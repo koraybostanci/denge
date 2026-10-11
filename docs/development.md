@@ -17,9 +17,9 @@ Tests need Node 22 or later and no dependencies:
 node --test
 ```
 
-They cover the calculations (`js/core.js`), the checks on backup files (`js/backup.js`), the model
+They cover the calculations (`js/core.js`), the plan data and its limits (`test/plan.test.mjs`), the plan, meal and food operations (`js/plans.js`, `test/plans.test.mjs`), the checks on backup files (`js/backup.js`), the model
 layer against a mocked `fetch` (`js/ai.js`) and the SQL export, which is loaded into Node's built-in
-SQLite and queried as in the section above. The IndexedDB code is not covered. The screens are
+SQLite and queried as in the section above. `js/app.js` cannot be loaded in Node, so `test/app-imports.test.mjs` checks that every name it uses is imported or defined, and `test/shell.test.mjs` checks that the versions in `sw.js` and `js/core.js` match and that every JS file is in `SHELL`. The IndexedDB code is not covered. The screens are
 rendered in Node from a fixed state (`test/screens.mjs`) for the English snapshot
 (`test/fixtures/en-snapshot.json`, regenerate it with `UPDATE_SNAPSHOT=1 node --test` after an
 intended English change) and for the language checks.
@@ -76,7 +76,8 @@ version is shown under Settings → "Version and updates".
   DOM and no storage, so it loads in Node and can be tested there
 - `js/app.js`: storage, event handling, the analysis queue, backup and restore
 - `js/views.js`: the screens
-- `js/plan.js`: food table, meal templates, goals, rules
+- `js/plan.js`: the default plan (`DEFAULT_FOODS`, `DEFAULT_TEMPLATES`), goals, rules, and `applyPlan`, which fills the live `FOODS`, `MEALS` and `MEAL_BY_ID` from the plan in use. No DOM, no storage
+- `js/plans.js`: the operations on the user plans (create, copy-on-edit, rename, delete, save or delete a meal or a food) with their limits. Pure: a plans array in, `{ plans }` or `{ error }` out. `app.js` stores the array in kv `plans` and the plan in use in `settings.activePlan`
 - `js/ai.js`: model calls (Claude and OpenAI-compatible), prompt and output schema
 - `js/badges.js`: the badge catalog and which badges the log has earned (no DOM, no storage). A weigh-in that is more than a kilo a day away from the last sane one (the first: from the start weight, with 3 kg of slack; never more than 15 kg) counts as a typo and moves no badge. `app.js` stores the result in kv `badges` (`{v:1, got, seen, told, av, base}`: `seen` is the highest step looked at per badge, which drives the New dot; `told` is set once the history on the device has been taken in, with its one "from your history" line; both are optional, so older records stay valid). The unlock toast comes after the first evaluation that follows a change (a save, or the clock or tab changing); the first evaluation after loading, a restore and the first run with a log are quiet. The "from your history" line is dropped if the person leaves Progress, or closes the app, without opening it (`told` is already set). Every write to the record goes through one queue (`serial()`), each from the latest `S.badges`. The screens measure badges through `badgeContext()` in `views.js`, cached on `S.rev`, which every save path moves. `av` is `{stage, face, acc}`, part ids from `PARTS` (`unlocked(part, got)` gates each against what is earned; stage 1, the plain face and no accessory are free). `wornAv` is what is shown (header and picker): an unearned or unknown part is its slot's default, and `cleanBadges` applies the same rule on load and restore. The header avatar button opens the picker sheet (`renderAvatarSheet`); a choice goes through `wear()` and the same badge queue, rolled back if the write fails. `avatarSvg` in `js/badge-art.js` draws the pickle from the `--pickle*` tokens.
 - `js/badge-art.js`: the badge icons (18 line icons in five shapes and four finishes) and the pickle avatar, drawn as inline SVG from the colour tokens

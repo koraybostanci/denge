@@ -1,8 +1,9 @@
 // Everything read from a backup file is checked before it is stored or shown (js/backup.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from '../js/backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf, cleanPlan, cleanPlans, prunePlanPhotos } from '../js/backup.js';
 import { SCHEMA_VERSION } from '../js/core.js';
+import { DEFAULT_PLAN, PLAN_LIMITS } from '../js/plan.js';
 
 const good = {
   id: 'abc123', ts: 1759300000000, day: '2026-10-01', kind: 'meal', status: 'ok', slot: 'lunch', title: 'Egg', kcal: 500, p: 30, c: 5, f: 20, fib: 2,
@@ -72,10 +73,79 @@ test('settings: what the app talks to is never taken from a file', () => {
   assert.equal(s.places.length, 1);
 });
 
-test('settings: junk values and unknown plan meals are dropped', () => {
-  const s = cleanSettings({ startKg: '90', targetKg: 1e9, startDate: '"><x>', kcalRest: -1, protein: 135, planPhotos: { 'L-A': 'p1', constructor: 'p2', 'D-A': '"><x' } });
+test('settings: junk values and badly shaped plan meals are dropped', () => {
+  const s = cleanSettings({ startKg: '90', targetKg: 1e9, startDate: '"><x>', kcalRest: -1, protein: 135, planPhotos: { 'L-A': 'p1', 'U-abc': 'p3', constructor: 'p2', __proto__: 'p4', toString: 'p5', 'D-A': '"><x', '"><x': 'p6' } });
   assert.deepEqual(Object.keys(s).sort(), ['planPhotos', 'protein']);
-  assert.deepEqual(s.planPhotos, { 'L-A': 'p1' });
+  assert.deepEqual(s.planPhotos, { 'L-A': 'p1', 'U-abc': 'p3' });
+});
+
+test('settings: activePlan is kept as a valid id string only', () => {
+  assert.equal(cleanSettings({ activePlan: 'P-abc123' }).activePlan, 'P-abc123');
+  assert.equal(cleanSettings({ activePlan: 'default' }).activePlan, 'default');
+  for (const v of ['"><x', '', 5, null, ['a'], 'x'.repeat(31), 'constructor', '__proto__']) assert.equal('activePlan' in cleanSettings({ activePlan: v }), false, String(v));
+});
+
+test('a photo keeps its plan meal id by key shape, whatever plan is applied', () => {
+  const p = (plan) => cleanPhoto({ id: 'p1', b64: btoa('abc'), plan }).plan;
+  assert.equal(p('L-A'), 'L-A');
+  assert.equal(p('U-1abc'), 'U-1abc');
+  for (const bad of ['constructor', '__proto__', '"><x', 5, '']) assert.equal(p(bad), undefined, String(bad));
+});
+
+const PLAN = {
+  id: 'P-1', name: 'Mine',
+  foods: { uegg: { name: 'Egg', v: [143, 12.5, 0.7, 9.5, 0] }, uoat: { name: 'Oats', v: [380, 13, 60, 7, 10] } },
+  meals: [
+    { id: 'U-a', slot: 'lunch', name: 'Eggs', ingredients: [['uegg', 120, '2 eggs'], ['uoat', 40]] },
+    { id: 'U-b', slot: 'late', name: 'Oats', ingredients: [['uoat', 50]] },
+  ],
+};
+
+test('cleanPlans: a valid plan survives a JSON round trip unchanged, with fresh objects', () => {
+  const out = cleanPlans(JSON.parse(JSON.stringify([PLAN])));
+  assert.deepEqual(out, [PLAN]);
+  const again = cleanPlans([PLAN]);
+  assert.notEqual(again[0], PLAN);
+  assert.notEqual(again[0].meals[0].ingredients[0], PLAN.meals[0].ingredients[0]);
+  assert.notEqual(again[0].foods.uegg.v, PLAN.foods.uegg.v);
+  assert.deepEqual(cleanPlan({ ...DEFAULT_PLAN, id: 'P-d' }).meals.length, DEFAULT_PLAN.meals.length);
+});
+
+test('cleanPlans: hostile input never throws and gives a sane plan or none', () => {
+  for (const x of [null, undefined, 5, 'x', {}, [null, 5, 'x', []], { id: 'P-1' }]) assert.doesNotThrow(() => cleanPlans(x), String(x));
+  for (const x of [null, 5, 'x', [], { id: 'default', name: 'x' }, { id: 'constructor' }, { id: '__proto__' }, { id: '"><x' }, { id: 'x'.repeat(31) }]) assert.equal(cleanPlan(x), null, JSON.stringify(x));
+  const hostile = JSON.parse(`{"id":"P-2","name":"  a\\nb\\u0000  ${'z'.repeat(500)}","foods":{"__proto__":{"name":"x","v":[1,1,1,1,1]},"constructor":{"name":"x","v":[1,1,1,1,1]},"toString":{"name":"x","v":[1,1,1,1,1]},
+    "ok":{"name":"Fine\\nfood","v":[5000,500,500,500,500]},"nan":{"name":"n","v":[null,1,1,1,1]},"neg":{"name":"n","v":[-1,1,1,1,1]},"short":{"name":"n","v":[1,1]},"str":"x"},
+    "meals":[{"id":"__proto__","slot":"lunch","name":"m","ingredients":[["ok",10]]},{"id":"M1","slot":"nope","name":"m","ingredients":[["ok",10]]},
+    {"id":"M2","slot":"lunch","name":"Many","ingredients":${JSON.stringify([['ok', 99999], ['ok', -5], ['ok', 'x'], ['ok', null], ['gone', 10], ['constructor', 10], 'junk', ['ok', 20, 'a\nb'], ['ok', 1]])}},
+    {"id":"M2","slot":"lunch","name":"dup","ingredients":[["ok",10]]},{"id":"M3","slot":"lunch","name":"Empty","ingredients":[["gone",10]]},
+    {"id":"M4","slot":"lunch","name":"m","ingredients":"nope"},{"id":"M5","slot":"lunch","name":"  ","ingredients":[["ok",10]]},5,null]}`);
+  const p = cleanPlan(hostile);
+  assert.equal(p.name.length, 60);
+  assert.doesNotMatch(p.name, /[\n\u0000]/);
+  assert.deepEqual(Object.keys(p.foods), ['ok']);
+  assert.deepEqual(p.foods.ok, { name: 'Fine food', v: [1000, 100, 100, 100, 100] });
+  assert.deepEqual(p.meals, [{ id: 'M2', slot: 'lunch', name: 'Many', ingredients: [['ok', 5000], ['ok', 20, 'a b'], ['ok', 1]] }]);
+  assert.equal(({}).polluted, undefined);
+});
+
+test('cleanPlans: counts are capped and repeated or reserved ids are dropped', () => {
+  const many = Array.from({ length: PLAN_LIMITS.plans + 5 }, (_, i) => ({ ...PLAN, id: 'P-' + i }));
+  assert.equal(cleanPlans(many).length, PLAN_LIMITS.plans);
+  assert.deepEqual(cleanPlans([PLAN, { ...PLAN, name: 'Other' }, { ...PLAN, id: 'default' }]).map((p) => p.name), ['Mine']);
+  const foods = Object.fromEntries(Array.from({ length: PLAN_LIMITS.foods + 20 }, (_, i) => ['f' + i, { name: 'F', v: [1, 1, 1, 1, 1] }]));
+  const meals = Array.from({ length: PLAN_LIMITS.meals + 20 }, (_, i) => ({ id: 'M' + i, slot: 'lunch', name: 'm', ingredients: Array.from({ length: 30 }, () => ['f0', 10]) }));
+  const p = cleanPlan({ id: 'P-9', name: 'Big', foods, meals });
+  assert.equal(Object.keys(p.foods).length, PLAN_LIMITS.foods);
+  assert.equal(p.meals.length, PLAN_LIMITS.meals);
+  assert.equal(p.meals[0].ingredients.length, PLAN_LIMITS.ingredients);
+});
+
+test('prunePlanPhotos removes only meal ids that no plan holds', () => {
+  const photos = { 'L-A': 'p1', 'U-a': 'p2', 'U-gone': 'p3' };
+  assert.deepEqual(prunePlanPhotos(photos, ['L-A', 'U-a']), { 'L-A': 'p1', 'U-a': 'p2' });
+  assert.deepEqual(prunePlanPhotos(photos, new Set(['U-a'])), { 'U-a': 'p2' });
+  assert.deepEqual(prunePlanPhotos(null, ['L-A']), {});
 });
 
 test('a check: ratings, sizes and ids are made safe', () => {
@@ -166,4 +236,9 @@ test('settings: the minimum kcal is kept when sane, and dropped when it is above
   assert.equal(cleanSettings({ kcalRest: 1550, kcalMinDay: 1200 }).kcalMinDay, 1200);
   assert.equal('kcalMinDay' in cleanSettings({ kcalRest: 1550, kcalMinDay: 2000 }), false);
   assert.equal('kcalMinDay' in cleanSettings({ kcalMinDay: 10 }), false);
+});
+
+test('every food of the default plan survives cleanPlan with its name intact', () => {
+  const out = cleanPlan({ ...DEFAULT_PLAN, id: 'P-d' });
+  for (const [k, f] of Object.entries(DEFAULT_PLAN.foods)) assert.equal(out.foods[k]?.name, f.name, k);
 });
