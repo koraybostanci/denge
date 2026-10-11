@@ -892,6 +892,7 @@ export default {
   '{n} entry restored|{n} entries restored': '{n} kayıt geri yüklendi',
   '{restored}; {skipped}': '{restored}; {skipped}',
   '{n} damaged item skipped|{n} damaged items skipped': '{n} bozuk öğe atlandı',
+  '{n} plan not restored (limit reached)|{n} plans not restored (limit reached)': '{n} plan geri yüklenmedi (sınıra ulaşıldı)',
   'First kilo down': 'İlk kilo verildi',
   '{n} kilos down': '{n} kilo verildi',
   'All five goals done today': 'Bugün beş hedefin hepsi tamam',

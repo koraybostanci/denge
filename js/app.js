@@ -26,6 +26,13 @@ async function applyLang(lang) {
   try { await setLang(lang); applyStatic(); return true; } catch { toast(t('Could not load that language. Try again when you are online.')); return false; }
 }
 async function savePlans() { S.rev++; await db.kvSet('plans', S.plans); }
+// Sets S.plans and saves them; when the save fails the previous plans come back and the error goes on to the caller.
+async function persistPlans(next) {
+  const prev = S.plans;
+  S.plans = next;
+  try { await savePlans(); } catch (err) { S.plans = prev; S.rev++; throw err; }
+}
+let planBusy = false; // a save that is in progress: a second tap on the same button is ignored
 const activePlan = () => resolvePlan(S.plans, S.settings.activePlan).plan;
 // Makes the plan named in the settings the one in use. An id that no plan has (a deleted plan, a bad backup) falls back to the default
 // and is repaired in the settings; the caller saves them. Says whether it had to repair.
@@ -44,6 +51,21 @@ async function switchPlan(id) {
   if (S.sheet && (S.sheet.type === 'plan' || S.sheet.type === 'plan-frame')) closeSheet(); // that meal may not be in the new plan
   render();
 }
+// Stores the new plans and switches to one of them. If either step fails, the plans, the active plan and the applied plan go back as they were.
+async function persistAndSwitch(next, id) {
+  const prevPlans = S.plans;
+  const prevActive = S.settings.activePlan;
+  try {
+    await persistPlans(next);
+    await switchPlan(id);
+  } catch (err) {
+    S.plans = prevPlans;
+    S.settings.activePlan = prevActive;
+    useActivePlan();
+    try { await db.kvSet('plans', S.plans); } catch { /* the first failure is the one to report */ }
+    throw err;
+  }
+}
 // ——— The meal editor: the draft lives in S.mealDraft, and the typed values are read back from the sheet before it is drawn again ———
 let whereOp = 'save'; // what the "where should it go" sheet is for: 'save' or 'delete' of a meal, 'food-save' or 'food-delete' of a food
 function readMealDraft() {
@@ -59,16 +81,18 @@ const showMealEditor = (focusSel, keepFocus) => openSheet(renderMealEditor(S.mea
 // Nothing is stored unless the whole change works, so a refused save leaves no stray copy.
 async function commitMeal(op, planId) {
   const d = S.mealDraft;
-  if (!d) return;
+  if (!d || planBusy) return;
+  planBusy = true;
+  try { await commitMealNow(op, planId, d); } finally { planBusy = false; }
+}
+async function commitMealNow(op, planId, d) {
   const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
   if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
   const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
   const dr = d.id !== undefined && !own.plan.meals.some((m) => m.id === d.id) ? { ...named, id: undefined } : named; // a chosen plan may not have this meal
   const r = op === 'delete' ? deleteMeal(own.plans, own.plan.id, d.id) : saveMeal(own.plans, own.plan.id, dr);
   if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') showMealEditor(); return; }
-  S.plans = r.plans;
-  await savePlans();
-  await switchPlan(own.plan.id);
+  await persistAndSwitch(r.plans, own.plan.id);
   S.mealDraft = null;
   closeSheet();
   toast(op === 'delete' ? t('Meal deleted') : t('Meal saved'));
@@ -84,16 +108,18 @@ const showFoods = () => openSheet(renderFoodsSheet(), { type: 'food-list' });
 const showFoodEditor = (focusSel) => openSheet(renderFoodEditor(S.foodDraft), { type: 'food' }, focusSel);
 async function commitFood(op, planId) {
   const d = S.foodDraft;
-  if (!d) return;
+  if (!d || planBusy) return;
+  planBusy = true;
+  try { await commitFoodNow(op, planId, d); } finally { planBusy = false; }
+}
+async function commitFoodNow(op, planId, d) {
   const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
   if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
   const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
   const dr = d.key !== undefined && !has(own.plan.foods, d.key) ? { ...named, key: undefined } : named; // a chosen plan may not have this food
   const r = op === 'food-delete' ? deleteFood(own.plans, own.plan.id, d.key) : saveFood(own.plans, own.plan.id, dr);
   if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') { if (op === 'food-delete') showFoods(); else showFoodEditor(); } return; }
-  S.plans = r.plans;
-  await savePlans();
-  await switchPlan(own.plan.id);
+  await persistAndSwitch(r.plans, own.plan.id);
   S.foodDraft = null;
   showFoods();
   toast(op === 'food-delete' ? t('Food deleted') : t('Food saved'));
@@ -795,12 +821,17 @@ async function importBackup(file) {
   // Everything read from the file is checked first (see backup.js).
   let restored = 0;
   let skipped = 0;
+  let notRestored = 0; // backup plans left out because the device is at the plan limit
   const gotBefore = S.badges ? S.badges.got : {};
   try {
     if (Array.isArray(data.plans)) { // the backup's version of a plan wins; the plans of this device that it does not have stay
       const incoming = cleanPlans(data.plans);
       const ids = new Set(incoming.map((p) => p.id));
-      S.plans = [...S.plans.map((p) => (ids.has(p.id) ? incoming.find((x) => x.id === p.id) : p)), ...incoming.filter((p) => !S.plans.some((x) => x.id === p.id))].slice(0, PLAN_LIMITS.plans);
+      const replaced = S.plans.map((p) => (ids.has(p.id) ? incoming.find((x) => x.id === p.id) : p)); // the device's own plans stay first
+      const fresh = incoming.filter((p) => !S.plans.some((x) => x.id === p.id));
+      const room = Math.max(0, PLAN_LIMITS.plans - replaced.length);
+      notRestored = fresh.length - Math.min(fresh.length, room);
+      S.plans = [...replaced, ...fresh.slice(0, room)];
       await db.kvSet('plans', S.plans);
     }
     for (const p of Array.isArray(data.photos) ? data.photos : []) {
@@ -850,7 +881,8 @@ async function importBackup(file) {
   render();
   if (S.sheet && S.sheet.type === 'settings') await openSettings(); // the open sheet shows the restored language
   const back = tn('{n} entry restored|{n} entries restored', restored);
-  toast(skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back);
+  const msg = skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back;
+  toast(notRestored ? t('{restored}; {skipped}', { restored: msg, skipped: tn('{n} plan not restored (limit reached)|{n} plans not restored (limit reached)', notRestored) }) : msg);
 }
 
 // ——— Loading and rendering ———
@@ -1177,14 +1209,14 @@ const ACT = {
   },
   'plans-open': () => openSheet(renderPlansSheet(), { type: 'plans' }),
   'plan-new': async () => {
+    if (planBusy) return;
     const base = activePlan();
     const name = window.prompt(t('Name the new plan. It starts as a copy of {name}.', { name: td(base.name) }));
     if (name === null) return;
     const r = newPlanFrom(S.plans, base, name);
     if (r.error) return toast(td(r.error));
-    S.plans = r.plans;
-    await savePlans();
-    await switchPlan(r.plan.id);
+    planBusy = true;
+    try { await persistAndSwitch(r.plans, r.plan.id); } finally { planBusy = false; }
   },
   'plan-switch': (el) => switchPlan(el.dataset.id),
   'plan-rename': async (el) => {
@@ -1193,8 +1225,7 @@ const ACT = {
     if (!name) return;
     const r = renamePlan(S.plans, p.id, name);
     if (r.error) return toast(td(r.error));
-    S.plans = r.plans;
-    await savePlans();
+    await persistPlans(r.plans);
     render();
   },
   'plan-delete': async (el) => {
@@ -1202,9 +1233,8 @@ const ACT = {
     if (!p || !window.confirm(t('Delete {name}? Meals and foods in it are lost. Your log stays.', { name: td(p.name) }))) return;
     const r = deletePlan(S.plans, p.id);
     if (r.error) return toast(td(r.error));
-    S.plans = r.plans;
-    await savePlans();
-    if (p.id === S.settings.activePlan) await switchPlan(DEFAULT_PLAN_ID); else render();
+    if (p.id === S.settings.activePlan) await persistAndSwitch(r.plans, DEFAULT_PLAN_ID);
+    else { await persistPlans(r.plans); render(); }
     await dropPlanPhotos(r.orphaned);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
@@ -1215,10 +1245,10 @@ const ACT = {
     S.mealDraft = { id: m.id, origName: m.name, name: td(m.name), slot: m.slot, ingredients: m.ingredients.map(([k, g, measure]) => [k, String(g), measure || '']) };
     showMealEditor('#md-name');
   },
-  'ing-add': () => { readMealDraft().ingredients.push(['', '', '']); showMealEditor('.ing-row:last-child .ing-food'); },
-  'ing-remove': (el) => { readMealDraft().ingredients.splice(Number(el.dataset.i), 1); showMealEditor(); },
+  'ing-add': () => { const d = readMealDraft(); if (!d) return; d.ingredients.push(['', '', '']); showMealEditor('.ing-row:last-child .ing-food'); },
+  'ing-remove': (el) => { const d = readMealDraft(); if (!d) return; d.ingredients.splice(Number(el.dataset.i), 1); showMealEditor(); },
   'meal-save': () => {
-    readMealDraft();
+    if (!readMealDraft()) return;
     whereOp = 'save';
     if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
     return commitMeal('save');
@@ -1241,7 +1271,7 @@ const ACT = {
     showFoodEditor('#fd-name');
   },
   'food-save': () => {
-    readFoodDraft();
+    if (!readFoodDraft()) return;
     whereOp = 'food-save';
     if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
     return commitFood('food-save');
