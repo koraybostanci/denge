@@ -8,7 +8,7 @@ import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
 import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
-import { MEALS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
+import { MEALS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, ACTIVE_ID, DEFAULT_PLAN_ID, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n0 = fmtInt;
@@ -1294,6 +1294,10 @@ function planPic(id, emptyText) {
   return `<span class="plan-pic${pid ? '' : ' is-empty'}"><span class="plan-pic-empty">${PLATE}${emptyText ? `<em>${emptyText}</em>` : ''}</span>${pid ? `<img data-photo="${esc(pid)}" alt="">` : ''}</span>`;
 }
 
+// A plan's name as shown: the built-in one is translated, a typed one stays as written
+const planLabel = (p) => (p.id === DEFAULT_PLAN_ID ? t('Default plan') : td(p.name));
+const planNow = () => S.plans.find((p) => p.id === ACTIVE_ID) || { id: DEFAULT_PLAN_ID };
+
 export function renderPlan() {
   const s = S.settings;
   const pictured = MEALS.filter((m) => (s.planPhotos || {})[m.id]).length;
@@ -1315,6 +1319,7 @@ export function renderPlan() {
     <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: MEALS.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
+  <div class="plan-active"><span>${t('Plan in use: {name}', { name: `<b>${esc(planLabel(planNow()))}</b>` })}</span><button type="button" class="btn" data-act="plans-open">${t('Plans')}</button></div>
   <ul class="plan-targets" aria-label="${t('Daily goals')}">
     <li>${t('Rest day <b>{kcal}</b> kcal', { kcal: n0(s.kcalRest) })}</li>
     <li>${t('Workout day <b>{kcal}</b> kcal', { kcal: n0(s.kcalTrain) })}</li>
@@ -1338,6 +1343,21 @@ export function renderPlan() {
     ${group(t('Training and movement'), list(RULES.training))}
     ${group(t('Process'), list(processRules(kcalMinDay())))}
   </section>`;
+}
+
+// The plans: the built-in one and the person's own, with the one in use marked
+export function renderPlansSheet() {
+  const row = (p) => {
+    const on = p.id === ACTIVE_ID;
+    const own = p.id !== DEFAULT_PLAN_ID;
+    const id = esc(p.id);
+    return `<li><span>${esc(planLabel(p))}${on ? ` <small>${t('In use')}</small>` : ''}</span><span>${on ? '' : `<button type="button" class="link" data-act="plan-switch" data-id="${id}">${t('Use')}</button> `}${own ? `<button type="button" class="link" data-act="plan-rename" data-id="${id}">${t('Rename')}</button> <button type="button" class="link link-danger" data-act="plan-delete" data-id="${id}">${t('Delete')}</button>` : ''}</span></li>`;
+  };
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${t('Plans')}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
+  <p class="note">${tn('{n} plan of your own, besides the default|{n} plans of your own, besides the default', S.plans.length)}</p>
+  <ul class="items">${[{ id: DEFAULT_PLAN_ID }, ...S.plans].map(row).join('')}</ul>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="plan-new">${t('New plan from the one in use')}</button></div>`;
 }
 
 // Framing a new plan picture: the photo already has the house treatment; the circle shows what will be kept

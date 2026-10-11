@@ -7,12 +7,13 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, prunePlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { MEAL_BY_ID, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
 } from './core.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { resolvePlan, newPlanFrom, renamePlan, deletePlan } from './plans.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -23,6 +24,38 @@ async function saveSettings() { S.rev++; rememberLang(S.settings.lang); await db
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
   try { await setLang(lang); applyStatic(); return true; } catch { toast(t('Could not load that language. Try again when you are online.')); return false; }
+}
+async function savePlans() { S.rev++; await db.kvSet('plans', S.plans); }
+const activePlan = () => resolvePlan(S.plans, S.settings.activePlan).plan;
+// Makes the plan named in the settings the one in use. An id that no plan has (a deleted plan, a bad backup) falls back to the default
+// and is repaired in the settings; the caller saves them. Says whether it had to repair.
+function useActivePlan() {
+  const { plan, id } = resolvePlan(S.plans, S.settings.activePlan);
+  const fixed = id !== S.settings.activePlan;
+  S.settings.activePlan = id;
+  applyPlan(plan);
+  S.rev++;
+  return fixed;
+}
+async function switchPlan(id) {
+  S.settings.activePlan = id;
+  useActivePlan();
+  await saveSettings();
+  if (S.sheet && (S.sheet.type === 'plan' || S.sheet.type === 'plan-frame')) closeSheet(); // that meal may not be in the new plan
+  render();
+}
+// Photos of meals that no plan holds any more
+async function dropPlanPhotos(mealIds) {
+  const pics = S.settings.planPhotos || {};
+  const gone = mealIds.filter((m) => pics[m]);
+  if (!gone.length) return;
+  S.settings.planPhotos = Object.fromEntries(Object.entries(pics).filter(([m]) => !gone.includes(m)));
+  await saveSettings();
+  for (const m of gone) {
+    await db.del('photos', pics[m]);
+    const u = S.urls.get(pics[m]);
+    if (u) { URL.revokeObjectURL(u); S.urls.delete(pics[m]); }
+  }
 }
 async function saveDay(day, patch) {
   const d = { ...(S.days[day] || { day }), ...patch };
@@ -674,7 +707,7 @@ async function deliverFile(name, content, type) {
 
 async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges };
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans: S.plans };
   // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
   // They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
@@ -710,6 +743,12 @@ async function importBackup(file) {
   let skipped = 0;
   const gotBefore = S.badges ? S.badges.got : {};
   try {
+    if (Array.isArray(data.plans)) { // the backup's version of a plan wins; the plans of this device that it does not have stay
+      const incoming = cleanPlans(data.plans);
+      const ids = new Set(incoming.map((p) => p.id));
+      S.plans = [...S.plans.map((p) => (ids.has(p.id) ? incoming.find((x) => x.id === p.id) : p)), ...incoming.filter((p) => !S.plans.some((x) => x.id === p.id))].slice(0, PLAN_LIMITS.plans);
+      await db.kvSet('plans', S.plans);
+    }
     for (const p of Array.isArray(data.photos) ? data.photos : []) {
       const photo = cleanPhoto(p); // photos go in one at a time: a damaged one is skipped, and the others are not held in memory together
       if (photo) await db.put('photos', photo); else skipped += 1;
@@ -724,12 +763,15 @@ async function importBackup(file) {
       const incoming = cleanSettings(data.settings);
       if (incoming.planPhotos) incoming.planPhotos = { ...(S.settings.planPhotos || {}), ...incoming.planPhotos }; // pictures are added to, not replaced
       S.settings = { ...S.settings, ...incoming };
+      S.settings.activePlan = resolvePlan(S.plans, S.settings.activePlan).id; // the backup's plan if it exists, else the default
+      const held = new Set([...before, ...Object.values(S.settings.planPhotos || {})]);
+      S.settings.planPhotos = prunePlanPhotos(S.settings.planPhotos, [...DEFAULT_PLAN.meals, ...S.plans.flatMap((p) => p.meals)].map((m) => m.id));
       if (S.settings.kcalMinDay > S.settings.kcalRest) S.settings.kcalMinDay = DEFAULTS.kcalMinDay; // a restore never leaves a minimum no day can reach
       await applyLang(S.settings.lang);
       await saveSettings();
       // A plan picture that the backup replaces is no longer referred to by anything
       const now = new Set(Object.values(S.settings.planPhotos || {}));
-      for (const id of before.filter((x) => !now.has(x))) {
+      for (const id of [...held].filter((x) => !now.has(x))) {
         await db.del('photos', id);
         const u = S.urls.get(id);
         if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -764,9 +806,11 @@ async function load() {
   S.entries = await db.all('entries');
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
+  S.plans = cleanPlans(await db.kvGet('plans', []));
   S.checks = await db.kvGet('checks', []);
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
   S.badges = badges ? cleanBadges(badges) : null;
+  if (useActivePlan()) await saveSettings();
 }
 
 async function refreshStorage() {
@@ -808,6 +852,7 @@ function render() {
   window.scrollTo(0, y);
   if (S.sheet && S.sheet.type === 'badge') $('#sheet-body').innerHTML = renderBadgeSheet(S.sheet.id);
   if (S.sheet && S.sheet.type === 'avatar') $('#sheet-body').innerHTML = renderAvatarSheet();
+  if (S.sheet && S.sheet.type === 'plans') $('#sheet-body').innerHTML = renderPlansSheet();
   if (S.sheet && S.sheet.type === 'plan') { $('#sheet-body').innerHTML = renderPlanSheet(S.sheet.id); hydratePhotos(); }
   if (S.sheet && S.sheet.type === 'entry') {
     const html = renderEntrySheet(S.sheet.id);
@@ -1075,6 +1120,38 @@ const ACT = {
   'avatar-pick': (el) => { // a locked chip carries its hint and changes nothing
     if (el.dataset.hint) { const h = $('#av-hint'); if (h) h.textContent = el.dataset.hint; return; }
     return wearPart(el.dataset.part);
+  },
+  'plans-open': () => openSheet(renderPlansSheet(), { type: 'plans' }),
+  'plan-new': async () => {
+    const base = activePlan();
+    const name = window.prompt(t('Name the new plan. It starts as a copy of {name}.', { name: td(base.name) }));
+    if (name === null) return;
+    const r = newPlanFrom(S.plans, base, name);
+    if (r.error) return toast(td(r.error));
+    S.plans = r.plans;
+    await savePlans();
+    await switchPlan(r.plan.id);
+  },
+  'plan-switch': (el) => switchPlan(el.dataset.id),
+  'plan-rename': async (el) => {
+    const p = S.plans.find((x) => x.id === el.dataset.id);
+    const name = p && window.prompt(t('New name for {name}', { name: td(p.name) }), td(p.name));
+    if (!name) return;
+    const r = renamePlan(S.plans, p.id, name);
+    if (r.error) return toast(td(r.error));
+    S.plans = r.plans;
+    await savePlans();
+    render();
+  },
+  'plan-delete': async (el) => {
+    const p = S.plans.find((x) => x.id === el.dataset.id);
+    if (!p || !window.confirm(t('Delete {name}? Meals and foods in it are lost. Your log stays.', { name: td(p.name) }))) return;
+    const r = deletePlan(S.plans, p.id);
+    if (r.error) return toast(td(r.error));
+    S.plans = r.plans;
+    await savePlans();
+    if (p.id === S.settings.activePlan) await switchPlan(DEFAULT_PLAN_ID); else render();
+    await dropPlanPhotos(r.orphaned);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
@@ -1414,6 +1491,8 @@ const ACT = {
     S.urls.clear();
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept };
+    S.plans = [];
+    useActivePlan();
     await saveSettings();
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();

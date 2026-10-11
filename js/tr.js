@@ -777,6 +777,17 @@ export default {
 
   // ——— js/plans.js: plan, meal and food editing messages ———
   'My plan': 'Planım',
+  'Default plan': 'Varsayılan plan',
+  'Plan in use: {name}': 'Kullanılan plan: {name}',
+  Plans: 'Planlar',
+  'In use': 'Kullanımda',
+  Use: 'Kullan',
+  Rename: 'Yeniden adlandır',
+  'New plan from the one in use': 'Kullanılan plandan yeni plan',
+  '{n} plan of your own, besides the default|{n} plans of your own, besides the default': 'Varsayılanın yanında {n} kendi planın',
+  'Name the new plan. It starts as a copy of {name}.': 'Yeni planın adını yaz. {name} planının kopyası olarak başlar.',
+  'New name for {name}': '{name} için yeni ad',
+  'Delete {name}? Meals and foods in it are lost. Your log stays.': '{name} silinsin mi? İçindeki öğünler ve yiyecekler kaybolur. Günlüğün kalır.',
   'Too many plans. Delete one first.': 'Çok fazla plan var. Önce birini sil.',
   'That name is too long.': 'Bu ad çok uzun.',
   'The default plan cannot be changed.': 'Varsayılan plan değiştirilemez.',

@@ -50,7 +50,6 @@ const used = (name) => new RegExp(`(?<![\\w$.])${name}(?![\\w$])(?!\\s*:(?!:))`)
 
 for (const file of ['plan.js', 'plans.js', 'backup.js', 'core.js', 'views.js']) {
   test(`every name of ${file} that app.js uses is imported or declared there`, async () => {
-    if (!existsSync(new URL(file, root))) return; // plans.js arrives with a later phase
     const mod = await import(new URL(file, root).href);
     const missing = Object.keys(mod).filter((n) => n !== 'default' && /^[A-Za-z_$][\w$]*$/.test(n) && !importedLocals.has(n) && used(n) && !declared(n));
     assert.deepEqual(missing, [], `app.js uses ${missing.join(', ')} from ${file} without importing it`);
