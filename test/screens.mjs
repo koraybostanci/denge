@@ -1,5 +1,5 @@
 // The fixed state and the screens rendered from it, for the English snapshot and the pseudo-locale test.
-// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, plans, badge and avatar sheets, which are
+// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, badge and avatar sheets, which are
 // string-returning functions of the state S and run in Node as they are. Not covered: anything that needs the DOM
 // (attachChart, toasts and the other code in app.js, which reads document and window at import time).
 process.env.TZ = 'UTC';
@@ -12,7 +12,7 @@ globalThis.Date = class extends RealDate {
 
 export const core = await import('../js/core.js');
 export const views = await import('../js/views.js');
-const { addDays, applyPlan, copyPlan, DEFAULT_PLAN } = await import('../js/plan.js');
+const { addDays } = await import('../js/plan.js');
 const { S } = core;
 export const T = core.today();
 export const day = (off) => addDays(T, off);
@@ -26,8 +26,6 @@ export function fixture() {
   S.sheet = null;
   S.calPick = null;
   S.settings = core.freshSettings();
-  S.plans = [];
-  applyPlan(DEFAULT_PLAN);
   Object.assign(S.settings, { startDate: day(-9), startKg: 87, targetDate: day(78), targetKg: 78, lastBackup: NOW - 3 * 86400000 });
   S.entries = [];
   S.days = {};
@@ -94,18 +92,5 @@ export function screens() {
   add('badge-sheet-locked', () => views.renderBadgeSheet('anniversary'));
   add('badge-sheet-kilos', () => views.renderBadgeSheet('kilos'));
   add('avatar-sheet', views.renderAvatarSheet);
-  // One own plan of the person's, in use (its name is a translated default)
-  S.plans = [{ ...copyPlan(DEFAULT_PLAN), id: 'P-demo', name: 'My plan' }];
-  applyPlan(S.plans[0]);
-  add('plan-custom', views.renderPlan);
-  add('plans-sheet', views.renderPlansSheet);
-  add('meal-editor-new', () => views.renderMealEditor({ name: '', slot: 'lunch', ingredients: [['', '', '']] }));
-  add('meal-editor-edit', () => { const m = S.plans[0].meals[0]; return views.renderMealEditor({ id: m.id, name: m.name, slot: m.slot, ingredients: m.ingredients.map(([k, g, x]) => [k, String(g), x || '']) }); });
-  add('meal-where-sheet', views.renderMealWhereSheet);
-  add('foods-sheet', views.renderFoodsSheet);
-  add('food-editor-new', () => views.renderFoodEditor({ name: '', v: ['', '', '', '', ''] }));
-  add('food-editor-edit', () => { const k = Object.keys(S.plans[0].foods)[0]; const f = S.plans[0].foods[k]; return views.renderFoodEditor({ key: k, name: f.name, v: f.v.map(String) }); });
-  S.plans = [];
-  applyPlan(DEFAULT_PLAN);
   return out;
 }

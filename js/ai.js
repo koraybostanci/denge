@@ -13,8 +13,7 @@ export const STRONG_MODEL = 'claude-sonnet-5-5';
 const IMG_EDGE = 768; // long edge; 768×576 is about 590 image tokens
 export const CHECK_EDGE = 1536; // menus and nutrition tables have small print, so checks send a larger copy
 
-// Built on each request, so it follows the plan in use
-export const entrySystem = () => inEnglish(() => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
+const SYSTEM = `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
 For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
@@ -25,9 +24,9 @@ tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a smal
 flags: add "alcohol" for any alcohol.
 conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
 Plan meals:
-${planDigest()}`);
+${planDigest()}`;
 
-// The prompts are English, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
+// The prompts are English and built once, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
 // Entries keep English food names and titles (the plan and the favourites match on them), so only the question is asked for in Turkish.
 const TURKISH = {
@@ -269,7 +268,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: entrySystem() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
+  const req = { system: SYSTEM + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -366,7 +365,7 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 
 // ——— Check before ordering or buying: photos of a menu, a dish or a product, judged against the plan ———
 // The prompts are always English, whatever the interface language is
-export const checkSystem = () => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
+const CHECK_SYSTEM = inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
 The plan is built from: ${planFoods()}.
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
@@ -414,7 +413,7 @@ const CHECK_SCHEMA = {
  * @returns {Promise<{data:{kind:string,title:string,answer:string,options:object[]}, usage:{in:number,out:number}, model:string}>}
  */
 export async function check(o) {
-  const req = { system: checkSystem() + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
+  const req = { system: CHECK_SYSTEM + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanVerdict(r.data);
   if (!data.answer && !data.options.length) throw new AiError('empty', 'The model returned no verdict');

@@ -7,13 +7,12 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, prunePlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, FOODS, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, isDefaultActive, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { MEAL_BY_ID, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
 } from './core.js';
-import { resolvePlan, newPlanFrom, renamePlan, deletePlan, ensureCustom, saveMeal, deleteMeal, saveFood, deleteFood } from './plans.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderMealEditor, renderMealWhereSheet, renderFoodsSheet, renderFoodEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -24,118 +23,6 @@ async function saveSettings() { S.rev++; rememberLang(S.settings.lang); await db
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
   try { await setLang(lang); applyStatic(); return true; } catch { toast(t('Could not load that language. Try again when you are online.')); return false; }
-}
-async function savePlans() { S.rev++; await db.kvSet('plans', S.plans); }
-// Sets S.plans and saves them; when the save fails the previous plans come back and the error goes on to the caller.
-async function persistPlans(next) {
-  const prev = S.plans;
-  S.plans = next;
-  try { await savePlans(); } catch (err) { S.plans = prev; S.rev++; throw err; }
-}
-let planBusy = false; // a save that is in progress: a second tap on the same button is ignored
-const activePlan = () => resolvePlan(S.plans, S.settings.activePlan).plan;
-// Makes the plan named in the settings the one in use. An id that no plan has (a deleted plan, a bad backup) falls back to the default
-// and is repaired in the settings; the caller saves them. Says whether it had to repair.
-function useActivePlan() {
-  const { plan, id } = resolvePlan(S.plans, S.settings.activePlan);
-  const fixed = id !== S.settings.activePlan;
-  S.settings.activePlan = id;
-  applyPlan(plan);
-  S.rev++;
-  return fixed;
-}
-async function switchPlan(id) {
-  S.settings.activePlan = id;
-  useActivePlan();
-  await saveSettings();
-  if (S.sheet && (S.sheet.type === 'plan' || S.sheet.type === 'plan-frame')) closeSheet(); // that meal may not be in the new plan
-  render();
-}
-// Stores the new plans and switches to one of them. If either step fails, the plans, the active plan and the applied plan go back as they were.
-async function persistAndSwitch(next, id) {
-  const prevPlans = S.plans;
-  const prevActive = S.settings.activePlan;
-  try {
-    await persistPlans(next);
-    await switchPlan(id);
-  } catch (err) {
-    S.plans = prevPlans;
-    S.settings.activePlan = prevActive;
-    useActivePlan();
-    try { await db.kvSet('plans', S.plans); } catch { /* the first failure is the one to report */ }
-    throw err;
-  }
-}
-// ——— The meal editor: the draft lives in S.mealDraft, and the typed values are read back from the sheet before it is drawn again ———
-let whereOp = 'save'; // what the "where should it go" sheet is for: 'save' or 'delete' of a meal, 'food-save' or 'food-delete' of a food
-function readMealDraft() {
-  const d = S.mealDraft;
-  if (!d || !$('#md-name')) return d;
-  d.name = $('#md-name').value;
-  d.slot = $('#md-slot').value;
-  d.ingredients = [...document.querySelectorAll('#sheet-body .ing-row')].map((r) => [r.querySelector('.ing-food').value, r.querySelector('.ing-g').value, r.querySelector('.ing-m').value]);
-  return d;
-}
-const showMealEditor = (focusSel, keepFocus) => openSheet(renderMealEditor(S.mealDraft), { type: 'meal' }, focusSel, keepFocus);
-// Saves or deletes the draft's meal. The default plan is never changed: the meal goes to a copy ("My plan"), or to the plan the person chose.
-// Nothing is stored unless the whole change works, so a refused save leaves no stray copy.
-async function commitMeal(op, planId) {
-  const d = S.mealDraft;
-  if (!d || planBusy) return;
-  planBusy = true;
-  try { await commitMealNow(op, planId, d); } finally { planBusy = false; }
-}
-async function commitMealNow(op, planId, d) {
-  const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
-  if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
-  const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
-  const dr = d.id !== undefined && !own.plan.meals.some((m) => m.id === d.id) ? { ...named, id: undefined } : named; // a chosen plan may not have this meal
-  const r = op === 'delete' ? deleteMeal(own.plans, own.plan.id, d.id) : saveMeal(own.plans, own.plan.id, dr);
-  if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') showMealEditor(); return; }
-  await persistAndSwitch(r.plans, own.plan.id);
-  S.mealDraft = null;
-  closeSheet();
-  toast(op === 'delete' ? t('Meal deleted') : t('Meal saved'));
-  if (r.orphaned) await dropPlanPhotos(r.orphaned);
-}
-// Foods: the same copy-on-edit rule as for meals. The draft lives in S.foodDraft: { key?, origName?, name, v: [typed text] }
-const readFoodDraft = () => {
-  const d = S.foodDraft;
-  if (d && $('#fd-name')) { d.name = $('#fd-name').value; d.v = [...document.querySelectorAll('#sheet-body .fd-v')].map((x) => x.value); }
-  return d;
-};
-const showFoods = () => openSheet(renderFoodsSheet(), { type: 'food-list' });
-const showFoodEditor = (focusSel) => openSheet(renderFoodEditor(S.foodDraft), { type: 'food' }, focusSel);
-async function commitFood(op, planId) {
-  const d = S.foodDraft;
-  if (!d || planBusy) return;
-  planBusy = true;
-  try { await commitFoodNow(op, planId, d); } finally { planBusy = false; }
-}
-async function commitFoodNow(op, planId, d) {
-  const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
-  if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
-  const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
-  const dr = d.key !== undefined && !has(own.plan.foods, d.key) ? { ...named, key: undefined } : named; // a chosen plan may not have this food
-  const r = op === 'food-delete' ? deleteFood(own.plans, own.plan.id, d.key) : saveFood(own.plans, own.plan.id, dr);
-  if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') { if (op === 'food-delete') showFoods(); else showFoodEditor(); } return; }
-  await persistAndSwitch(r.plans, own.plan.id);
-  S.foodDraft = null;
-  showFoods();
-  toast(op === 'food-delete' ? t('Food deleted') : t('Food saved'));
-}
-// Photos of meals that no plan holds any more
-async function dropPlanPhotos(mealIds) {
-  const pics = S.settings.planPhotos || {};
-  const gone = mealIds.filter((m) => pics[m]);
-  if (!gone.length) return;
-  S.settings.planPhotos = Object.fromEntries(Object.entries(pics).filter(([m]) => !gone.includes(m)));
-  await saveSettings();
-  for (const m of gone) {
-    await db.del('photos', pics[m]);
-    const u = S.urls.get(pics[m]);
-    if (u) { URL.revokeObjectURL(u); S.urls.delete(pics[m]); }
-  }
 }
 async function saveDay(day, patch) {
   const d = { ...(S.days[day] || { day }), ...patch };
@@ -787,7 +674,7 @@ async function deliverFile(name, content, type) {
 
 async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans: S.plans };
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges };
   // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
   // They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
@@ -821,19 +708,8 @@ async function importBackup(file) {
   // Everything read from the file is checked first (see backup.js).
   let restored = 0;
   let skipped = 0;
-  let notRestored = 0; // backup plans left out because the device is at the plan limit
   const gotBefore = S.badges ? S.badges.got : {};
   try {
-    if (Array.isArray(data.plans)) { // the backup's version of a plan wins; the plans of this device that it does not have stay
-      const incoming = cleanPlans(data.plans);
-      const ids = new Set(incoming.map((p) => p.id));
-      const replaced = S.plans.map((p) => (ids.has(p.id) ? incoming.find((x) => x.id === p.id) : p)); // the device's own plans stay first
-      const fresh = incoming.filter((p) => !S.plans.some((x) => x.id === p.id));
-      const room = Math.max(0, PLAN_LIMITS.plans - replaced.length);
-      notRestored = fresh.length - Math.min(fresh.length, room);
-      S.plans = [...replaced, ...fresh.slice(0, room)];
-      await db.kvSet('plans', S.plans);
-    }
     for (const p of Array.isArray(data.photos) ? data.photos : []) {
       const photo = cleanPhoto(p); // photos go in one at a time: a damaged one is skipped, and the others are not held in memory together
       if (photo) await db.put('photos', photo); else skipped += 1;
@@ -848,15 +724,12 @@ async function importBackup(file) {
       const incoming = cleanSettings(data.settings);
       if (incoming.planPhotos) incoming.planPhotos = { ...(S.settings.planPhotos || {}), ...incoming.planPhotos }; // pictures are added to, not replaced
       S.settings = { ...S.settings, ...incoming };
-      S.settings.activePlan = resolvePlan(S.plans, S.settings.activePlan).id; // the backup's plan if it exists, else the default
-      const held = new Set([...before, ...Object.values(S.settings.planPhotos || {})]);
-      S.settings.planPhotos = prunePlanPhotos(S.settings.planPhotos, [...DEFAULT_PLAN.meals, ...S.plans.flatMap((p) => p.meals)].map((m) => m.id));
       if (S.settings.kcalMinDay > S.settings.kcalRest) S.settings.kcalMinDay = DEFAULTS.kcalMinDay; // a restore never leaves a minimum no day can reach
       await applyLang(S.settings.lang);
       await saveSettings();
       // A plan picture that the backup replaces is no longer referred to by anything
       const now = new Set(Object.values(S.settings.planPhotos || {}));
-      for (const id of [...held].filter((x) => !now.has(x))) {
+      for (const id of before.filter((x) => !now.has(x))) {
         await db.del('photos', id);
         const u = S.urls.get(id);
         if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -881,8 +754,7 @@ async function importBackup(file) {
   render();
   if (S.sheet && S.sheet.type === 'settings') await openSettings(); // the open sheet shows the restored language
   const back = tn('{n} entry restored|{n} entries restored', restored);
-  const msg = skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back;
-  toast(notRestored ? t('{restored}; {skipped}', { restored: msg, skipped: tn('{n} plan not restored (limit reached)|{n} plans not restored (limit reached)', notRestored) }) : msg);
+  toast(skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back);
 }
 
 // ——— Loading and rendering ———
@@ -892,11 +764,9 @@ async function load() {
   S.entries = await db.all('entries');
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
-  S.plans = cleanPlans(await db.kvGet('plans', []));
   S.checks = await db.kvGet('checks', []);
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
   S.badges = badges ? cleanBadges(badges) : null;
-  if (useActivePlan()) await saveSettings();
 }
 
 async function refreshStorage() {
@@ -938,7 +808,6 @@ function render() {
   window.scrollTo(0, y);
   if (S.sheet && S.sheet.type === 'badge') $('#sheet-body').innerHTML = renderBadgeSheet(S.sheet.id);
   if (S.sheet && S.sheet.type === 'avatar') $('#sheet-body').innerHTML = renderAvatarSheet();
-  if (S.sheet && S.sheet.type === 'plans') $('#sheet-body').innerHTML = renderPlansSheet();
   if (S.sheet && S.sheet.type === 'plan') { $('#sheet-body').innerHTML = renderPlanSheet(S.sheet.id); hydratePhotos(); }
   if (S.sheet && S.sheet.type === 'entry') {
     const html = renderEntrySheet(S.sheet.id);
@@ -1207,83 +1076,7 @@ const ACT = {
     if (el.dataset.hint) { const h = $('#av-hint'); if (h) h.textContent = el.dataset.hint; return; }
     return wearPart(el.dataset.part);
   },
-  'plans-open': () => openSheet(renderPlansSheet(), { type: 'plans' }),
-  'plan-new': async () => {
-    if (planBusy) return;
-    const base = activePlan();
-    const name = window.prompt(t('Name the new plan. It starts as a copy of {name}.', { name: td(base.name) }));
-    if (name === null) return;
-    const r = newPlanFrom(S.plans, base, name);
-    if (r.error) return toast(td(r.error));
-    planBusy = true;
-    try { await persistAndSwitch(r.plans, r.plan.id); } finally { planBusy = false; }
-  },
-  'plan-switch': (el) => switchPlan(el.dataset.id),
-  'plan-rename': async (el) => {
-    const p = S.plans.find((x) => x.id === el.dataset.id);
-    const name = p && window.prompt(t('New name for {name}', { name: td(p.name) }), td(p.name));
-    if (!name) return;
-    const r = renamePlan(S.plans, p.id, name);
-    if (r.error) return toast(td(r.error));
-    await persistPlans(r.plans);
-    render();
-  },
-  'plan-delete': async (el) => {
-    const p = S.plans.find((x) => x.id === el.dataset.id);
-    if (!p || !window.confirm(t('Delete {name}? Meals and foods in it are lost. Your log stays.', { name: td(p.name) }))) return;
-    const r = deletePlan(S.plans, p.id);
-    if (r.error) return toast(td(r.error));
-    if (p.id === S.settings.activePlan) await persistAndSwitch(r.plans, DEFAULT_PLAN_ID);
-    else { await persistPlans(r.plans); render(); }
-    await dropPlanPhotos(r.orphaned);
-  },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
-  'meal-add': (el) => { S.mealDraft = { name: '', slot: el.dataset.slot, ingredients: [['', '', '']] }; showMealEditor('#md-name'); },
-  'meal-edit': (el) => {
-    const m = MEAL_BY_ID[el.dataset.id];
-    if (!m) return;
-    S.mealDraft = { id: m.id, origName: m.name, name: td(m.name), slot: m.slot, ingredients: m.ingredients.map(([k, g, measure]) => [k, String(g), measure || '']) };
-    showMealEditor('#md-name');
-  },
-  'ing-add': () => { const d = readMealDraft(); if (!d) return; d.ingredients.push(['', '', '']); showMealEditor('.ing-row:last-child .ing-food'); },
-  'ing-remove': (el) => { const d = readMealDraft(); if (!d) return; d.ingredients.splice(Number(el.dataset.i), 1); showMealEditor(); },
-  'meal-save': () => {
-    if (!readMealDraft()) return;
-    whereOp = 'save';
-    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
-    return commitMeal('save');
-  },
-  'meal-delete': () => {
-    const d = readMealDraft();
-    if (!d || !window.confirm(t('Delete {name}? Logged entries stay.', { name: td(d.name) }))) return;
-    whereOp = 'delete';
-    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
-    return commitMeal('delete');
-  },
-  'meal-into': (el) => (whereOp.startsWith('food') ? commitFood : commitMeal)(whereOp, el.dataset.id),
-  'meal-back': () => (whereOp === 'food-delete' ? showFoods() : whereOp === 'food-save' ? showFoodEditor() : showMealEditor()),
-  'foods-open': showFoods,
-  'food-add': () => { S.foodDraft = { name: '', v: ['', '', '', '', ''] }; showFoodEditor('#fd-name'); },
-  'food-edit': (el) => {
-    const f = FOODS[el.dataset.key];
-    if (!f) return;
-    S.foodDraft = { key: el.dataset.key, origName: f.name, name: td(f.name), v: f.v.map(String) };
-    showFoodEditor('#fd-name');
-  },
-  'food-save': () => {
-    if (!readFoodDraft()) return;
-    whereOp = 'food-save';
-    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
-    return commitFood('food-save');
-  },
-  'food-delete': (el) => {
-    const f = FOODS[el.dataset.key];
-    if (!f || !window.confirm(t('Delete {name}?', { name: td(f.name) }))) return;
-    S.foodDraft = { key: el.dataset.key };
-    whereOp = 'food-delete';
-    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
-    return commitFood('food-delete');
-  },
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
   'check-lib': () => { photoTarget = CHECK_PHOTOS; $('#f-lib').click(); },
   'check-photo-remove': (el) => removeCheckPhoto(el.dataset.id),
@@ -1621,8 +1414,6 @@ const ACT = {
     S.urls.clear();
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept };
-    S.plans = [];
-    useActivePlan();
     await saveSettings();
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();

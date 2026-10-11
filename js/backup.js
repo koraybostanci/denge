@@ -2,8 +2,7 @@
 // type and size before it is stored or shown, so a damaged or hostile file cannot break the screens.
 // Pure functions: no DOM and no storage.
 import { T } from './i18n.js';
-import { SLOT_NAME, PLAN_LIMITS } from './plan.js';
-import { SLOT_IDS } from './plans.js';
+import { MEAL_BY_ID, SLOT_NAME, has } from './plan.js';
 import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
 import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid } from './core.js';
@@ -19,13 +18,6 @@ const oneOf = (v, list, def) => (list.includes(v) ? v : def);
 const isDay = (v) => typeof v === 'string' && DAY_RE.test(v) && !Number.isNaN(Date.parse(v));
 const isId = (v) => typeof v === 'string' && ID_RE.test(v);
 const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 20)).slice(0, 4) : []);
-// Key shapes of js/plans.js. MEAL_BY_ID only holds the active plan, so ids from a file are checked by shape alone.
-const MEAL_ID = /^[A-Za-z][\w-]{0,19}$/;
-const FOOD_KEY = /^[A-Za-z][\w-]{0,29}$/;
-const PLAN_ID = /^[\w-]{1,30}$/;
-const goodKey = (re, k) => typeof k === 'string' && re.test(k) && !(k in Object.prototype);
-const isMealId = (k) => goodKey(MEAL_ID, k);
-const oneLine = (v, n) => txt(v, 400).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => ({ n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500) }));
 
 // The recipe of a generated title (see titleOf in js/core.js): a known kind and a few plain parameters. Anything else is dropped,
@@ -118,7 +110,7 @@ export function cleanPhoto(p) {
   let buf;
   try { buf = bufFromB64(p.b64); } catch { return null; }
   const out = { id: p.id, buf, type: 'image/jpeg', w: Math.round(pos(p.w, 10000)), h: Math.round(pos(p.h, 10000)) };
-  if (isMealId(p.plan)) out.plan = p.plan;
+  if (typeof p.plan === 'string' && has(MEAL_BY_ID, p.plan)) out.plan = p.plan;
   return out;
 }
 
@@ -153,65 +145,10 @@ export function cleanSettings(s) {
   }
   if (Array.isArray(s.favorites)) out.favorites = s.favorites.slice(0, 50).map(cleanFavorite).filter(Boolean);
   if (s.planPhotos && typeof s.planPhotos === 'object') {
-    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => isMealId(meal) && isId(id)));
+    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => has(MEAL_BY_ID, meal) && isId(id)));
   }
-  if (typeof s.activePlan === 'string' && goodKey(PLAN_ID, s.activePlan)) out.activePlan = s.activePlan;
   if (s.wins && typeof s.wins === 'object') out.wins = { kilos: Math.round(pos(s.wins.kilos, 1000)), perfect: isDay(s.wins.perfect) ? s.wins.perfect : '' };
   return out;
-}
-
-// One user plan from a file, or null when it has no usable id. Fresh objects only; foods that are malformed are dropped, then
-// ingredients of missing foods, then meals left without ingredients. Never throws.
-export function cleanPlan(raw) {
-  if (!plain(raw) || !goodKey(PLAN_ID, raw.id) || raw.id === 'default') return null;
-  const foods = {};
-  if (plain(raw.foods)) {
-    for (const [key, f] of Object.entries(raw.foods)) {
-      if (Object.keys(foods).length >= PLAN_LIMITS.foods) break;
-      if (!goodKey(FOOD_KEY, key) || !plain(f) || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every((x) => isNum(x) && x >= 0)) continue;
-      const name = oneLine(f.name, 60);
-      if (!name) continue;
-      const v = f.v.map((x, i) => Math.min(i === 0 ? PLAN_LIMITS.kcal : PLAN_LIMITS.per100, x));
-      foods[key] = { name, v };
-    }
-  }
-  const meals = [];
-  const seen = new Set();
-  for (const m of Array.isArray(raw.meals) ? raw.meals : []) {
-    if (meals.length >= PLAN_LIMITS.meals) break;
-    if (!plain(m) || !isMealId(m.id) || seen.has(m.id) || !SLOT_IDS.includes(m.slot)) continue;
-    const name = oneLine(m.name, 60);
-    const ingredients = [];
-    for (const row of Array.isArray(m.ingredients) ? m.ingredients : []) {
-      if (ingredients.length >= PLAN_LIMITS.ingredients) break;
-      if (!Array.isArray(row) || !Object.hasOwn(foods, row[0]) || !isNum(row[1]) || row[1] <= 0) continue;
-      const measure = oneLine(row[2], 30);
-      const grams = Math.min(PLAN_LIMITS.grams, row[1]);
-      ingredients.push(measure ? [row[0], grams, measure] : [row[0], grams]);
-    }
-    if (!name || !ingredients.length) continue;
-    seen.add(m.id);
-    meals.push({ id: m.id, slot: m.slot, name, ingredients });
-  }
-  return { id: raw.id, name: oneLine(raw.name, 60) || T('My plan'), foods, meals };
-}
-
-// The user plans of a backup: at most PLAN_LIMITS.plans, the first of a repeated id wins
-export function cleanPlans(list) {
-  const out = [];
-  const seen = new Set();
-  for (const raw of Array.isArray(list) ? list : []) {
-    if (out.length >= PLAN_LIMITS.plans) break;
-    const p = cleanPlan(raw);
-    if (p && !seen.has(p.id)) { seen.add(p.id); out.push(p); }
-  }
-  return out;
-}
-
-// planPhotos without the meal ids that no plan holds (knownMealIds: every id of the default plan and the user plans)
-export function prunePlanPhotos(planPhotos, knownMealIds) {
-  const known = new Set(knownMealIds);
-  return Object.fromEntries(Object.entries(plain(planPhotos) ? planPhotos : {}).filter(([meal]) => known.has(meal)));
 }
 
 // Earned badges, from the stored copy or a backup: only catalog ids, steps on the ladder and real calendar days survive, and a worn
