@@ -5,7 +5,7 @@ import { T, parseNum } from './i18n.js';
 
 export const SLOT_IDS = ['lunch', 'snack1', 'snack2', 'dinner', 'late', 'workout'];
 const NAME_MAX = 60; // a meal or plan name
-const FOOD_NAME_MAX = 40; // a food name reaches the model prompt, which caps it at the same length
+const FOOD_NAME_MAX = 60; // must stay in step with cleanPlan (js/backup.js) and the food editor maxlength; the built-in default plan has 41-42 character names
 const MEASURE_MAX = 30;
 const MEAL_ID = /^[A-Za-z][\w-]{0,19}$/; // entries store planId sliced to 20 characters
 const FOOD_KEY = /^[A-Za-z][\w-]{0,29}$/;

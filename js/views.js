@@ -1433,7 +1433,7 @@ export function renderFoodEditor(draft) {
   const field = (i, label) => `<label for="fd-${i}">${label}<input id="fd-${i}" class="fd-v" type="text" inputmode="decimal" value="${esc(draft.v[i])}" autocomplete="off"></label>`;
   return `
   <header class="sheet-top"><h2 id="sheet-title">${draft.key ? t('Edit food') : t('New food')}</h2><button type="button" class="btn" data-act="foods-open">${t('Cancel')}</button></header>
-  <div class="field-grid"><label for="fd-name">${t('Name')}<input id="fd-name" type="text" value="${esc(draft.name)}" maxlength="40" autocomplete="off"></label></div>
+  <div class="field-grid"><label for="fd-name">${t('Name')}<input id="fd-name" type="text" value="${esc(draft.name)}" maxlength="60" autocomplete="off"></label></div>
   <p class="note">${t('Values per 100 g')}</p>
   <div class="field-grid">${field(0, t('Calories'))}${field(1, t('Protein'))}${field(2, t('Carbs'))}${field(3, t('Fat'))}${field(4, t('Fibre'))}</div>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="food-save">${t('Save')}</button></div>`;

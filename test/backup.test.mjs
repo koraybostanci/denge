@@ -237,3 +237,8 @@ test('settings: the minimum kcal is kept when sane, and dropped when it is above
   assert.equal('kcalMinDay' in cleanSettings({ kcalRest: 1550, kcalMinDay: 2000 }), false);
   assert.equal('kcalMinDay' in cleanSettings({ kcalMinDay: 10 }), false);
 });
+
+test('every food of the default plan survives cleanPlan with its name intact', () => {
+  const out = cleanPlan({ ...DEFAULT_PLAN, id: 'P-d' });
+  for (const [k, f] of Object.entries(DEFAULT_PLAN.foods)) assert.equal(out.foods[k]?.name, f.name, k);
+});

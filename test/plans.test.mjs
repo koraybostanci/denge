@@ -155,7 +155,7 @@ test('validateFood and its per-100 g caps', () => {
   assert.ok(validateFood({ name: 'Water', v: [0, 0, 0, 0, 0] }).food);
   const bad = (d) => assert.ok(validateFood(d).error, JSON.stringify(d));
   bad({ name: '', v: [1, 1, 1, 1, 1] });
-  bad({ name: 'x'.repeat(41), v: [1, 1, 1, 1, 1] });
+  bad({ name: 'x'.repeat(61), v: [1, 1, 1, 1, 1] });
   bad({ name: 'x', v: [1, 1, 1, 1] });
   bad({ name: 'x', v: 'nope' });
   bad({ name: 'x', v: [1001, 1, 1, 1, 1] });
@@ -204,4 +204,10 @@ test('a new meal and a new food from the default plan copy are usable together',
   const m = saveMeal(f.plans, copy.plan.id, draft({ ingredients: [[f.key, '150']] }));
   assert.ok(m.meal);
   assert.ok(deleteFood(m.plans, copy.plan.id, f.key).error);
+});
+
+test('validateFood accepts a 60-character name and rejects 61', () => {
+  const v = [1, 1, 1, 1, 1];
+  assert.ok(validateFood({ name: 'x'.repeat(60), v }).food);
+  assert.ok(validateFood({ name: 'x'.repeat(61), v }).error);
 });

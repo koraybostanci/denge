@@ -169,7 +169,7 @@ export function cleanPlan(raw) {
     for (const [key, f] of Object.entries(raw.foods)) {
       if (Object.keys(foods).length >= PLAN_LIMITS.foods) break;
       if (!goodKey(FOOD_KEY, key) || !plain(f) || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every((x) => isNum(x) && x >= 0)) continue;
-      const name = oneLine(f.name, 40);
+      const name = oneLine(f.name, 60);
       if (!name) continue;
       const v = f.v.map((x, i) => Math.min(i === 0 ? PLAN_LIMITS.kcal : PLAN_LIMITS.per100, x));
       foods[key] = { name, v };
