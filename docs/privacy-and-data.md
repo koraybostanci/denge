@@ -1,6 +1,6 @@
 # Privacy and data
 
-- Entries, photos and settings are stored in the browser's IndexedDB on your device. Nothing is
+- Entries, photos, settings and your own plans are stored in the browser's IndexedDB on your device. Nothing is
   sent to a server of this project, because there is none.
 - Photo and free-text analysis goes straight from your phone to the model provider you choose,
   with your own API key. That is the one place your data leaves the device: the photos and text you
@@ -22,16 +22,16 @@
   been taken in, the parts of your pickle you wear, and your start and goal weights as they were when you first logged something (the weight badges are measured from them, so a later
   change of goals does not move them). Nothing about badges is sent anywhere, and the model never sees them.
 - There is no sync. Back up from Settings → "Backup and export"; the backup is a JSON file you can
-  restore on the same or another device. It holds your entries, goals, favourites, the plan's
+  restore on the same or another device. It holds your entries, goals, favourites, your own plans (meals and foods, with the plan in use), the plan's
   pictures, the verdicts of your checks, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
-  entries, days, checks, badges and plan pictures to what is on the device (an entry or day that is in
-  both takes the backup's version); its goals, favourites and saved places replace yours. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
+  entries, days, checks, badges, plans and plan pictures to what is on the device (an entry, day or plan that is in
+  both, matched by id, takes the backup's version; the plans on the device that the backup does not have stay, and the backup's plan in use is applied if that plan exists); its goals, favourites and saved places replace yours. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
-  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, checks) and keeps every setting, the plan's
+  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, checks) and keeps every setting, your own plans, the plan's
   pictures, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
-  goals, favourites, saved places, the plan's pictures, the badges and the usage totals; the API key and provider
+  goals, favourites, your own plans, saved places, the plan's pictures, the badges and the usage totals; the API key and provider
   stay unless you untick the box. It asks you to type DELETE. Both refuse while something is being
   analysed. Neither can be undone, so save a backup first.
 
