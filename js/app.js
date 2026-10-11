@@ -8,12 +8,12 @@ import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, prunePlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, isDefaultActive, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { MEAL_BY_ID, FOODS, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, isDefaultActive, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
 } from './core.js';
-import { resolvePlan, newPlanFrom, renamePlan, deletePlan, ensureCustom, saveMeal, deleteMeal } from './plans.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderMealEditor, renderMealWhereSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { resolvePlan, newPlanFrom, renamePlan, deletePlan, ensureCustom, saveMeal, deleteMeal, saveFood, deleteFood } from './plans.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderMealEditor, renderMealWhereSheet, renderFoodsSheet, renderFoodEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -45,7 +45,7 @@ async function switchPlan(id) {
   render();
 }
 // ——— The meal editor: the draft lives in S.mealDraft, and the typed values are read back from the sheet before it is drawn again ———
-let whereOp = 'save'; // what the "where should it go" sheet is for: 'save' or 'delete'
+let whereOp = 'save'; // what the "where should it go" sheet is for: 'save' or 'delete' of a meal, 'food-save' or 'food-delete' of a food
 function readMealDraft() {
   const d = S.mealDraft;
   if (!d || !$('#md-name')) return d;
@@ -73,6 +73,30 @@ async function commitMeal(op, planId) {
   closeSheet();
   toast(op === 'delete' ? t('Meal deleted') : t('Meal saved'));
   if (r.orphaned) await dropPlanPhotos(r.orphaned);
+}
+// Foods: the same copy-on-edit rule as for meals. The draft lives in S.foodDraft: { key?, origName?, name, v: [typed text] }
+const readFoodDraft = () => {
+  const d = S.foodDraft;
+  if (d && $('#fd-name')) { d.name = $('#fd-name').value; d.v = [...document.querySelectorAll('#sheet-body .fd-v')].map((x) => x.value); }
+  return d;
+};
+const showFoods = () => openSheet(renderFoodsSheet(), { type: 'food-list' });
+const showFoodEditor = (focusSel) => openSheet(renderFoodEditor(S.foodDraft), { type: 'food' }, focusSel);
+async function commitFood(op, planId) {
+  const d = S.foodDraft;
+  if (!d) return;
+  const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
+  if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
+  const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
+  const dr = d.key !== undefined && !has(own.plan.foods, d.key) ? { ...named, key: undefined } : named; // a chosen plan may not have this food
+  const r = op === 'food-delete' ? deleteFood(own.plans, own.plan.id, d.key) : saveFood(own.plans, own.plan.id, dr);
+  if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') { if (op === 'food-delete') showFoods(); else showFoodEditor(); } return; }
+  S.plans = r.plans;
+  await savePlans();
+  await switchPlan(own.plan.id);
+  S.foodDraft = null;
+  showFoods();
+  toast(op === 'food-delete' ? t('Food deleted') : t('Food saved'));
 }
 // Photos of meals that no plan holds any more
 async function dropPlanPhotos(mealIds) {
@@ -1206,8 +1230,30 @@ const ACT = {
     if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
     return commitMeal('delete');
   },
-  'meal-into': (el) => commitMeal(whereOp, el.dataset.id),
-  'meal-back': () => showMealEditor(),
+  'meal-into': (el) => (whereOp.startsWith('food') ? commitFood : commitMeal)(whereOp, el.dataset.id),
+  'meal-back': () => (whereOp === 'food-delete' ? showFoods() : whereOp === 'food-save' ? showFoodEditor() : showMealEditor()),
+  'foods-open': showFoods,
+  'food-add': () => { S.foodDraft = { name: '', v: ['', '', '', '', ''] }; showFoodEditor('#fd-name'); },
+  'food-edit': (el) => {
+    const f = FOODS[el.dataset.key];
+    if (!f) return;
+    S.foodDraft = { key: el.dataset.key, origName: f.name, name: td(f.name), v: f.v.map(String) };
+    showFoodEditor('#fd-name');
+  },
+  'food-save': () => {
+    readFoodDraft();
+    whereOp = 'food-save';
+    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
+    return commitFood('food-save');
+  },
+  'food-delete': (el) => {
+    const f = FOODS[el.dataset.key];
+    if (!f || !window.confirm(t('Delete {name}?', { name: td(f.name) }))) return;
+    S.foodDraft = { key: el.dataset.key };
+    whereOp = 'food-delete';
+    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
+    return commitFood('food-delete');
+  },
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
   'check-lib': () => { photoTarget = CHECK_PHOTOS; $('#f-lib').click(); },
   'check-photo-remove': (el) => removeCheckPhoto(el.dataset.id),

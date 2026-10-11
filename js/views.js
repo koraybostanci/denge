@@ -9,7 +9,7 @@ import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
 import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
-import { MEALS, FOODS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, ACTIVE_ID, DEFAULT_PLAN_ID, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
+import { MEALS, FOODS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, ACTIVE_ID, DEFAULT_PLAN_ID, isDefaultActive, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n0 = fmtInt;
@@ -297,10 +297,10 @@ function daySlots(day) {
   const list = [];
   if (has('morning')) list.push({ id: 'morning', name: td(SLOT_NAME.morning), time: '' });
   SLOTS.filter((x) => x.id !== 'late').forEach((x) => list.push({ id: x.id, name: td(x.name), time: x.time }));
-  if (dd.train || has('workout')) list.push({ id: 'workout', name: t('Workout extras'), time: '', hint: t('Banana before, skyr after') });
+  if (dd.train || has('workout')) list.push({ id: 'workout', name: t('Workout extras'), time: '', hint: isDefaultActive() ? t('Banana before, skyr after') : '' });
   // The late slot only shows once it matters: in the evening, when something is in it, or when skyr would close a protein gap
   const sg = suggest(day);
-  if (has('late') || (isToday && (new Date().getHours() >= 19 || sg.extra))) list.push({ id: 'late', name: lateName(), time: SLOTS.find((x) => x.id === 'late').time, hint: t('Herbal tea; skyr if very hungry') });
+  if (has('late') || (isToday && (new Date().getHours() >= 19 || sg.extra))) list.push({ id: 'late', name: lateName(), time: SLOTS.find((x) => x.id === 'late').time, hint: isDefaultActive() ? t('Herbal tea; skyr if very hungry') : '' });
   return { list, all, sg, isToday };
 }
 const lateName = () => t('After {time}', { time: SLOTS.find((x) => x.id === 'late').time });
@@ -352,7 +352,7 @@ function dayList(day) {
   }
   return `<section class="meals">
     <div class="meals-head"><h2>${isToday ? t('Today’s meals') : t('Meals')}<small>${t('{n} of {total}', { n: done, total: main })}</small></h2>
-      <button type="button" class="toggle" role="switch" aria-checked="${dd.train ? 'true' : 'false'}" data-act="train" data-v="${dd.train ? 0 : 1}" aria-label="${t('Workout day: budget {kcal} kcal, banana and skyr added', { kcal: n0(S.settings.kcalTrain) })}"><i aria-hidden="true"></i>${t('Workout day')}</button>
+      <button type="button" class="toggle" role="switch" aria-checked="${dd.train ? 'true' : 'false'}" data-act="train" data-v="${dd.train ? 0 : 1}" aria-label="${isDefaultActive() ? t('Workout day: budget {kcal} kcal, banana and skyr added', { kcal: n0(S.settings.kcalTrain) }) : t('Workout day: budget {kcal} kcal', { kcal: n0(S.settings.kcalTrain) })}"><i aria-hidden="true"></i>${t('Workout day')}</button>
     </div>
     <ul class="meal-list">${rows.join('')}</ul></section>`;
 }
@@ -436,7 +436,7 @@ function coachLine(day) {
     if (sg.meal && sg.slot) line = t('First up: {meal} at {time}.', { meal: td(sg.meal.name), time: sg.slot.time });
   } else if (sg.extra) {
     head = t('Meals done.');
-    line = t('Protein is {n} g short; 150 g of plain skyr closes the gap and fits the budget.', { n: n0(sg.remP) });
+    line = t('Protein is {n} g short; {meal} closes the gap and fits the budget.', { n: n0(sg.remP), meal: lc(td(sg.meal.name)) });
   } else if (sg.meal && sg.slot) {
     head = t('You’re on track.');
     const meal = td(sg.meal.name);
@@ -1302,10 +1302,11 @@ const planNow = () => S.plans.find((p) => p.id === ACTIVE_ID) || { id: DEFAULT_P
 export function renderPlan() {
   const s = S.settings;
   const pictured = MEALS.filter((m) => (s.planPhotos || {})[m.id]).length;
+  const dflt = isDefaultActive(); // the slot notes and the dinner rotation belong to the default plan
   const slot = (id, title, time, note) => {
     const meals = MEALS.filter((m) => m.slot === id);
     return `<section class="plan-slot">
-    <h2>${title}${time ? `<small>${time}</small>` : ''}</h2>${note ? `<p class="note">${note}</p>` : ''}
+    <h2>${title}${time ? `<small>${time}</small>` : ''}</h2>${note && dflt ? `<p class="note">${note}</p>` : ''}
     <div class="plan-row">${meals.map((m) => `<button type="button" class="plan-card" data-act="plan-meal" data-id="${m.id}" aria-label="${esc(t('{meal}, {kcal} kcal, {p} g protein. Details', { meal: td(m.name), kcal: m.kcal, p: n0(m.p) }))}">
         ${planPic(m.id, t('Add photo'))}
         <span class="plan-name">${esc(td(m.name))}</span>
@@ -1321,7 +1322,7 @@ export function renderPlan() {
     <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: MEALS.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
-  <div class="plan-active"><span>${t('Plan in use: {name}', { name: `<b>${esc(planLabel(planNow()))}</b>` })}</span><button type="button" class="btn" data-act="plans-open">${t('Plans')}</button></div>
+  <div class="plan-active"><span>${t('Plan in use: {name}', { name: `<b>${esc(planLabel(planNow()))}</b>` })}</span><button type="button" class="btn" data-act="plans-open">${t('Plans')}</button><button type="button" class="btn" data-act="foods-open">${t('Foods')}</button></div>
   <ul class="plan-targets" aria-label="${t('Daily goals')}">
     <li>${t('Rest day <b>{kcal}</b> kcal', { kcal: n0(s.kcalRest) })}</li>
     <li>${t('Workout day <b>{kcal}</b> kcal', { kcal: n0(s.kcalTrain) })}</li>
@@ -1338,7 +1339,7 @@ export function renderPlan() {
   ${slot('late', lateName(), '', t('Herbal tea by default.'))}
   <section class="plan-rules">
     <h2>${t('The rules')}</h2>
-    ${group(t('Dinner rotation'), `<p class="note">${t('Fish twice and legumes twice a week.')}</p><table class="table"><tbody>${RULES.rotation.map(([day, meal]) => `<tr><th scope="row">${day}</th><td>${esc(meal)}</td></tr>`).join('')}</tbody></table>`)}
+    ${dflt ? group(t('Dinner rotation'), `<p class="note">${t('Fish twice and legumes twice a week.')}</p><table class="table"><tbody>${RULES.rotation.map(([day, meal]) => `<tr><th scope="row">${day}</th><td>${esc(meal)}</td></tr>`).join('')}</tbody></table>`) : ''}
     ${group(t('Every day'), list(RULES.daily))}
     ${group(t('The week’s extras'), list(RULES.weekly))}
     ${group(t('Off for the whole period'), list(RULES.off))}
@@ -1416,10 +1417,32 @@ export function renderMealEditor(draft) {
     ${draft.id ? `<button type="button" class="link link-danger" data-act="meal-delete">${t('Delete meal')}</button>` : ''}</div>`;
 }
 
-// Saving from the default plan when the person has plans of their own: where should the meal go?
+// The foods of the plan in use, with the ones that can be changed
+export function renderFoodsSheet() {
+  const keys = Object.keys(FOODS).sort((a, b) => td(FOODS[a].name).localeCompare(td(FOODS[b].name)));
+  const row = (k) => `<li><span>${esc(td(FOODS[k].name))} <small>${t('{kcal} kcal per 100 g', { kcal: n0(FOODS[k].v[0]) })}</small></span><span><button type="button" class="link" data-act="food-edit" data-key="${esc(k)}">${t('Edit')}</button> <button type="button" class="link link-danger" data-act="food-delete" data-key="${esc(k)}">${t('Delete')}</button></span></li>`;
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${t('Foods')}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
+  <p class="note">${t('Values are per 100 g. A food that a meal uses cannot be deleted.')}</p>
+  <ul class="items">${keys.map(row).join('')}</ul>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="food-add">${t('Add food')}</button></div>`;
+}
+
+// The food editor. draft: { key?, name, v: [kcal, protein, carbs, fat, fibre] as typed text }
+export function renderFoodEditor(draft) {
+  const field = (i, label) => `<label for="fd-${i}">${label}<input id="fd-${i}" class="fd-v" type="text" inputmode="decimal" value="${esc(draft.v[i])}" autocomplete="off"></label>`;
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${draft.key ? t('Edit food') : t('New food')}</h2><button type="button" class="btn" data-act="foods-open">${t('Cancel')}</button></header>
+  <div class="field-grid"><label for="fd-name">${t('Name')}<input id="fd-name" type="text" value="${esc(draft.name)}" maxlength="40" autocomplete="off"></label></div>
+  <p class="note">${t('Values per 100 g')}</p>
+  <div class="field-grid">${field(0, t('Calories'))}${field(1, t('Protein'))}${field(2, t('Carbs'))}${field(3, t('Fat'))}${field(4, t('Fibre'))}</div>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="food-save">${t('Save')}</button></div>`;
+}
+
+// Saving from the default plan when the person has plans of their own: where should the change go?
 export function renderMealWhereSheet() {
   return `
-  <header class="sheet-top"><h2 id="sheet-title">${t('Where should this meal be saved?')}</h2><button type="button" class="btn" data-act="meal-back">${t('Back')}</button></header>
+  <header class="sheet-top"><h2 id="sheet-title">${t('Where should this change be saved?')}</h2><button type="button" class="btn" data-act="meal-back">${t('Back')}</button></header>
   <p class="note">${t('The default plan cannot be changed.')}</p>
   <ul class="items">${S.plans.map((p) => `<li><button type="button" class="btn btn-wide" data-act="meal-into" data-id="${esc(p.id)}">${t('Edit in {name}', { name: esc(td(p.name)) })}</button></li>`).join('')}</ul>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="meal-into" data-id="">${t('New copy')}</button></div>`;

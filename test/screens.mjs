@@ -102,6 +102,9 @@ export function screens() {
   add('meal-editor-new', () => views.renderMealEditor({ name: '', slot: 'lunch', ingredients: [['', '', '']] }));
   add('meal-editor-edit', () => { const m = S.plans[0].meals[0]; return views.renderMealEditor({ id: m.id, name: m.name, slot: m.slot, ingredients: m.ingredients.map(([k, g, x]) => [k, String(g), x || '']) }); });
   add('meal-where-sheet', views.renderMealWhereSheet);
+  add('foods-sheet', views.renderFoodsSheet);
+  add('food-editor-new', () => views.renderFoodEditor({ name: '', v: ['', '', '', '', ''] }));
+  add('food-editor-edit', () => { const k = Object.keys(S.plans[0].foods)[0]; const f = S.plans[0].foods[k]; return views.renderFoodEditor({ key: k, name: f.name, v: f.v.map(String) }); });
   S.plans = [];
   applyPlan(DEFAULT_PLAN);
   return out;
