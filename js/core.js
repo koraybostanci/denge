@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { MEALS, MEAL_BY_ID, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
 
-export const APP_VERSION = '46'; // bump together with VERSION in sw.js
+export const APP_VERSION = '47'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -14,7 +14,7 @@ export const APP_ID = 'weightplan';
 export const freshSettings = () => ({
   ...DEFAULTS, schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
-  useLocation: false, activePlan: 'default', places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
+  useLocation: false, places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
   usage: { in: 0, out: 0, calls: 0, usd: 0 }, lastBackup: 0,
 });
 // What the Check screen is holding while a check is put together; its photos live in memory only
@@ -23,7 +23,6 @@ export const freshCheck = () => ({ photos: [], note: '', busy: false, status: ''
 export const S = {
   tab: 'today',
   settings: freshSettings(),
-  plans: [], // the user's own plans; the default plan is built in and never stored
   entries: [],
   days: {},
   rev: 0, // moves on every save, load, clear and restore: what a cached result of the log is keyed on
@@ -44,8 +43,7 @@ export const S = {
   storage: null,
   calPick: null,
   chartRange: 'weeks', // the weight chart: 'week' (7 days), 'weeks' (14) or 'whole' (the plan)
-  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame'|'meal'|'meal-where', ...}
-  mealDraft: null, // the meal being edited: { id?, name, slot, ingredients: [[foodKey, grams text, measure]] }
+  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
 };
@@ -355,14 +353,13 @@ export function suggest(day) {
   const rem = dayTarget(day) - tot.kcal;
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
-  const next = open.find((s) => MEALS.some((m) => m.slot === s.id)); // a custom plan may leave a slot empty: take the next one with options
-  if (!next) {
-    const late = MEALS.find((m) => m.slot === 'late'); // a plan may have no late snack
-    if (late && remP > 12 && rem >= 90) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
+  if (!open.length) {
+    if (remP > 12 && rem >= 90) return { rem, remP, meal: MEAL_BY_ID['N-A'], slot: SLOTS.find((s) => s.id === 'late'), extra: true };
     return { rem, remP, meal: null };
   }
-  const minKcal = (id) => { const k = Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal)); return Number.isFinite(k) ? k : 0; }; // an empty slot reserves nothing
-  const reserve = open.filter((s) => s !== next).reduce((a, s) => a + minKcal(s.id), 0);
+  const next = open[0];
+  const minKcal = (id) => Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal));
+  const reserve = open.slice(1).reduce((a, s) => a + minKcal(s.id), 0);
   const options = MEALS.filter((m) => m.slot === next.id);
   const fit = options.filter((m) => m.kcal <= rem - reserve + 40);
   const pool = fit.length ? fit : options.slice().sort((a, b) => a.kcal - b.kcal).slice(0, 1);
@@ -514,11 +511,7 @@ export const TK_KINDS = Object.keys(TITLES);
 export function titleOf(e) {
   const k = e.tk;
   const text = tkValid(k) ? TITLES[k.kind](k.params) : null;
-  if (text) {
-    // A meal renamed since keeps the name it was logged under
-    const now = k.kind === 'plan' && e.title ? planItem(k.params.id) : null;
-    return now && now.name !== e.title ? e.title : text;
-  }
+  if (text) return text;
   // An older plan entry has no tk: when its title is still the plan item's English name, show that name in the interface language
   const item = typeof e.planId === 'string' ? planItem(e.planId) : null;
   return item && item.name === e.title ? td(item.name) : e.title;
