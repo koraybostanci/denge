@@ -6,7 +6,7 @@ import {
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
 } from '../js/core.js';
-import { addDays, diffDays, hhmm, planDigest, planFoods, FOODS, MEALS, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import { addDays, diffDays, hhmm, planDigest, planFoods, FOODS, MEALS, DEFAULTS, KCAL_MIN_DAY, DEFAULT_PLAN, applyPlan } from '../js/plan.js';
 
 const T = today();
 const day = (off) => addDays(T, off);
@@ -386,4 +386,66 @@ test('a review goes stale when the minimum changes', () => {
   S.settings.kcalMinDay = 1400;
   assert.equal(reviewState(day(-1)), 'stale');
   delete S.days[day(-1)];
+});
+
+// Guards for a plan that does not fill every slot
+test('suggest with a plan that has no late meal or an empty slot does not throw and gives meal: null where there is none', () => {
+  reset();
+  const d = today();
+  try {
+    const noLate = { ...DEFAULT_PLAN, id: 'P-nl', meals: DEFAULT_PLAN.meals.filter((m) => m.slot !== 'late') };
+    applyPlan(noLate);
+    for (const sl of openSlots(d)) meal(d, 300, 20, { slot: sl.id });
+    assert.deepEqual(openSlots(d), []);
+    const r = suggest(d);
+    assert.equal(r.meal, null);
+    assert.ok(!r.extra);
+    applyPlan({ ...DEFAULT_PLAN, id: 'P-eg', meals: DEFAULT_PLAN.meals.filter((m) => m.slot !== 'lunch' && m.slot !== 'snack1') });
+    S.entries = [];
+    const s1 = suggest(d); // lunch has no meal: meal is null and the next slot is still named
+    assert.equal(s1.meal, null);
+    assert.equal(s1.slot.id, 'lunch');
+    assert.ok(Number.isFinite(s1.rem));
+    meal(d, 300, 20, { slot: 'lunch' });
+    assert.equal(suggest(d).meal, null); // snack1 is empty too
+    applyPlan({ id: 'P-none', name: 'None', foods: {}, meals: [] });
+    S.entries = [];
+    assert.equal(suggest(d).meal, null);
+    assert.doesNotThrow(() => suggest(d));
+  } finally {
+    applyPlan(DEFAULT_PLAN);
+    reset();
+  }
+});
+
+test('suggest takes the late snack from the plan in use, not from a fixed id', () => {
+  reset();
+  const d = today();
+  try {
+    applyPlan({ ...DEFAULT_PLAN, id: 'P-late', meals: DEFAULT_PLAN.meals.map((m) => (m.slot === 'late' ? { ...m, id: 'U-late', name: 'Night yoghurt' } : m)) });
+    for (const sl of openSlots(d)) meal(d, 100, 1, { slot: sl.id });
+    const r = suggest(d);
+    assert.equal(r.extra, true);
+    assert.equal(r.meal.id, 'U-late');
+  } finally {
+    applyPlan(DEFAULT_PLAN);
+    reset();
+  }
+});
+
+test('planSteps with every slot empty spends nothing in each step', () => {
+  try {
+    applyPlan({ id: 'P-none', name: 'None', foods: {}, meals: [] });
+    const steps = planSteps(1550);
+    assert.equal(steps.length, 4);
+    assert.ok(steps.every((x) => x.kcal === 0));
+    assert.equal(plannedBy(1550, 20), 0);
+  } finally {
+    applyPlan(DEFAULT_PLAN);
+  }
+});
+
+test('a new install uses the default plan, and S holds no user plans', () => {
+  assert.equal(freshSettings().activePlan, 'default');
+  assert.deepEqual(S.plans, []);
 });

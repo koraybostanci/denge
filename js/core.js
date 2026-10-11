@@ -14,7 +14,7 @@ export const APP_ID = 'weightplan';
 export const freshSettings = () => ({
   ...DEFAULTS, schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
-  useLocation: false, places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
+  useLocation: false, activePlan: 'default', places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
   usage: { in: 0, out: 0, calls: 0, usd: 0 }, lastBackup: 0,
 });
 // What the Check screen is holding while a check is put together; its photos live in memory only
@@ -23,6 +23,7 @@ export const freshCheck = () => ({ photos: [], note: '', busy: false, status: ''
 export const S = {
   tab: 'today',
   settings: freshSettings(),
+  plans: [], // the user's own plans; the default plan is built in and never stored
   entries: [],
   days: {},
   rev: 0, // moves on every save, load, clear and restore: what a cached result of the log is keyed on
@@ -354,16 +355,17 @@ export function suggest(day) {
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
   if (!open.length) {
-    if (remP > 12 && rem >= 90) return { rem, remP, meal: MEAL_BY_ID['N-A'], slot: SLOTS.find((s) => s.id === 'late'), extra: true };
+    const late = MEALS.find((m) => m.slot === 'late'); // a plan may have no late snack
+    if (late && remP > 12 && rem >= 90) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
     return { rem, remP, meal: null };
   }
   const next = open[0];
-  const minKcal = (id) => Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal));
+  const minKcal = (id) => { const k = Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal)); return Number.isFinite(k) ? k : 0; }; // an empty slot reserves nothing
   const reserve = open.slice(1).reduce((a, s) => a + minKcal(s.id), 0);
   const options = MEALS.filter((m) => m.slot === next.id);
   const fit = options.filter((m) => m.kcal <= rem - reserve + 40);
   const pool = fit.length ? fit : options.slice().sort((a, b) => a.kcal - b.kcal).slice(0, 1);
-  const meal = pool.slice().sort((a, b) => b.p - a.p)[0];
+  const meal = pool.slice().sort((a, b) => b.p - a.p)[0] || null; // null when the slot has no meals
   return { rem, remP, meal, slot: next, tight: !fit.length };
 }
 

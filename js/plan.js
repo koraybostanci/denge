@@ -6,7 +6,7 @@ import { LOCALE, T, t } from './i18n.js';
 export { LOCALE }; // follows the interface language (a live binding)
 
 // Per 100 g: [kcal, protein, carbs, fat, fibre]
-export const FOODS = {
+export const DEFAULT_FOODS = {
   egg:        { name: T('Boiled egg'),                               v: [143, 12.6, 0.7, 9.5, 0] },
   cheese:     { name: T('Low-fat white cheese'),                     v: [170, 18, 1, 10.5, 0] },
   salad:      { name: T('Cucumber, tomato, greens'),                 v: [18, 1, 3, 0.2, 1.2] },
@@ -38,7 +38,7 @@ export const FOODS = {
 };
 
 // ingredients: [food, grams, optional household measure]
-const TEMPLATES = [
+export const DEFAULT_TEMPLATES = [
   // Lunch
   { id: 'L-A', slot: 'lunch', name: T('Egg and cheese plate'),
     ingredients: [['egg', 106, T('2 eggs')], ['cheese', 60], ['salad', 350, T('large bowl')], ['olives', 20, T('5 olives')], ['bread', 45, T('1 slice')], ['oliveOil', 5, T('1 tsp')]] },
@@ -87,23 +87,53 @@ const TEMPLATES = [
 
 const round1 = (x) => Math.round(x * 10) / 10;
 
+// The plan the app ships with. It is read-only; a user plan has the same shape: { id, name, foods, meals }
+export const DEFAULT_PLAN_ID = 'default';
+export const DEFAULT_PLAN = { id: DEFAULT_PLAN_ID, name: 'Default plan', foods: DEFAULT_FOODS, meals: DEFAULT_TEMPLATES };
+export const PLAN_LIMITS = { plans: 10, foods: 200, meals: 60, ingredients: 12, grams: 5000, kcal: 1000, per100: 100 };
+// A deep copy that shares nothing with the plan it came from
+export const copyPlan = (plan) => ({
+  ...plan,
+  foods: Object.fromEntries(Object.entries(plan.foods).map(([k, f]) => [k, { ...f, v: f.v.slice() }])),
+  meals: plan.meals.map((m) => ({ ...m, ingredients: m.ingredients.map((i) => i.slice()) })),
+});
+
+// The plan in use. These objects are filled by applyPlan and never replaced, so every importer sees the active plan
+export const FOODS = {};
+export const MEALS = [];
+export const MEAL_BY_ID = {};
+export let ACTIVE_ID = DEFAULT_PLAN_ID; // a live binding
+export const isDefaultActive = () => ACTIVE_ID === DEFAULT_PLAN_ID;
+
 export function macros(ingredients) {
   const s = [0, 0, 0, 0, 0];
-  for (const [k, g] of ingredients) FOODS[k].v.forEach((v, i) => { s[i] += (v * g) / 100; });
+  for (const [k, g] of ingredients) if (has(FOODS, k)) FOODS[k].v.forEach((v, i) => { s[i] += (v * g) / 100; });
   return { kcal: Math.round(s[0]), p: round1(s[1]), c: round1(s[2]), f: round1(s[3]), fib: round1(s[4]) };
 }
 
-export const MEALS = TEMPLATES.map((t) => ({
-  ...t,
-  ...macros(t.ingredients),
-  items: t.ingredients.map(([k, g, measure]) => ({
-    n: FOODS[k].name, g, measure: measure || '',
-    kcal: Math.round((FOODS[k].v[0] * g) / 100),
-    p: round1((FOODS[k].v[1] * g) / 100),
-  })),
-}));
-
-export const MEAL_BY_ID = Object.fromEntries(MEALS.map((m) => [m.id, m]));
+// Makes a plan the active one, in place. Copies it, so changing MEALS never changes the plan; an ingredient whose food is missing is dropped.
+export function applyPlan(plan) {
+  const own = copyPlan(plan);
+  for (const k of Object.keys(FOODS)) delete FOODS[k];
+  for (const k of Object.keys(MEAL_BY_ID)) delete MEAL_BY_ID[k];
+  MEALS.length = 0;
+  Object.assign(FOODS, own.foods);
+  for (const t of own.meals) {
+    const ingredients = t.ingredients.filter(([k]) => has(FOODS, k));
+    MEALS.push({
+      ...t,
+      ingredients,
+      ...macros(ingredients),
+      items: ingredients.map(([k, g, measure]) => ({
+        n: FOODS[k].name, g, measure: measure || '',
+        kcal: Math.round((FOODS[k].v[0] * g) / 100),
+        p: round1((FOODS[k].v[1] * g) / 100),
+      })),
+    });
+  }
+  for (const m of MEALS) MEAL_BY_ID[m.id] = m;
+  ACTIVE_ID = own.id;
+}
 // Own keys only: a lookup with text from outside must not find "constructor" or "__proto__"
 export const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -256,9 +286,11 @@ const SHORT = {
   almonds: 'almonds', cottage: 'cottage cheese', chicken: 'chicken breast', mince: 'meatballs',
   beef: 'red meat', salmon: 'salmon', ovenVeg: 'oven vegetables', bulgur: 'bulgur', lentils: 'lentils',
 };
-const short = (k) => SHORT[k] || FOODS[k].name; // a food you add needs no entry in SHORT
+const short = (k) => (has(SHORT, k) ? SHORT[k] : null) || FOODS[k].name; // a food you add needs no entry in SHORT
 // The foods the plan is built from, for requests that only need the gist of it
 export const planFoods = () => Array.from(new Set(Object.keys(FOODS).map(short))).join(', ');
 export function planDigest() {
   return MEALS.map((m) => `${m.id}: ${m.ingredients.map(([k, g]) => `${short(k)} ${g}g`).join(', ')} = ${m.kcal} kcal, ${Math.round(m.p)}p`).join('\n');
 }
+
+applyPlan(DEFAULT_PLAN); // last, so that everything above (has, SHORT) is defined when it runs
