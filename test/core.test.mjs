@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   S, BAND, proteinFloor, proteinLevel, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
-  isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
+  isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState, titleOf, titleFor,
 } from '../js/core.js';
 import { addDays, diffDays, hhmm, planDigest, planFoods, FOODS, MEALS, DEFAULTS, KCAL_MIN_DAY, DEFAULT_PLAN, applyPlan } from '../js/plan.js';
 
@@ -167,6 +167,29 @@ test('the late snack is suggested only when every planned meal is logged', () =>
   const s = suggest(T);
   assert.equal(s.extra, true);
   assert.equal(s.slot.id, 'late');
+});
+
+test('an open slot with no meals is skipped for the next one with options; null only when none has any', () => {
+  reset();
+  const keep = DEFAULT_PLAN.meals.filter((m) => m.slot !== 'lunch' && m.slot !== 'late');
+  applyPlan({ ...DEFAULT_PLAN, meals: keep });
+  try {
+    assert.equal(suggest(T).slot.id, 'snack1');
+    assert.ok(suggest(T).meal);
+    applyPlan({ ...DEFAULT_PLAN, meals: [] });
+    assert.equal(suggest(T).meal, null);
+  } finally { applyPlan(DEFAULT_PLAN); }
+});
+
+test('an entry logged under an old meal name keeps that name after the meal is renamed', () => {
+  const id = MEALS[0].id;
+  const e = { ...titleFor('plan', { id }), planId: id };
+  assert.equal(titleOf(e), MEALS[0].name);
+  const renamed = { ...DEFAULT_PLAN, meals: DEFAULT_PLAN.meals.map((m) => (m.id === id ? { ...m, name: 'Renamed' } : m)) };
+  applyPlan(renamed);
+  try {
+    assert.equal(titleOf(e), DEFAULT_PLAN.meals.find((m) => m.id === id).name);
+  } finally { applyPlan(DEFAULT_PLAN); }
 });
 
 test('weights never print as -0.0', () => {
@@ -402,12 +425,9 @@ test('suggest with a plan that has no late meal or an empty slot does not throw 
     assert.ok(!r.extra);
     applyPlan({ ...DEFAULT_PLAN, id: 'P-eg', meals: DEFAULT_PLAN.meals.filter((m) => m.slot !== 'lunch' && m.slot !== 'snack1') });
     S.entries = [];
-    const s1 = suggest(d); // lunch has no meal: meal is null and the next slot is still named
-    assert.equal(s1.meal, null);
-    assert.equal(s1.slot.id, 'lunch');
-    assert.ok(Number.isFinite(s1.rem));
-    meal(d, 300, 20, { slot: 'lunch' });
-    assert.equal(suggest(d).meal, null); // snack1 is empty too
+    const s1 = suggest(d); // lunch and snack1 have no meal: the next slot with options is suggested
+    assert.equal(s1.slot.id, 'snack2');
+    assert.ok(s1.meal && Number.isFinite(s1.rem));
     applyPlan({ id: 'P-none', name: 'None', foods: {}, meals: [] });
     S.entries = [];
     assert.equal(suggest(d).meal, null);

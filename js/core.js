@@ -44,7 +44,8 @@ export const S = {
   storage: null,
   calPick: null,
   chartRange: 'weeks', // the weight chart: 'week' (7 days), 'weeks' (14) or 'whole' (the plan)
-  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
+  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame'|'meal'|'meal-where', ...}
+  mealDraft: null, // the meal being edited: { id?, name, slot, ingredients: [[foodKey, grams text, measure]] }
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
 };
@@ -354,18 +355,18 @@ export function suggest(day) {
   const rem = dayTarget(day) - tot.kcal;
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
-  if (!open.length) {
+  const next = open.find((s) => MEALS.some((m) => m.slot === s.id)); // a custom plan may leave a slot empty: take the next one with options
+  if (!next) {
     const late = MEALS.find((m) => m.slot === 'late'); // a plan may have no late snack
     if (late && remP > 12 && rem >= 90) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
     return { rem, remP, meal: null };
   }
-  const next = open[0];
   const minKcal = (id) => { const k = Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal)); return Number.isFinite(k) ? k : 0; }; // an empty slot reserves nothing
-  const reserve = open.slice(1).reduce((a, s) => a + minKcal(s.id), 0);
+  const reserve = open.filter((s) => s !== next).reduce((a, s) => a + minKcal(s.id), 0);
   const options = MEALS.filter((m) => m.slot === next.id);
   const fit = options.filter((m) => m.kcal <= rem - reserve + 40);
   const pool = fit.length ? fit : options.slice().sort((a, b) => a.kcal - b.kcal).slice(0, 1);
-  const meal = pool.slice().sort((a, b) => b.p - a.p)[0] || null; // null when the slot has no meals
+  const meal = pool.slice().sort((a, b) => b.p - a.p)[0];
   return { rem, remP, meal, slot: next, tight: !fit.length };
 }
 
@@ -513,7 +514,11 @@ export const TK_KINDS = Object.keys(TITLES);
 export function titleOf(e) {
   const k = e.tk;
   const text = tkValid(k) ? TITLES[k.kind](k.params) : null;
-  if (text) return text;
+  if (text) {
+    // A meal renamed since keeps the name it was logged under
+    const now = k.kind === 'plan' && e.title ? planItem(k.params.id) : null;
+    return now && now.name !== e.title ? e.title : text;
+  }
   // An older plan entry has no tk: when its title is still the plan item's English name, show that name in the interface language
   const item = typeof e.planId === 'string' ? planItem(e.planId) : null;
   return item && item.name === e.title ? td(item.name) : e.title;

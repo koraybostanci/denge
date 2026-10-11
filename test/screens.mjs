@@ -99,6 +99,9 @@ export function screens() {
   applyPlan(S.plans[0]);
   add('plan-custom', views.renderPlan);
   add('plans-sheet', views.renderPlansSheet);
+  add('meal-editor-new', () => views.renderMealEditor({ name: '', slot: 'lunch', ingredients: [['', '', '']] }));
+  add('meal-editor-edit', () => { const m = S.plans[0].meals[0]; return views.renderMealEditor({ id: m.id, name: m.name, slot: m.slot, ingredients: m.ingredients.map(([k, g, x]) => [k, String(g), x || '']) }); });
+  add('meal-where-sheet', views.renderMealWhereSheet);
   S.plans = [];
   applyPlan(DEFAULT_PLAN);
   return out;

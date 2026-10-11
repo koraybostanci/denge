@@ -4,11 +4,12 @@ import {
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
   plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay,
 } from './core.js';
+import { SLOT_IDS } from './plans.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
 import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
-import { MEALS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, ACTIVE_ID, DEFAULT_PLAN_ID, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
+import { MEALS, FOODS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, ACTIVE_ID, DEFAULT_PLAN_ID, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n0 = fmtInt;
@@ -1310,6 +1311,7 @@ export function renderPlan() {
         <span class="plan-name">${esc(td(m.name))}</span>
         <span class="plan-meta"><span><b>${m.kcal}</b> kcal</span> · <span>${t('{n} g protein', { n: n0(m.p) })}</span></span>
       </button>`).join('')}</div>
+    <button type="button" class="link" data-act="meal-add" data-slot="${id}">${t('Add meal')}</button>
   </section>`;
   };
   const list = (items) => `<ul class="rules">${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
@@ -1390,7 +1392,37 @@ export function renderPlanSheet(id) {
     <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th></tr></thead>
     <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td>${n0(i.kcal)}</td></tr>`).join('')}</tbody>
   </table>
-  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button></div>`;
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button><button type="button" class="btn" data-act="meal-edit" data-id="${id}">${t('Edit meal')}</button></div>`;
+}
+
+// The meal editor. draft: { id?, name, slot, ingredients: [[foodKey, grams text, measure]] }; the foods are those of the plan in use
+export function renderMealEditor(draft) {
+  const foods = Object.keys(FOODS).sort((a, b) => td(FOODS[a].name).localeCompare(td(FOODS[b].name)));
+  const row = ([key, g, measure], i) => `<li class="ing-row">
+      <select class="ing-food" aria-label="${t('Food')}"><option value=""${key ? '' : ' selected'}>${t('Choose a food')}</option>${foods.map((k) => `<option value="${esc(k)}"${k === key ? ' selected' : ''}>${esc(td(FOODS[k].name))}</option>`).join('')}</select>
+      <input class="ing-g" type="text" inputmode="decimal" value="${esc(g)}" placeholder="g" aria-label="${t('Grams')}" autocomplete="off">
+      <input class="ing-m" type="text" value="${esc(measure)}" placeholder="${t('Measure (optional)')}" aria-label="${t('Measure (optional)')}" autocomplete="off">
+      <button type="button" class="link link-danger" data-act="ing-remove" data-i="${i}">${t('Remove')}</button></li>`;
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${draft.id ? t('Edit meal') : t('New meal')}</h2><button type="button" class="btn" data-act="close-sheet">${t('Cancel')}</button></header>
+  <div class="field-grid">
+    <label for="md-name">${t('Name')}<input id="md-name" type="text" value="${esc(draft.name)}" maxlength="60" autocomplete="off"></label>
+    <label for="md-slot">${t('Slot')}<select id="md-slot">${SLOT_IDS.map((k) => `<option value="${k}"${draft.slot === k ? ' selected' : ''}>${td(SLOT_NAME[k])}</option>`).join('')}</select></label>
+  </div>
+  <p class="note">${t('Ingredients')}</p>
+  <ul class="items">${draft.ingredients.map(row).join('')}</ul>
+  <div class="actions"><button type="button" class="btn" data-act="ing-add">${t('Add ingredient')}</button></div>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="meal-save">${t('Save')}</button>
+    ${draft.id ? `<button type="button" class="link link-danger" data-act="meal-delete">${t('Delete meal')}</button>` : ''}</div>`;
+}
+
+// Saving from the default plan when the person has plans of their own: where should the meal go?
+export function renderMealWhereSheet() {
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${t('Where should this meal be saved?')}</h2><button type="button" class="btn" data-act="meal-back">${t('Back')}</button></header>
+  <p class="note">${t('The default plan cannot be changed.')}</p>
+  <ul class="items">${S.plans.map((p) => `<li><button type="button" class="btn btn-wide" data-act="meal-into" data-id="${esc(p.id)}">${t('Edit in {name}', { name: esc(td(p.name)) })}</button></li>`).join('')}</ul>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="meal-into" data-id="">${t('New copy')}</button></div>`;
 }
 
 // ——— Settings: every section starts collapsed and shows its current state in the heading ———

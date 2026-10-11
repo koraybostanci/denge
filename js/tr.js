@@ -809,6 +809,26 @@ export default {
   'Too many foods in this plan.': 'Bu planda çok fazla yiyecek var.',
   'A meal uses this food. Remove it from the meal first.': 'Bir öğün bu yiyeceği kullanıyor. Önce öğünden çıkar.',
 
+  // ——— js/views.js, js/app.js: the meal editor ———
+  'Add meal': 'Öğün ekle',
+  'Edit meal': 'Öğünü düzenle',
+  'New meal': 'Yeni öğün',
+  Food: 'Yiyecek',
+  'Choose a food': 'Yiyecek seç',
+  Grams: 'Gram',
+  'Measure (optional)': 'Ölçü (isteğe bağlı)',
+  Slot: 'Zaman',
+  Ingredients: 'Malzemeler',
+  'Add ingredient': 'Malzeme ekle',
+  'Delete meal': 'Öğünü sil',
+  'Where should this meal be saved?': 'Bu öğün nereye kaydedilsin?',
+  Back: 'Geri',
+  'Edit in {name}': '{name} planında düzenle',
+  'New copy': 'Yeni kopya',
+  'Delete {name}? Logged entries stay.': '{name} silinsin mi? Günlük kayıtların kalır.',
+  'Meal saved': 'Öğün kaydedildi',
+  'Meal deleted': 'Öğün silindi',
+
   // ——— js/app.js: toasts, errors and sheets ———
   'Could not load that language. Try again when you are online.': 'Bu dil yüklenemedi. İnternete bağlanınca tekrar dene.',
   '{msg}. {label} is available.': '{msg}. Seçenek: {label}.',

@@ -8,12 +8,12 @@ import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, prunePlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { MEAL_BY_ID, DEFAULT_PLAN, DEFAULT_PLAN_ID, PLAN_LIMITS, applyPlan, isDefaultActive, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
 } from './core.js';
-import { resolvePlan, newPlanFrom, renamePlan, deletePlan } from './plans.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { resolvePlan, newPlanFrom, renamePlan, deletePlan, ensureCustom, saveMeal, deleteMeal } from './plans.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderPlansSheet, renderMealEditor, renderMealWhereSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -43,6 +43,36 @@ async function switchPlan(id) {
   await saveSettings();
   if (S.sheet && (S.sheet.type === 'plan' || S.sheet.type === 'plan-frame')) closeSheet(); // that meal may not be in the new plan
   render();
+}
+// ——— The meal editor: the draft lives in S.mealDraft, and the typed values are read back from the sheet before it is drawn again ———
+let whereOp = 'save'; // what the "where should it go" sheet is for: 'save' or 'delete'
+function readMealDraft() {
+  const d = S.mealDraft;
+  if (!d || !$('#md-name')) return d;
+  d.name = $('#md-name').value;
+  d.slot = $('#md-slot').value;
+  d.ingredients = [...document.querySelectorAll('#sheet-body .ing-row')].map((r) => [r.querySelector('.ing-food').value, r.querySelector('.ing-g').value, r.querySelector('.ing-m').value]);
+  return d;
+}
+const showMealEditor = (focusSel, keepFocus) => openSheet(renderMealEditor(S.mealDraft), { type: 'meal' }, focusSel, keepFocus);
+// Saves or deletes the draft's meal. The default plan is never changed: the meal goes to a copy ("My plan"), or to the plan the person chose.
+// Nothing is stored unless the whole change works, so a refused save leaves no stray copy.
+async function commitMeal(op, planId) {
+  const d = S.mealDraft;
+  if (!d) return;
+  const own = planId ? { plans: S.plans, plan: S.plans.find((p) => p.id === planId) } : ensureCustom(S.plans, S.settings.activePlan);
+  if (own.error || !own.plan) { if (own.error) toast(td(own.error)); return; }
+  const named = d.origName !== undefined && d.name === td(d.origName) ? { ...d, name: d.origName } : d; // the name shown was only translated: keep the stored one
+  const dr = d.id !== undefined && !own.plan.meals.some((m) => m.id === d.id) ? { ...named, id: undefined } : named; // a chosen plan may not have this meal
+  const r = op === 'delete' ? deleteMeal(own.plans, own.plan.id, d.id) : saveMeal(own.plans, own.plan.id, dr);
+  if (r.error) { toast(td(r.error)); if (S.sheet && S.sheet.type === 'meal-where') showMealEditor(); return; }
+  S.plans = r.plans;
+  await savePlans();
+  await switchPlan(own.plan.id);
+  S.mealDraft = null;
+  closeSheet();
+  toast(op === 'delete' ? t('Meal deleted') : t('Meal saved'));
+  if (r.orphaned) await dropPlanPhotos(r.orphaned);
 }
 // Photos of meals that no plan holds any more
 async function dropPlanPhotos(mealIds) {
@@ -1154,6 +1184,30 @@ const ACT = {
     await dropPlanPhotos(r.orphaned);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
+  'meal-add': (el) => { S.mealDraft = { name: '', slot: el.dataset.slot, ingredients: [['', '', '']] }; showMealEditor('#md-name'); },
+  'meal-edit': (el) => {
+    const m = MEAL_BY_ID[el.dataset.id];
+    if (!m) return;
+    S.mealDraft = { id: m.id, origName: m.name, name: td(m.name), slot: m.slot, ingredients: m.ingredients.map(([k, g, measure]) => [k, String(g), measure || '']) };
+    showMealEditor('#md-name');
+  },
+  'ing-add': () => { readMealDraft().ingredients.push(['', '', '']); showMealEditor('.ing-row:last-child .ing-food'); },
+  'ing-remove': (el) => { readMealDraft().ingredients.splice(Number(el.dataset.i), 1); showMealEditor(); },
+  'meal-save': () => {
+    readMealDraft();
+    whereOp = 'save';
+    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
+    return commitMeal('save');
+  },
+  'meal-delete': () => {
+    const d = readMealDraft();
+    if (!d || !window.confirm(t('Delete {name}? Logged entries stay.', { name: td(d.name) }))) return;
+    whereOp = 'delete';
+    if (isDefaultActive() && S.plans.length) return openSheet(renderMealWhereSheet(), { type: 'meal-where' });
+    return commitMeal('delete');
+  },
+  'meal-into': (el) => commitMeal(whereOp, el.dataset.id),
+  'meal-back': () => showMealEditor(),
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
   'check-lib': () => { photoTarget = CHECK_PHOTOS; $('#f-lib').click(); },
   'check-photo-remove': (el) => removeCheckPhoto(el.dataset.id),
