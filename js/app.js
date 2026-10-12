@@ -8,10 +8,11 @@ import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
 } from './core.js';
+import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -486,7 +487,7 @@ function zoomFrame(z) {
   if (r && Math.abs(Number(r.value) - frame.zoom) > 0.005) r.value = String(frame.zoom);
 }
 async function openFrame(mealId, file) {
-  if (!MEAL_BY_ID[mealId]) return;
+  if (!mealById(mealId)) return;
   let src;
   try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
   frame = { id: mealId, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
@@ -581,7 +582,7 @@ async function analyzeEntry(id, opts = {}) {
       Object.assign(e, { kind: 'steps', status: 'ok', steps, ...titleFor('steps', { steps }) });
       await saveDay(e.day, { steps });
     } else if (data.kind === 'meal') {
-      const plan = has(MEAL_BY_ID, data.plan) ? MEAL_BY_ID[data.plan] : null;
+      const plan = mealById(data.plan) || null;
       if (plan) {
         Object.assign(e, {
           planId: plan.id, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
@@ -760,6 +761,7 @@ async function importBackup(file) {
 // ——— Loading and rendering ———
 async function load() {
   S.rev++;
+  S.plan = buildPlan(seedPlan); // the shipped plan, until plans are stored
   const stored = await db.kvGet('settings', null);
   S.entries = await db.all('entries');
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
@@ -1038,7 +1040,7 @@ const ACT = {
   'week-prev': () => { S.viewDay = addDays(S.viewDay, -7); render(); },
   'week-next': () => { const d = addDays(S.viewDay, 7); S.viewDay = d > today() ? today() : d; render(); },
   'day-today': () => { S.viewDay = today(); render(); },
-  'log-plan': (el) => { if (S.sheet && S.sheet.type === 'slot') closeSheet(); return logMeal(MEAL_BY_ID[el.dataset.id], 'plan'); },
+  'log-plan': (el) => { if (S.sheet && S.sheet.type === 'slot') closeSheet(); return logMeal(mealById(el.dataset.id), 'plan'); },
   'slot': (el) => openSheet(renderSlotSheet(el.dataset.slot, S.viewDay), { type: 'slot', slot: el.dataset.slot }),
   'slot-camera': () => { closeSheet(); photoTarget = null; $('#f-cam').click(); },
   'compose': () => { closeSheet(); const inp = $('#composer-input'); inp.focus(); },
@@ -1089,7 +1091,7 @@ const ACT = {
   'plan-photo-remove': (el) => removePlanPhoto(el.dataset.id),
   'frame-save': () => saveFrame(),
   'frame-cancel': () => cancelFrame(),
-  'log-plan-today': (el) => { closeSheet(); return logMeal(MEAL_BY_ID[el.dataset.id], 'plan', today()); },
+  'log-plan-today': (el) => { closeSheet(); return logMeal(mealById(el.dataset.id), 'plan', today()); },
   'hint': (el) => {
     const inp = $('#composer-input');
     inp.value = el.dataset.fill;

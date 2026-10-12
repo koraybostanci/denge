@@ -1,7 +1,7 @@
 // State, and the calculations on it. No DOM and no storage, so the maths loads on its own (in node, for tests).
 import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
-import { MEALS, MEAL_BY_ID, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
+import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
 
 export const APP_VERSION = '47'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
@@ -46,7 +46,13 @@ export const S = {
   sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
+  plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
 };
+
+// A meal of the active plan by its id, or undefined (a search of the list, so text from outside cannot find "constructor")
+export const mealById = (id) => S.plan.meals.find((m) => m.id === id);
+// The main meal times (not the late snack) that the active plan has a meal for, in order
+export const mainSlots = () => SLOTS.filter((s) => s.id !== 'late' && S.plan.meals.some((m) => m.slot === s.id));
 
 
 // Call configuration for the selected provider
@@ -313,7 +319,7 @@ export function parseLocal(text) {
     return { type: 'water', ml: Math.round(ml) };
   }
   if (TRAIN_RE.test(t)) return { type: 'train' };
-  const meal = MEALS.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
+  const meal = S.plan.meals.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
   if (meal) return { type: 'plan', meal };
   const flex = FLEX.find((x) => norm(x.name) === t || norm(td(x.name)) === t);
   if (flex) return { type: 'flex', flex };
@@ -345,7 +351,7 @@ export function streak() {
 // The planned meals of the day not logged yet, in order (the late snack is only for when you are hungry)
 export function openSlots(day) {
   const logged = new Set(mealsOf(day).map((e) => e.slot));
-  return SLOTS.filter((s) => s.id !== 'late' && !logged.has(s.id));
+  return mainSlots().filter((s) => !logged.has(s.id));
 }
 
 export function suggest(day) {
@@ -354,13 +360,14 @@ export function suggest(day) {
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
   if (!open.length) {
-    if (remP > 12 && rem >= 90) return { rem, remP, meal: MEAL_BY_ID['N-A'], slot: SLOTS.find((s) => s.id === 'late'), extra: true };
+    const late = S.plan.meals.find((m) => m.slot === 'late');
+    if (late && remP > 12 && rem >= 90) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
     return { rem, remP, meal: null };
   }
   const next = open[0];
-  const minKcal = (id) => Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal));
+  const minKcal = (id) => { const k = S.plan.meals.filter((m) => m.slot === id).map((m) => m.kcal); return k.length ? Math.min(...k) : 0; };
   const reserve = open.slice(1).reduce((a, s) => a + minKcal(s.id), 0);
-  const options = MEALS.filter((m) => m.slot === next.id);
+  const options = S.plan.meals.filter((m) => m.slot === next.id);
   const fit = options.filter((m) => m.kcal <= rem - reserve + 40);
   const pool = fit.length ? fit : options.slice().sort((a, b) => a.kcal - b.kcal).slice(0, 1);
   const meal = pool.slice().sort((a, b) => b.p - a.p)[0];
@@ -429,8 +436,8 @@ export function verdictText(v) {
 export const PACE = { fast: 1.25, slow: 0.7 }; // eaten / planned-by-now: above fast is ahead of the plan, below slow behind it
 // What the plan has spent at each meal time: each main slot spends the average of its options, scaled so the day ends at its budget
 export function planSteps(target) {
-  const steps = SLOTS.filter((x) => x.id !== 'late').map((x) => {
-    const options = MEALS.filter((m) => m.slot === x.id);
+  const steps = mainSlots().map((x) => {
+    const options = S.plan.meals.filter((m) => m.slot === x.id);
     const [h, m] = x.time.split(':').map(Number);
     return { id: x.id, name: x.name, time: x.time, at: h + m / 60, kcal: options.reduce((a, o) => a + o.kcal, 0) / (options.length || 1) };
   });
@@ -489,7 +496,7 @@ export const fmtInt = (n) => Math.round(n).toLocaleString(LOCALE);
 // ——— Generated entry titles ———
 // An entry made by the app keeps its English `title` (the canonical text: backups, the SQL export, favourites and the model read it) and,
 // next to it, `tk: { kind, params }`, from which the screen builds the title in the interface language. Older entries have no `tk`.
-const planItem = (id) => (has(MEAL_BY_ID, id) ? MEAL_BY_ID[id] : FLEX.find((f) => f.id === id));
+const planItem = (id) => mealById(id) || FLEX.find((f) => f.id === id);
 const planName = (id) => { const x = planItem(id); return x ? td(x.name) : null; };
 const TITLES = {
   weight: (p) => t('Weight {kg} kg', { kg: fmtKg(p.kg) }),

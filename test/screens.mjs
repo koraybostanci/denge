@@ -12,7 +12,8 @@ globalThis.Date = class extends RealDate {
 
 export const core = await import('../js/core.js');
 export const views = await import('../js/views.js');
-const { addDays } = await import('../js/plan.js');
+const { addDays, buildPlan } = await import('../js/plan.js');
+const { default: seedPlan } = await import('../js/default-plan.js');
 const { S } = core;
 export const T = core.today();
 export const day = (off) => addDays(T, off);
@@ -26,6 +27,7 @@ export function fixture() {
   S.sheet = null;
   S.calPick = null;
   S.settings = core.freshSettings();
+  S.plan = buildPlan(seedPlan);
   Object.assign(S.settings, { startDate: day(-9), startKg: 87, targetDate: day(78), targetKg: 78, lastBackup: NOW - 3 * 86400000 });
   S.entries = [];
   S.days = {};

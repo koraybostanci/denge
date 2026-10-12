@@ -72,10 +72,10 @@ test('settings: what the app talks to is never taken from a file', () => {
   assert.equal(s.places.length, 1);
 });
 
-test('settings: junk values and unknown plan meals are dropped', () => {
-  const s = cleanSettings({ startKg: '90', targetKg: 1e9, startDate: '"><x>', kcalRest: -1, protein: 135, planPhotos: { 'L-A': 'p1', constructor: 'p2', 'D-A': '"><x' } });
+test('settings: junk values and malformed plan meal ids are dropped', () => {
+  const s = cleanSettings({ startKg: '90', targetKg: 1e9, startDate: '"><x>', kcalRest: -1, protein: 135, planPhotos: { 'L-A': 'p1', 'my meal': 'p2', 'D-A': '"><x', 'X-1': 'p3' } });
   assert.deepEqual(Object.keys(s).sort(), ['planPhotos', 'protein']);
-  assert.deepEqual(s.planPhotos, { 'L-A': 'p1' });
+  assert.deepEqual(s.planPhotos, { 'L-A': 'p1', 'X-1': 'p3' }); // plans are the person's own, so any well-formed meal id is kept
 });
 
 test('a check: ratings, sizes and ids are made safe', () => {
@@ -90,6 +90,8 @@ test('a check: ratings, sizes and ids are made safe', () => {
 test('a photo is always stored as JPEG, and damaged base64 is skipped', () => {
   assert.equal(cleanPhoto({ id: 'p1', type: 'image/svg+xml', w: 10, h: 10, b64: btoa('abc') }).type, 'image/jpeg');
   assert.equal(cleanPhoto({ id: 'p1', b64: '!!!not base64!!!' }), null);
+  assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), plan: 'X-1' }).plan, 'X-1'); // any well-formed meal id: plans are the person's own
+  assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), plan: '"><x' }).plan, undefined);
   const bytes = [0, 1, 2, 250, 251, 255];
   const back = cleanPhoto({ id: 'p', b64: b64FromBuf(new Uint8Array(bytes).buffer) }).buf;
   assert.deepEqual([...new Uint8Array(back)], bytes);

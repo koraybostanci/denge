@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { setLang, applyStatic } from '../js/i18n.js';
 import tr from '../js/tr.js';
-import { parseLocal } from '../js/core.js';
+import { S, parseLocal } from '../js/core.js';
+import { buildPlan } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
 import { extract, literals } from './extract.mjs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
@@ -78,6 +80,7 @@ test('the example chips: each Turkish phrase is understood by the parser the way
   const fills = extract().found.filter((f) => f.fn === 'data-t' && f.file.endsWith('.html')).map((f) => f.key);
   const chips = [...HTML.matchAll(/data-t-fill="([^"]*)"/g)].map((m) => m[1]);
   assert.ok(chips.length >= 6 && chips.every((c) => fills.includes(c)));
+  S.plan = buildPlan(seedPlan); // a chip can name a plan meal
   await setLang('tr');
   for (const en of chips) {
     assert.ok(en in tr, `tr.js has a phrase for the chip "${en}"`);

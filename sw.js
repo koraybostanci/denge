@@ -8,7 +8,7 @@
 const VERSION = 'weightplan-v45'; // weightplan: the app's internal id (APP_ID in js/core.js), not its name
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/core.js', 'js/views.js', 'js/plan.js', 'js/db.js', 'js/ai.js', 'js/exif.js', 'js/export.js', 'js/picture.js', 'js/backup.js', 'js/standalone.js', 'js/i18n.js', 'js/tr.js', 'js/parse-tr.js', 'js/briefs.js', 'js/badges.js', 'js/badge-art.js',
+  'js/app.js', 'js/core.js', 'js/views.js', 'js/plan.js', 'js/default-plan.js', 'js/db.js', 'js/ai.js', 'js/exif.js', 'js/export.js', 'js/picture.js', 'js/backup.js', 'js/standalone.js', 'js/i18n.js', 'js/tr.js', 'js/parse-tr.js', 'js/briefs.js', 'js/badges.js', 'js/badge-art.js',
   'fonts/ibm-plex-sans-latin.woff2', 'fonts/ibm-plex-sans-latin-ext.woff2', 'fonts/ibm-plex-mono-500-latin.woff2', 'fonts/ibm-plex-mono-500-latin-ext.woff2',
   'fonts/space-grotesk-latin.woff2', 'fonts/space-grotesk-latin-ext.woff2',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',

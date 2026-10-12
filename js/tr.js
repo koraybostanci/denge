@@ -121,7 +121,8 @@ export default {
   '{steps} steps': '{steps} adım',
   Photo: 'Fotoğraf',
 
-  // ——— js/plan.js: foods ———
+  // ——— js/default-plan.js: the shipped plan, its foods ———
+  Default: 'Varsayılan',
   'Boiled egg': 'Haşlanmış yumurta',
   'Low-fat white cheese': 'Az yağlı beyaz peynir',
   'Cucumber, tomato, greens': 'Salatalık, domates, yeşillik',
@@ -150,7 +151,7 @@ export default {
   'Oven vegetables (a frozen mix is fine)': 'Fırın sebze (dondurulmuş karışık olur)',
   'Cooked bulgur': 'Pişmiş bulgur',
   'Cooked green lentils or chickpeas': 'Pişmiş yeşil mercimek veya nohut',
-  // js/plan.js: meal templates and amounts
+  // js/default-plan.js: meal templates and amounts
   'Egg and cheese plate': 'Yumurta ve peynir tabağı',
   '2 eggs': '2 yumurta',
   'large bowl': 'büyük kase',

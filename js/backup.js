@@ -2,7 +2,7 @@
 // type and size before it is stored or shown, so a damaged or hostile file cannot break the screens.
 // Pure functions: no DOM and no storage.
 import { T } from './i18n.js';
-import { MEAL_BY_ID, SLOT_NAME, has } from './plan.js';
+import { SLOT_NAME } from './plan.js';
 import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
 import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid } from './core.js';
@@ -110,7 +110,7 @@ export function cleanPhoto(p) {
   let buf;
   try { buf = bufFromB64(p.b64); } catch { return null; }
   const out = { id: p.id, buf, type: 'image/jpeg', w: Math.round(pos(p.w, 10000)), h: Math.round(pos(p.h, 10000)) };
-  if (typeof p.plan === 'string' && has(MEAL_BY_ID, p.plan)) out.plan = p.plan;
+  if (isId(p.plan)) out.plan = p.plan; // a meal id; plans are the person's own data, so only its shape is checked
   return out;
 }
 
@@ -145,7 +145,7 @@ export function cleanSettings(s) {
   }
   if (Array.isArray(s.favorites)) out.favorites = s.favorites.slice(0, 50).map(cleanFavorite).filter(Boolean);
   if (s.planPhotos && typeof s.planPhotos === 'object') {
-    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => has(MEAL_BY_ID, meal) && isId(id)));
+    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => isId(meal) && isId(id)));
   }
   if (s.wins && typeof s.wins === 'object') out.wins = { kilos: Math.round(pos(s.wins.kilos, 1000)), perfect: isDay(s.wins.perfect) ? s.wins.perfect : '' };
   return out;

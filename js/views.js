@@ -2,13 +2,13 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById,
 } from './core.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
 import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
-import { MEALS, SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
+import { SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n0 = fmtInt;
@@ -305,7 +305,7 @@ function daySlots(day) {
 const lateName = () => t('After {time}', { time: SLOTS.find((x) => x.id === 'late').time });
 const slotOptions = (id, entries) => {
   const logged = new Set(entries.map((e) => e.planId));
-  return MEALS.filter((x) => x.slot === id && !(id === 'workout' && logged.has(x.id)));
+  return S.plan.meals.filter((x) => x.slot === id && !(id === 'workout' && logged.has(x.id)));
 };
 
 // The day's meals as one short list: what is logged, what is next (with a one-tap suggestion), what is still open.
@@ -1296,9 +1296,9 @@ function planPic(id, emptyText) {
 
 export function renderPlan() {
   const s = S.settings;
-  const pictured = MEALS.filter((m) => (s.planPhotos || {})[m.id]).length;
+  const pictured = S.plan.meals.filter((m) => (s.planPhotos || {})[m.id]).length;
   const slot = (id, title, time, note) => {
-    const meals = MEALS.filter((m) => m.slot === id);
+    const meals = S.plan.meals.filter((m) => m.slot === id);
     return `<section class="plan-slot">
     <h2>${title}${time ? `<small>${time}</small>` : ''}</h2>${note ? `<p class="note">${note}</p>` : ''}
     <div class="plan-row">${meals.map((m) => `<button type="button" class="plan-card" data-act="plan-meal" data-id="${m.id}" aria-label="${esc(t('{meal}, {kcal} kcal, {p} g protein. Details', { meal: td(m.name), kcal: m.kcal, p: n0(m.p) }))}">
@@ -1312,7 +1312,7 @@ export function renderPlan() {
   const group = (title, body) => `<details class="rule-group"><summary><span>${title}</span></summary><div class="rule-body">${body}</div></details>`;
   return `
   <header class="top">
-    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: MEALS.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
+    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
   <ul class="plan-targets" aria-label="${t('Daily goals')}">
@@ -1342,7 +1342,7 @@ export function renderPlan() {
 
 // Framing a new plan picture: the photo already has the house treatment; the circle shows what will be kept
 export function renderFrameSheet(id) {
-  const m = MEALS.find((x) => x.id === id);
+  const m = mealById(id);
   return `
   <header class="sheet-top"><h2 id="sheet-title">${t('Frame the picture')}</h2><button type="button" class="btn" data-act="frame-cancel">${t('Cancel')}</button></header>
   <p class="note">${t('{meal}. Drag until the plate sits in the circle, zoom until it fills it.', { meal: esc(m ? td(m.name) : '') })}</p>
@@ -1354,7 +1354,7 @@ export function renderFrameSheet(id) {
 
 // One plan meal: its picture, what goes into it, and a button to log it
 export function renderPlanSheet(id) {
-  const m = MEALS.find((x) => x.id === id);
+  const m = mealById(id);
   if (!m) return '';
   const has = !!(S.settings.planPhotos || {})[id];
   return `

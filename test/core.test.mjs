@@ -5,9 +5,14 @@ import {
   S, BAND, proteinFloor, proteinLevel, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
+  parseLocal, mealById,
 } from '../js/core.js';
-import { addDays, diffDays, hhmm, planDigest, planFoods, FOODS, MEALS, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
+import { readFileSync, readdirSync } from 'node:fs';
 
+const SEED = buildPlan(seedPlan);
+S.plan = SEED;
 const T = today();
 const day = (off) => addDays(T, off);
 const reset = () => {
@@ -181,15 +186,79 @@ test('hhmm takes a Date or a timestamp', () => {
 });
 
 test('a food added to the plan without a short name does not put "undefined" in the model digest', () => {
-  FOODS.testfood = { name: 'Test food', v: [1, 1, 1, 1, 1] };
-  MEALS[0].ingredients.push(['testfood', 10]);
-  try {
-    assert.ok(!/undefined/.test(planDigest()));
-    assert.ok(!/undefined/.test(planFoods()));
-  } finally {
-    MEALS[0].ingredients.pop();
-    delete FOODS.testfood;
+  const plan = buildPlan({ ...seedPlan, foods: { ...seedPlan.foods, testfood: { name: 'Test food', v: [1, 1, 1, 1, 1] }, constructor: { name: 'Odd key', v: [1, 1, 1, 1, 1] } },
+    meals: [{ ...seedPlan.meals[0], ingredients: [...seedPlan.meals[0].ingredients, ['testfood', 10], ['constructor', 5]] }, ...seedPlan.meals.slice(1)] });
+  for (const text of [planDigest(plan), planFoods(plan)]) {
+    assert.ok(!/undefined|function/.test(text));
+    assert.match(text, /Test food/); // its own name stands in for the short one
   }
+  assert.ok(!/undefined/.test(planDigest(SEED)));
+  assert.equal(planDigest(buildPlan({ id: 'x', name: '', foods: {}, meals: [] })), '');
+});
+
+test('buildPlan works out the macros from the food table and skips an ingredient whose food is missing', () => {
+  const foods = { a: { name: 'A', v: [100, 10, 20, 5, 2] } };
+  const plan = buildPlan({ id: 'p', name: 'P', foods, meals: [{ id: 'M-1', slot: 'lunch', name: 'M', ingredients: [['a', 150, '1 cup'], ['gone', 100], ['toString', 50]] }] });
+  const m = plan.meals[0];
+  assert.deepEqual([m.kcal, m.p, m.c, m.f, m.fib], [150, 15, 30, 7.5, 3]);
+  assert.deepEqual(m.items, [{ n: 'A', g: 150, measure: '1 cup', kcal: 150, p: 15 }]);
+  assert.deepEqual(m.ingredients, [['a', 150, '1 cup']]);
+  assert.equal(SEED.meals.find((x) => x.id === 'L-A').kcal, 487); // the shipped plan's numbers are unchanged
+});
+
+test('typed text matches only the meals of the active plan', () => {
+  assert.equal(parseLocal('Egg and cheese plate').meal.id, 'L-A');
+  assert.equal(mealById('L-A').name, 'Egg and cheese plate');
+  assert.equal(mealById('constructor'), undefined);
+  S.plan = buildPlan({ id: 'mine', name: 'Mine', foods: seedPlan.foods, meals: [{ id: 'X-1', slot: 'lunch', name: 'Big salad', ingredients: [['salad', 400]] }] });
+  try {
+    assert.equal(parseLocal('Egg and cheese plate'), null);
+    assert.equal(parseLocal('l-a'), null);
+    assert.equal(mealById('L-A'), undefined);
+    assert.equal(parseLocal('big salad').meal.id, 'X-1');
+    assert.equal(parseLocal('x-1').meal.id, 'X-1');
+  } finally { S.plan = SEED; }
+});
+
+test('a plan with an empty slot and no late meal: suggestions and the pace skip what the plan does not have', () => {
+  reset();
+  const meals = seedPlan.meals.filter((m) => m.slot !== 'snack2' && m.slot !== 'late');
+  S.plan = buildPlan({ ...seedPlan, meals });
+  try {
+    assert.deepEqual(openSlots(T).map((s) => s.id), ['lunch', 'snack1', 'dinner']);
+    const s = suggest(T);
+    assert.equal(s.slot.id, 'lunch');
+    assert.ok(Number.isFinite(s.rem) && s.meal);
+    assert.deepEqual(planSteps(1550).map((x) => x.id), ['lunch', 'snack1', 'dinner']);
+    assert.ok(Math.abs(planSteps(1550).reduce((a, x) => a + x.kcal, 0) - 1550) < 1e-6);
+    for (const slot of ['lunch', 'snack1', 'dinner']) meal(T, 100, 5, { slot });
+    const after = suggest(T); // every planned meal logged, protein short, and no late meal to offer
+    assert.equal(after.meal, null);
+    assert.ok(!after.extra);
+    S.plan = buildPlan({ id: 'empty', name: '', foods: {}, meals: [] });
+    reset();
+    assert.deepEqual(openSlots(T), []);
+    assert.deepEqual(planSteps(1550), []);
+    assert.equal(plannedBy(1550, 20), 0);
+    assert.equal(suggest(T).meal, null);
+  } finally { S.plan = SEED; }
+});
+
+test('a slot the plan has no meal for adds nothing to the reserve for the next meal', () => {
+  reset();
+  // A plan whose dinner slot is empty but whose lunch is: the reserve stays a number, so a fitting meal is found
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot === 'lunch' || m.slot === 'snack1') });
+  try {
+    const s = suggest(T);
+    assert.equal(s.slot.id, 'lunch');
+    assert.equal(s.tight, false);
+  } finally { S.plan = SEED; }
+});
+
+test('only js/app.js imports the shipped plan; everything else reads S.plan', () => {
+  const dir = new URL('../js/', import.meta.url);
+  const importers = readdirSync(dir).filter((f) => f.endsWith('.js') && /default-plan\.js['"]/.test(readFileSync(new URL(f, dir), 'utf8')));
+  assert.deepEqual(importers, ['app.js']);
 });
 
 test('fresh settings are those of a new install, as new objects each time', () => {
