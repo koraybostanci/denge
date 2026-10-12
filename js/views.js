@@ -2,7 +2,7 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots,
 } from './core.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
@@ -295,7 +295,9 @@ function daySlots(day) {
   const isToday = day === today();
   const list = [];
   if (has('morning')) list.push({ id: 'morning', name: td(SLOT_NAME.morning), time: '' });
-  SLOTS.filter((x) => x.id !== 'late').forEach((x) => list.push({ id: x.id, name: td(x.name), time: x.time }));
+  // The meal times of the active plan; one the plan has no meal for shows only when something is logged in it
+  const main = new Set(mainSlots().map((x) => x.id));
+  SLOTS.filter((x) => x.id !== 'late' && (main.has(x.id) || has(x.id))).forEach((x) => list.push({ id: x.id, name: td(x.name), time: x.time }));
   if (dd.train || has('workout')) list.push({ id: 'workout', name: t('Workout extras'), time: '', hint: t('Banana before, skyr after') });
   // The late slot only shows once it matters: in the evening, when something is in it, or when skyr would close a protein gap
   const sg = suggest(day);
@@ -319,10 +321,11 @@ function dayList(day) {
   const minutesNow = now.getHours() * 60 + now.getMinutes();
   const rows = [];
   let done = 0;
-  const main = SLOTS.filter((x) => x.id !== 'late').length;
+  const mains = mainSlots();
+  const main = mains.length;
   for (const sl of list) {
     const entries = all.filter((e) => e.slot === sl.id).sort((x, y) => x.ts - y.ts);
-    if (entries.some((e) => e.status === 'ok') && SLOTS.some((x) => x.id === sl.id && x.id !== 'late')) done += 1;
+    if (entries.some((e) => e.status === 'ok') && mains.some((x) => x.id === sl.id)) done += 1;
     for (const e of entries) {
       const ok = e.status === 'ok';
       const v = eff(e);

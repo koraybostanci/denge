@@ -90,8 +90,6 @@ test('generated titles: the English title stays, titleOf translates from tk', as
   assert.deepEqual(w, { title: 'Weight 82.5 kg', tk: { kind: 'weight', params: { kg: 82.5 } } });
   assert.equal(titleFor('steps', { steps: 8200 }).title, '8,200 steps'); // English formats whatever the language is
   assert.equal(titleFor('photo', {}).title, 'Photo');
-  assert.equal(titleFor('plan', { id: 'L-A' }).title, 'Egg and cheese plate');
-  assert.equal(titleFor('plan', { id: 'F-BEER50' }).title, 'Beer 0.5 l');
   assert.deepEqual(TK_KINDS, ['weight', 'steps', 'photo', 'plan']);
   const steps = { title: '8,200 steps', tk: { kind: 'steps', params: { steps: 8200 } } };
   assert.equal(titleOf(steps), '8,200 steps');
@@ -111,6 +109,30 @@ test('generated titles: the English title stays, titleOf translates from tk', as
   assert.equal(titleOf({ title: 'Egg and cheese plate', planId: 'L-A' }), 'Yumurta ve peynir tabağı'); // older entry without tk
   assert.equal(titleOf({ title: 'My own name', planId: 'L-A' }), 'My own name');
   assert.equal(titleFor('steps', { steps: 8200 }).title, '8,200 steps'); // the stored title is English in any language
+});
+
+test('a plan entry keeps its title when the active plan is edited or switched', async () => {
+  const saved = S.plan;
+  try {
+    const e = { title: 'Egg and cheese plate', planId: 'L-A', tk: { kind: 'plan', params: { id: 'L-A' } } };
+    const flex = { title: 'Beer 0.5 l', planId: '', tk: { kind: 'plan', params: { id: 'F-BEER50' } } };
+    const old = { title: 'Egg and cheese plate', planId: 'L-A' }; // an older entry without tk
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    // The meal renamed in the active plan
+    S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.map((m) => (m.id === 'L-A' ? { ...m, name: 'Renamed plate' } : m)) });
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    assert.equal(titleOf(old), 'Egg and cheese plate');
+    // A plan without that meal
+    S.plan = buildPlan({ ...seedPlan, id: 'P-x', name: 'Mine', meals: seedPlan.meals.filter((m) => m.id !== 'L-A') });
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    assert.equal(titleOf(old), 'Egg and cheese plate');
+    assert.equal(titleOf(flex), 'Beer 0.5 l');
+    await setLang('tr');
+    addTr('Egg and cheese plate', 'Yumurta ve peynir tabağı');
+    assert.equal(titleOf(e), 'Yumurta ve peynir tabağı'); // a default name still shows in the interface language
+    assert.equal(titleOf(old), 'Yumurta ve peynir tabağı');
+    assert.equal(titleOf({ title: 'Oat drink bowl', tk: { kind: 'plan', params: { id: 'U-x1' } } }), 'Oat drink bowl'); // a name of the person's own: as written
+  } finally { S.plan = saved; }
 });
 
 test('backup: tk is kept when valid, dropped when not, and old entries still import', () => {

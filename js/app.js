@@ -600,7 +600,7 @@ async function analyzeEntry(id, opts = {}) {
       const plan = mealById(data.plan) || null;
       if (plan) {
         Object.assign(e, {
-          planId: plan.id, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
+          planId: plan.id, title: plan.name, tk: { kind: 'plan', params: { id: plan.id } }, items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
           kcal: plan.kcal, p: plan.p, c: plan.c, f: plan.f, fib: plan.fib, tier: 'plan',
         });
         // A plan meal without a picture takes this photo as its own

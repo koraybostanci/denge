@@ -3,6 +3,9 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyze, review, coach, check, AI_ERRORS, WAITING } from '../js/ai.js';
 import { setLang, inEnglish } from '../js/i18n.js';
+import { S } from '../js/core.js';
+import { buildPlan, planDigest, planFoods } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
 
 const sonnet = { provider: 'anthropic', key: 'sk-ant-secretsecret', model: 'claude-sonnet-5-5' };
 const haiku = { ...sonnet, model: 'claude-haiku-4-5-20251001' };
@@ -146,4 +149,30 @@ test('the line follows the language the person chose, also when the request is m
 test('the vision probe prompt carries no language line', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../js/ai.js', import.meta.url), 'utf8');
   assert.match(src, /system: 'You read numbers from images\.'/);
+});
+
+test('every prompt is built from the active plan at request time, and stays English in Turkish', async () => {
+  const saved = S.plan;
+  // A plan of the person's own: a new food and meal, and no meal at snack 2
+  const mine = buildPlan({ ...seedPlan, id: 'P-abc123', name: 'My plan', foods: { ...seedPlan.foods, u1: { name: 'Oat drink', v: [45, 1, 6.5, 1.5, 0.8] } },
+    meals: [...seedPlan.meals.filter((m) => m.slot !== 'snack2'), { id: 'U-x1', slot: 'lunch', name: 'Oat bowl', ingredients: [['u1', 250]] }] });
+  try {
+    S.plan = buildPlan(seedPlan);
+    for (const [run, body] of Object.values(askers)) { mockFetch(() => reply(200, claudeBody(body))); await run(); }
+    const before = calls.splice(0).map((c) => c.body.system);
+    assert.ok(before.every((x) => !/U-x1|Oat drink/.test(x)));
+    S.plan = mine;
+    for (const [name, [run, body, line]] of Object.entries(askers)) {
+      mockFetch(() => reply(200, claudeBody(body)));
+      await setLang('en');
+      await run();
+      await setLang('tr');
+      await run();
+      const [en, tr] = calls.splice(0).map((c) => c.body.system);
+      assert.equal(tr, en + line, name); // English in Turkish too, with only the language line added
+      assert.ok(en.includes(name === 'check' ? planFoods(mine) : planDigest(mine)), name);
+      assert.match(en, /Oat drink/, name);
+      if (name === 'review' || name === 'coach') assert.match(en, /meals are lunch 12:00, snack 1 14:30, dinner 18:00\./, name); // only the meal times the plan has
+    }
+  } finally { S.plan = saved; await setLang('en'); }
 });

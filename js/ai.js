@@ -1,9 +1,9 @@
 // Model calls. Two routes: Claude (Anthropic Messages API) or any OpenAI-compatible endpoint
 // (Gemini, OpenCode Zen/Go, OpenRouter…). Kept token-lean: small image, short fixed
 // instruction, short JSON output.
-import { planDigest, planFoods, RULES, SLOTS, hhmm } from './plan.js';
+import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
-import { S } from './core.js';
+import { S, mainSlots } from './core.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -28,7 +28,7 @@ conf: 0–1 confidence in the kcal total. q: if something you cannot see (cookin
 Plan meals:
 ${planDigest(S.plan)}`;
 
-// The prompts are English and built once, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
+// The prompts are English and built at each request from the active plan, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
 // Entries keep English food names and titles (the plan and the favourites match on them), so only the question is asked for in Turkish.
 const TURKISH = {
@@ -298,8 +298,8 @@ const FALLBACK_ON = ['server', 'rate', 'no_quota'];
 
 // ——— The day's review: text only, a few hundred tokens ———
 // The prompts are always English, whatever the interface language is
-const REVIEW_SYSTEM = inEnglish(() => `You review one day of a food log for one person on a weight-loss plan, against the plan and the goal. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${SLOTS.filter((x) => x.id !== 'late').map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+const REVIEW_SYSTEM = () => inEnglish(() => `You review one day of a food log for one person on a weight-loss plan, against the plan and the goal. Reply with JSON only, in English.
+The plan: the calorie budget and protein goal given with the day; meals are ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 The calories against the budget are the main goal; protein, fibre and the rest are secondary, so never call a day a miss for those alone. Use only the foods and numbers given; never invent an amount. Name the actual foods. Be supportive and encouraging, like a kind coach reading the numbers: name what went well first, stay concrete, never scold or moralise, and treat a bigger day as one day, not a failure. No medical advice.
@@ -307,7 +307,9 @@ head: one sentence. How did the day go against the plan, and what is the main re
 good: up to 2 things that helped, each naming the food or habit. Empty if there were none.
 cut: up to 2 things that cost the most and what would have reduced them, with the kcal that would save. Empty if nothing needed cutting.
 next: one concrete thing to do tomorrow; for a day still in progress, for the rest of today.
-Every string at most 22 words.`);
+Every string at most 22 words.
+Plan meals:
+${planDigest(S.plan)}`);
 const REVIEW_SHAPE = '\nReturn exactly one JSON object with these keys: {"head":"","good":[""],"cut":[""],"next":""}';
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -326,7 +328,7 @@ const REVIEW_SCHEMA = {
  * @returns {Promise<{data:{head:string,good:string[],cut:string[],next:string}, usage:{in:number,out:number}, model:string}>}
  */
 export async function review(o) {
-  const req = { system: REVIEW_SYSTEM + langLine(), shape: REVIEW_SHAPE, text: o.brief, schema: REVIEW_SCHEMA, json: true, maxTokens: 400 };
+  const req = { system: REVIEW_SYSTEM() + langLine(), shape: REVIEW_SHAPE, text: o.brief, schema: REVIEW_SCHEMA, json: true, maxTokens: 400 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanReview(r.data);
   if (!data.head) throw new AiError('empty', 'The model returned no review');
@@ -343,12 +345,14 @@ export function cleanReview(d) {
 
 // ——— The quick note on the day so far: text only, a few sentences ———
 // The prompts are always English, whatever the interface language is
-const COACH_SYSTEM = inEnglish(() => `You give one person on a weight-loss plan a quick, supportive check-in on their day so far. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${SLOTS.filter((x) => x.id !== 'late').map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+const COACH_SYSTEM = () => inEnglish(() => `You give one person on a weight-loss plan a quick, supportive check-in on their day so far. Reply with JSON only, in English.
+The plan: the calorie budget and protein goal given with the day; meals are ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 note: two or three short sentences, at most 45 words in all. Say how the day is going so far, then what is left of the budget and which macros (protein first, then fibre) are still worth adding, with a concrete food or meal from the plan for the rest of the day. Warm and encouraging, never scolding; if the day is already above budget, be kind and say what to do next without skipping meals.
-The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.`);
+The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.
+Plan meals:
+${planDigest(S.plan)}`);
 const COACH_SHAPE = '\nReturn exactly one JSON object with this key: {"note":""}';
 const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string' } } };
 
@@ -357,7 +361,7 @@ const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['
  * @returns {Promise<{data:{note:string}, usage:{in:number,out:number}, model:string}>}
  */
 export async function coach(o) {
-  const req = { system: COACH_SYSTEM + langLine(), shape: COACH_SHAPE, text: o.brief, schema: COACH_SCHEMA, json: true, maxTokens: 250 };
+  const req = { system: COACH_SYSTEM() + langLine(), shape: COACH_SHAPE, text: o.brief, schema: COACH_SCHEMA, json: true, maxTokens: 250 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanCoach(r.data);
   if (!data.note) throw new AiError('empty', 'The model returned no note');

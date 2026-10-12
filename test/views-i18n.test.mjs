@@ -302,3 +302,17 @@ test('badge sheet: no placeholder is left on screen for any badge, in English or
   assert.equal(views.renderBadgeSheet('constructor'), '');
   assert.ok(BY_ID.days_on);
 });
+
+test('Today: a meal time the active plan has no meal for is not listed, unless something is logged in it', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  assert.match(views.renderToday(), /Snack 2/);
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot !== 'snack2') });
+  const html = views.renderToday();
+  assert.doesNotMatch(html, /Snack 2/);
+  assert.match(html, /<small>2 of 3<\/small>/);
+  S.entries.push(meal(TODAY, 16, 'snack2', 'Apple', 80, 0));
+  assert.match(views.renderToday(), /Snack 2/); // a logged meal is never hidden
+  fixture();
+});

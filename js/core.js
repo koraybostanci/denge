@@ -497,13 +497,11 @@ export const fmtInt = (n) => Math.round(n).toLocaleString(LOCALE);
 // ——— Generated entry titles ———
 // An entry made by the app keeps its English `title` (the canonical text: backups, the SQL export, favourites and the model read it) and,
 // next to it, `tk: { kind, params }`, from which the screen builds the title in the interface language. Older entries have no `tk`.
-const planItem = (id) => mealById(id) || FLEX.find((f) => f.id === id);
-const planName = (id) => { const x = planItem(id); return x ? td(x.name) : null; };
+// A plan or flex meal (`tk` kind 'plan') stores the meal's name as its title and shows that, never the plan's current name.
 const TITLES = {
   weight: (p) => t('Weight {kg} kg', { kg: fmtKg(p.kg) }),
   steps: (p) => t('{steps} steps', { steps: fmtInt(p.steps) }),
   photo: () => t('Photo'),
-  plan: (p) => planName(p.id),
 };
 // What each kind needs in its params to give a sensible title
 const numIn = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
@@ -514,15 +512,15 @@ const TK_VALID = {
   plan: (p) => typeof p.id === 'string',
 };
 export const tkValid = (tk) => !!tk && typeof tk === 'object' && has(TK_VALID, tk.kind) && !!tk.params && typeof tk.params === 'object' && TK_VALID[tk.kind](tk.params);
-export const TK_KINDS = Object.keys(TITLES);
+export const TK_KINDS = Object.keys(TK_VALID);
 // The title of an entry in the interface language; the stored title when there is no known `tk`
 export function titleOf(e) {
   const k = e.tk;
+  // A plan or flex meal (and an older plan entry without tk) shows the name it was logged with, so editing or switching
+  // the plan never changes a past entry; a default meal's English name still shows in the interface language
+  if ((tkValid(k) && k.kind === 'plan') || (typeof e.planId === 'string' && e.planId)) return typeof e.title === 'string' ? td(e.title) : e.title;
   const text = tkValid(k) ? TITLES[k.kind](k.params) : null;
-  if (text) return text;
-  // An older plan entry has no tk: when its title is still the plan item's English name, show that name in the interface language
-  const item = typeof e.planId === 'string' ? planItem(e.planId) : null;
-  return item && item.name === e.title ? td(item.name) : e.title;
+  return text || e.title;
 }
 // { title, tk } for a new generated entry: the English title, built with English formats whatever the language is
 export function titleFor(kind, params) {
