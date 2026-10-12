@@ -174,17 +174,24 @@ export function targetAt(day, s) {
   return s.startKg + ((s.targetKg - s.startKg) * t) / total;
 }
 
-// Short plan summary appended to each analysis request (one line per meal to save tokens)
+// Short plan summary appended to each analysis request (one line per meal to save tokens). SHORT is keyed by the English name of
+// each seed food, so a food renamed in My plan goes by its new name.
 const SHORT = {
-  egg: 'egg', cheese: 'white cheese', salad: 'salad', olives: 'olives', bread: 'whole-wheat bread',
-  oliveOil: 'olive oil', potato: 'boiled potato', tuna: 'tuna', skyr: 'skyr', muesli: 'muesli',
-  soyFlakes: 'soy flakes', banana: 'banana', berries: 'berries', peach: 'peach', walnuts: 'walnuts',
-  crispbread: 'crispbread', hummus: 'hummus', rawVeg: 'raw vegetables', kefir: 'kefir or ayran',
-  almonds: 'almonds', cottage: 'cottage cheese', chicken: 'chicken breast', mince: 'meatballs',
-  beef: 'red meat', salmon: 'salmon', ovenVeg: 'oven vegetables', bulgur: 'bulgur', lentils: 'lentils',
+  'Boiled egg': 'egg', 'Low-fat white cheese': 'white cheese', 'Cucumber, tomato, greens': 'salad', Olives: 'olives',
+  'Whole-wheat or rye bread': 'whole-wheat bread', 'Olive oil': 'olive oil', 'Boiled potato (cooled)': 'boiled potato',
+  'Tuna in water, drained': 'tuna', 'Plain skyr': 'skyr', 'Unsweetened muesli': 'muesli', 'Soy flakes': 'soy flakes',
+  Banana: 'banana', 'Mixed berries': 'berries', 'Peach (or a handful of cherries or grapes)': 'peach', Walnuts: 'walnuts',
+  Crispbread: 'crispbread', Hummus: 'hummus', 'Raw vegetables (pepper, carrot, cucumber)': 'raw vegetables',
+  'Kefir or plain ayran': 'kefir or ayran', 'Raw almonds or hazelnuts': 'almonds', 'Cottage cheese': 'cottage cheese',
+  'Chicken breast (raw weight)': 'chicken breast', 'Lean mince, max 10% fat (raw)': 'meatballs', 'Lean red meat (raw weight)': 'red meat',
+  'Salmon (raw weight)': 'salmon', 'Oven vegetables (a frozen mix is fine)': 'oven vegetables', 'Cooked bulgur': 'bulgur',
+  'Cooked green lentils or chickpeas': 'lentils',
 };
-// A food you add needs no entry in SHORT: it goes by its own name
-const short = (plan, k) => (has(SHORT, k) ? SHORT[k] : has(plan.foods, k) ? plan.foods[k].name : k);
+// Any other food (one you added or renamed) goes by its own name
+const short = (plan, k) => {
+  const name = has(plan.foods, k) ? plan.foods[k].name : k;
+  return has(SHORT, name) ? SHORT[name] : name;
+};
 // The foods the plan is built from, for requests that only need the gist of it
 export const planFoods = (plan) => Array.from(new Set(Object.keys(plan.foods).map((k) => short(plan, k)))).join(', ');
 export function planDigest(plan) {

@@ -918,6 +918,7 @@ export default {
   'Log cleared': 'Günlük temizlendi',
   'Delete My plan? You’ll be back on Default. Your log stays; pictures of meals you added are deleted.': 'Planın silinsin mi? Varsayılan plana dönersin. Günlüğün kalır; eklediğin öğünlerin resimleri silinir.',
   'Saved to My plan. Default is unchanged.': 'Planım’a kaydedildi. Varsayılan değişmedi.',
+  'Your plan changed while you were editing. Open the meal again.': 'Sen düzenlerken planın değişti. Öğünü yeniden aç.',
   'Delete {meal}? Logged entries stay.': 'Silinsin mi: {meal}? Kayıtlı girişler kalır.',
   'Delete {meal}? This creates My plan without it. Default stays as it is.': 'Silinsin mi: {meal}? Bu, onsuz bir Planım oluşturur. Varsayılan olduğu gibi kalır.',
   'reset.word': 'SİL', // the word to type for a factory reset; js/app.js accepts DELETE as well

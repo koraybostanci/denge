@@ -7,7 +7,7 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, planFromDraft, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, startFood, doneFood, dropFood,
@@ -748,7 +748,7 @@ async function importBackup(file) {
     }
     // My plan is replaced by the backup's (a backup with plans but no user plan removes it); an older backup has no plans and leaves them alone
     if (data.plans !== undefined) {
-      const plans = cleanPlans(data.plans);
+      const plans = cleanPlans(data.plans, data.settings && data.settings.activePlan);
       await writePlans(plans.list, plans.active);
     }
     // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
@@ -783,7 +783,7 @@ async function load() {
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
   // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
   // and a meal it no longer has loses its picture.
-  const plans = loadedPlans(await db.kvGet('plans', null), seedPlan);
+  const plans = loadedPlans(await db.kvGet('plans', null), seedPlan, S.settings.activePlan);
   S.plans = plans.record;
   S.plan = buildPlan(activePlan(plans.record));
   if (plans.rewrite) {
@@ -1095,11 +1095,17 @@ function checkDraft() {
   $('[data-act="plan-meal-save"]').disabled = !r.valid;
 }
 const openEditor = (focusSel) => openSheet(renderMealEditor(), { type: 'plan-edit', id: S.draft.meal.id }, focusSel);
-// Every save of the editor: the draft plan with the meal changed (or removed), in one write. A copy of Default becomes My plan
-// and is made active. Says whether My plan was created.
+// Every save of the editor: the stored plan with the draft's meal changed (or removed) and its new or changed foods, in one
+// write. A copy of Default becomes My plan and is made active. Says whether My plan was created; null when the plan changed
+// under the draft (it is dropped and nothing is written).
 async function saveDraft(meal, remove) {
   const first = S.draft.plan.id === 'default';
-  const plan = planFromDraft(S.draft.plan, meal, { remove, newId: 'P-' + db.uid() });
+  const plan = savedPlan(S.plans, S.draft, meal, { remove, newId: 'P-' + db.uid() });
+  if (!plan) {
+    dropDraft();
+    toast(t('Your plan changed while you were editing. Open the meal again.'));
+    return null;
+  }
   await writePlans([plan], plan.id);
   dropDraft();
   return first;
@@ -1279,6 +1285,7 @@ const ACT = {
     if (!r.valid) return;
     el.disabled = true; // no second save while this one is written (typing enables it again)
     const first = await saveDraft(r.meal);
+    if (first === null) { closeSheet(); return render(); }
     openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id });
     render();
     toast(first ? t('Saved to My plan. Default is unchanged.') : t('{title} saved', { title: td(r.meal.name) }));
@@ -1289,7 +1296,7 @@ const ACT = {
     const first = S.draft.plan.id === 'default';
     const name = td(meal.name);
     if (!window.confirm(first ? t('Delete {meal}? This creates My plan without it. Default stays as it is.', { meal: name }) : t('Delete {meal}? Logged entries stay.', { meal: name }))) return;
-    await saveDraft(meal, true);
+    if ((await saveDraft(meal, true)) === null) { closeSheet(); return render(); }
     await setPlanPhotos(S.settings.planPhotos);
     closeSheet();
     render();

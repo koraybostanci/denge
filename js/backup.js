@@ -260,9 +260,27 @@ export function planFromDraft(plan, meal, { remove = false, newId } = {}) {
   return plan.id === 'default' ? { ...plan, id: newId, name: T('My plan'), meals } : { ...plan, meals };
 }
 
-// The plans of a backup file ({ active, list }): the first usable user plan only, cleaned, and the active id when that plan exists
-export function cleanPlans(raw) {
-  const r = plain(raw) ? raw : {};
+// The plan a meal editor save writes, built on the plans stored now (record), not on the draft's copy, so that a write while
+// the editor was open stays: only the draft's meal and the foods it added or changed (against draft.base) are put in. Null, and
+// the save is refused, when the plan the draft started from is gone (My plan replaced or deleted) or a draft of Default would
+// now meet a user plan. The inputs are not changed.
+export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
+  const user = record.list.find((p) => p.id !== 'default');
+  const current = draft.plan.id === 'default' ? (user ? null : record.list[0]) : record.list.find((p) => p.id === draft.plan.id);
+  if (!current) return null;
+  const base = plain(draft.base) ? draft.base : {};
+  const changed = Object.entries(draft.plan.foods).filter(([k, f]) => !Object.hasOwn(base, k) || JSON.stringify(base[k]) !== JSON.stringify(f));
+  const plan = JSON.parse(JSON.stringify(current));
+  return planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...JSON.parse(JSON.stringify(changed))]) }, meal, { remove, newId });
+}
+
+// An earlier build stored (and backed up) the plans as a bare list of user plans, with the active id in settings.activePlan
+const plansShape = (raw, oldActive) => (Array.isArray(raw) ? { active: oldActive, list: raw } : plain(raw) ? raw : {});
+
+// The plans of a backup file ({ active, list }, or the older bare list with oldActive from its settings.activePlan): the first
+// usable user plan only, cleaned, and the active id when that plan exists
+export function cleanPlans(raw, oldActive) {
+  const r = plansShape(raw, oldActive);
   let user = null;
   for (const p of Array.isArray(r.list) ? r.list : []) {
     user = cleanPlan(p).plan;
@@ -288,9 +306,10 @@ export function plansRecord(seed, list, active) {
 export const activePlan = (record) => record.list.find((p) => p.id === record.active) || record.list[0];
 
 // What load makes of the stored record: Default is the seed as shipped, the user plan stays as stored when it is sound
-// (a damaged one is cleaned). rewrite is true when the record on the device differs from that, e.g. after an update changed the seed.
-export function loadedPlans(stored, seed) {
-  const s = plain(stored) ? stored : {};
+// (a damaged one is cleaned). rewrite is true when the record on the device differs from that, e.g. after an update changed the seed
+// or when it is the older bare list of user plans (oldActive is then settings.activePlan).
+export function loadedPlans(stored, seed, oldActive) {
+  const s = plansShape(stored, oldActive);
   const list = Array.isArray(s.list) ? s.list : [];
   let user = null;
   for (const p of list) {

@@ -185,6 +185,16 @@ test('hhmm takes a Date or a timestamp', () => {
   assert.equal(hhmm(new Date(2026, 0, 1, 7, 5).getTime()), '07:05');
 });
 
+test('a seed food renamed in My plan goes by its new name in the digest; one left as it is keeps its short name', () => {
+  const plan = buildPlan({ ...seedPlan, foods: { ...seedPlan.foods, chicken: { name: 'Firm tofu', v: [120, 13, 2, 7, 1] } } });
+  for (const text of [planDigest(plan), planFoods(plan)]) {
+    assert.match(text, /Firm tofu/);
+    assert.ok(!/chicken breast/.test(text));
+    assert.match(text, /boiled potato/);
+  }
+  assert.match(planDigest(plan), /D-E: lentils 250g, Firm tofu 100g/);
+});
+
 test('a food added to the plan without a short name does not put "undefined" in the model digest', () => {
   const plan = buildPlan({ ...seedPlan, foods: { ...seedPlan.foods, testfood: { name: 'Test food', v: [1, 1, 1, 1, 1] }, constructor: { name: 'Odd key', v: [1, 1, 1, 1, 1] } },
     meals: [{ ...seedPlan.meals[0], ingredients: [...seedPlan.meals[0].ingredients, ['testfood', 10], ['constructor', 5]] }, ...seedPlan.meals.slice(1)] });

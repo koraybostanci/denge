@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft } from '../js/backup.js';
+import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft, savedPlan } from '../js/backup.js';
 import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, dropFood, foodUses } from '../js/core.js';
 import seedPlan from '../js/default-plan.js';
 
@@ -86,10 +86,20 @@ test('restore: the first user plan replaces My plan, and active falls back to De
   assert.deepEqual(cleanPlans(null), { active: 'default', list: [] });
 });
 
+test('restore: a backup of the earlier build, with plans as a bare list and the active id in settings.activePlan, brings its plan in', () => {
+  const other = { ...mine(), id: 'P-other', name: 'Other' };
+  const r = cleanPlans([null, 'junk', other, mine()], 'P-other');
+  assert.deepEqual(r, { active: 'P-other', list: [other] });
+  assert.equal(cleanPlans([mine()], 'P-nope').active, 'default');
+  assert.equal(cleanPlans([mine()]).active, 'default');
+  const record = plansRecord(seedPlan, r.list, r.active);
+  assert.equal(activePlan(record).name, 'Other');
+});
+
 test('restore: an older backup without plans leaves the device alone (its app.js path only runs when the file has plans)', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(data\.plans !== undefined\) \{\s*const plans = cleanPlans\(data\.plans\);\s*await writePlans\(plans\.list, plans\.active\);/);
+  assert.match(src, /if \(data\.plans !== undefined\) \{\s*const plans = cleanPlans\(data\.plans, data\.settings && data\.settings\.activePlan\);\s*await writePlans\(plans\.list, plans\.active\);/);
 });
 
 test('load: a stored Default that differs from the seed is rewritten; My plan is kept as it is', () => {
@@ -106,6 +116,16 @@ test('load: a stored Default that differs from the seed is rewritten; My plan is
   // Nothing stored yet: the seed is written; an unknown active id becomes Default
   assert.deepEqual(loadedPlans(null, SEED), { record: { active: 'default', list: [SEED] }, rewrite: true });
   assert.equal(loadedPlans({ active: 'P-zzz', list: [SEED] }, SEED).record.active, 'default');
+});
+
+test('load: the earlier build\'s bare list of user plans is read as My plan (active from settings.activePlan), so its pictures stay', () => {
+  const r = loadedPlans([null, mine()], SEED, 'P-abc123');
+  assert.equal(r.rewrite, true);
+  assert.deepEqual(r.record, { active: 'P-abc123', list: [SEED, mine()] });
+  assert.equal(loadedPlans([mine()], SEED, 'P-other').record.active, 'default');
+  assert.equal(loadedPlans([mine()], SEED).record.active, 'default');
+  // the sweep after the rewrite keeps the picture of the user plan's meal
+  assert.deepEqual(sweepPlanPhotos({ 'U-x1': 'p1' }, { 'U-x1': 'p1' }, r.record), { planPhotos: { 'U-x1': 'p1' }, gone: [] });
 });
 
 test('plan pictures: only meal ids a stored plan holds stay; a photo shared by two meals is kept, an orphan is deleted', () => {
@@ -356,4 +376,48 @@ test('food form: values out of range or not numbers are marked and block Done', 
   }
   assert.deepEqual([read([1, 1, 1, 1, 1], ' ').valid, read([1, 1, 1, 1, 1], ' ').bad.name], [false, false]);
   assert.equal(read([1, 1, 1, 1, 1], 'x'.repeat(61)).bad.name, true);
+});
+
+test('a save after a plans write while the editor was open keeps the newer data: only the meal and the foods the draft changed go in', () => {
+  S.plans = plansRecord(seedPlan, [mine()], 'P-abc123');
+  startDraft('L-A');
+  S.draft.meal.name = 'Edited';
+  startFood('chicken'); doneFood({ name: 'Firm tofu', v: [120, 13, 2, 7, 1] }); dropFood();
+  // meanwhile (a restore) My plan gets another meal and another food value
+  const newer = mine();
+  newer.meals.push({ id: 'U-y2', slot: 'lunch', name: 'Newer', ingredients: [['egg', 50]] });
+  newer.foods.egg = { name: 'Big egg', v: [150, 13, 1, 10, 0] };
+  S.plans = plansRecord(seedPlan, [newer], 'P-abc123');
+  const plan = savedPlan(S.plans, S.draft, readMeal(S.draft.meal).meal);
+  assert.ok(plansRecord(seedPlan, [plan], plan.id));
+  assert.equal(plan.id, 'P-abc123');
+  assert.ok(plan.meals.some((m) => m.id === 'U-y2'));
+  assert.equal(plan.meals.find((m) => m.id === 'L-A').name, 'Edited');
+  assert.equal(plan.foods.egg.name, 'Big egg');
+  assert.equal(plan.foods.chicken.name, 'Firm tofu');
+  assert.equal(S.plans.list[1].meals.find((m) => m.id === 'L-A').name, SEED.meals[0].name); // the stored record is not changed
+  // removing takes out only that meal
+  assert.deepEqual(savedPlan(S.plans, S.draft, S.draft.meal, { remove: true }).meals.map((m) => m.id), newer.meals.filter((m) => m.id !== 'L-A').map((m) => m.id));
+  dropDraft();
+});
+
+test('a save is refused when My plan the draft started from is gone, or a draft of Default would meet a user plan', () => {
+  S.plans = plansRecord(seedPlan, [mine()], 'P-abc123');
+  startDraft('L-A');
+  S.plans = plansRecord(seedPlan, [{ ...mine(), id: 'P-other' }], 'P-other'); // a restore replaced it
+  assert.equal(savedPlan(S.plans, S.draft, S.draft.meal), null);
+  S.plans = plansRecord(seedPlan, [], 'default'); // or My plan was deleted
+  assert.equal(savedPlan(S.plans, S.draft, S.draft.meal), null);
+  dropDraft();
+  startDraft('L-A'); // from Default
+  S.draft.meal.name = 'First';
+  S.plans = plansRecord(seedPlan, [mine()], 'P-abc123');
+  assert.equal(savedPlan(S.plans, S.draft, S.draft.meal, { newId: 'P-new01' }), null);
+  // the first save, with Default the only plan, still makes My plan from Default and the change
+  S.plans = plansRecord(seedPlan, [], 'default');
+  const plan = savedPlan(S.plans, S.draft, S.draft.meal, { newId: 'P-new01' });
+  assert.equal(plan.id, 'P-new01');
+  assert.equal(plan.meals.find((m) => m.id === 'L-A').name, 'First');
+  assert.deepEqual(plan.foods, SEED.foods);
+  dropDraft();
 });
