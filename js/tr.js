@@ -646,8 +646,6 @@ export default {
   'All 5 goals': '5 hedefin hepsi',
 
   // ——— js/views.js: Plan ———
-  '{meal}, {kcal} kcal, {p} g protein. Details': '{meal}, {kcal} kcal, {p} g protein. Ayrıntılar',
-  'Add photo': 'Fotoğraf ekle',
   Plan: 'Plan',
   '{n} of {total} meals show your own photo.': 'Kendi fotoğrafın olan öğün: {n}/{total}.',
   'Tap a meal for its ingredients, and to add a photo of your own plate.': 'Malzemeleri görmek ve kendi tabağının fotoğrafını eklemek için bir öğüne dokun.',
@@ -663,6 +661,8 @@ export default {
   'Workout-day extras': 'Antrenman günü ekstraları',
   'Only on workout days; together about 200 kcal.': 'Sadece antrenman günlerinde; toplam yaklaşık 200 kcal.',
   'Herbal tea by default.': 'Varsayılan olarak bitki çayı.',
+  'No meals here; Today won’t suggest one.': 'Burada öğün yok; Bugün ekranı bir öneri sunmaz.',
+  'Delete My plan': 'Planımı sil',
   'The rules': 'Kurallar',
   'Dinner rotation': 'Akşam yemeği döngüsü',
   'Fish twice and legumes twice a week.': 'Haftada iki kez balık, iki kez baklagil.',
@@ -683,6 +683,7 @@ export default {
   'Remove photo': 'Fotoğrafı kaldır',
   '{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre': '{p} g protein, {c} g karbonhidrat, {f} g yağ, {fib} g lif',
   'Log for today': 'Bugüne kaydet',
+  'Built in, can’t be changed. Switch to My plan to change it.': 'Hazır gelir, değiştirilemez. Değiştirmek için Planım’a geç.',
 
   // ——— js/views.js: Settings ———
   'No backup yet': 'Henüz yedek yok',
@@ -884,6 +885,7 @@ export default {
   'Something is still being analysed. Try again in a moment': 'Bir şey hâlâ analiz ediliyor. Birazdan tekrar dene',
   'Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?': 'Günlüğün temizlensin mi? Bu cihazdan öğünler ve fotoğrafları, tartımlar, adımlar, su, kahve, alınan takviyeler, antrenman günleri, gün değerlendirmeleri ve Kontrol sonuçları silinir. Hedeflerin, favorilerin, kayıtlı yerlerin, planın resimleri, API anahtarın ve kazandığın rozetler kalır. Geri alınamaz. Yedeğin var mı?',
   'Log cleared': 'Günlük temizlendi',
+  'Delete My plan? You’ll be back on Default. Your log stays; pictures of meals you added are deleted.': 'Planın silinsin mi? Varsayılan plana dönersin. Günlüğün kalır; eklediğin öğünlerin resimleri silinir.',
   'reset.word': 'SİL', // the word to type for a factory reset; js/app.js accepts DELETE as well
   'Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.': 'Fabrika ayarlarına sıfırlama: bu cihazdaki her şey silinir: günlüğün ve fotoğrafların, hedeflerin, favorilerin, kayıtlı yerlerin, planın resimleri ve kullanım toplamları. {keyNote} Geri alınamaz. Yedeğin var mı?\n\nDevam etmek için {word} yaz.',
   'Your API key and provider stay.': 'API anahtarın ve sağlayıcın kalır.',

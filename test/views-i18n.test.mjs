@@ -7,7 +7,7 @@ import { setLang, t } from '../js/i18n.js';
 import tr from '../js/tr.js';
 import { MODELS, PRESETS } from '../js/ai.js';
 import { extract, literals } from './extract.mjs';
-import { screens, fixture, core, views, day, at, meal, T as TODAY } from './screens.mjs';
+import { screens, fixture, core, views, day, at, meal, MINE, T as TODAY } from './screens.mjs';
 
 const { S } = core;
 const VIEWS = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
@@ -22,8 +22,8 @@ const ALLOW_WORDS = new Set(['kg', 'kcal', 'mg', 'ml', 'pickle', 'claude', 'engl
 const CODE_WORDS = new Set(['numeric', 'long', 'short', 'future', 'before', 'over', 'top', 'more', 'morning', 'late', 'workout', 'true', 'false', 'decimal', 'start', 'middle',
   'hidden', 'visible', 'span', 'pointermove', 'pointerdown', 'pointerleave', 'conjunction', 'going', 'target', 'min', 'near', 'disabled', 'selected', 'checked', 'open',
   'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned']);
-// A class name or a piece of one: is-done, cal-d, day-${st}, pill-good, log-plan
-const CLASS_NAME = /^(?:is|pill|day|cal|log|way)-[a-z0-9\0-]*$/;
+// A class name or a piece of one, or an action name: is-done, cal-d, day-${st}, pill-good, log-plan, plan-meal
+const CLASS_NAME = /^(?:is|pill|day|cal|log|way|plan)-[a-z0-9\0-]*$/;
 // An attribute whose value a person reads
 const TEXT_ATTR = /\s(?:aria-label|title|placeholder|alt)="([^"]*)"/g;
 // The English-looking words of a piece of text: 3 letters or more, not a unit or brand, not part of a name like is-done, a:b or a/b
@@ -120,7 +120,7 @@ async function pseudoOn() {
 // What is allowed to stay as it is in the pseudo-locale, and why:
 const EXCEPT = {
   // Text the person typed, or the model wrote, in the fixtures (shown as written; user data is never translated)
-  data: ['Oats with yoghurt', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
+  data: ['Oats with yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
   // Names from ai.js that are not marked with T() yet (the models and providers of the Settings sheet): brand names with a few English words
   models: [...Object.values(MODELS).map((m) => m.name), ...PRESETS.map((p) => p.name), ...Object.values(MODELS).map((m) => m.name.split(' (')[0]), ...PRESETS.map((p) => p.name.split(' (')[0])],
   // Words that are not English text: units, brand names, the two language names, and the host part of a placeholder
@@ -315,4 +315,50 @@ test('Today: a meal time the active plan has no meal for is not listed, unless s
   S.entries.push(meal(TODAY, 16, 'snack2', 'Apple', 80, 0));
   assert.match(views.renderToday(), /Snack 2/); // a logged meal is never hidden
   fixture();
+});
+
+test('Plan: the switch, Delete My plan, the empty slot and what only Default shows', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  S.tab = 'plan';
+  const only = views.renderPlan(); // (a) only Default
+  S.plans = { active: MINE.id, list: [seedPlan, MINE] };
+  S.plan = buildPlan(MINE);
+  const mine = views.renderPlan(); // (b) My plan active, Snack 2 empty
+  const slotWorkout = views.renderSlotSheet('workout', TODAY);
+  const mineSheet = views.renderPlanSheet('L-A');
+  S.plans = { active: 'default', list: [seedPlan, MINE] };
+  S.plan = buildPlan(seedPlan);
+  const both = views.renderPlan(); // (c) Default active while My plan exists
+  const defSheet = views.renderPlanSheet('L-A');
+  const sw = /class="seg plan-switch"/;
+  assert.doesNotMatch(only, sw);
+  assert.match(mine, sw);
+  assert.match(both, sw);
+  assert.match(mine, /data-id="P-mine01" aria-pressed="true">My plan</);
+  assert.match(both, /data-id="default" aria-pressed="true">Default</);
+  const del = /data-act="plan-delete"/;
+  assert.doesNotMatch(only, del);
+  assert.match(mine, del);
+  assert.doesNotMatch(both, del);
+  assert.ok(mine.indexOf('data-act="plan-delete"') < mine.indexOf('class="plan-rules"'));
+  const empty = /class="plan-empty">No meals here; Today won’t suggest one.</;
+  assert.match(mine, empty);
+  assert.doesNotMatch(only, empty);
+  // Rows open the plan meal sheet; the notes and the dinner rotation show only on Default
+  assert.match(only, /<li class="meal"><button type="button" class="meal-main" data-act="plan-meal" data-id="L-A">/);
+  assert.doesNotMatch(only, /plan-card|plan-row/);
+  for (const x of ['The first meal of the day.', 'Herbal tea by default.', 'Dinner rotation']) {
+    assert.ok(only.includes(x) && both.includes(x), x);
+    assert.ok(!mine.includes(x), x);
+  }
+  assert.doesNotMatch(slotWorkout, /Banana before, skyr after/); // the Today hints describe Default's meals
+  assert.match(views.renderSlotSheet('workout', TODAY), /Banana before, skyr after/);
+  // The read-only note: only on Default while My plan exists
+  const note = 'Built in, can’t be changed. Switch to My plan to change it.';
+  assert.ok(defSheet.includes(note));
+  assert.ok(!mineSheet.includes(note));
+  fixture();
+  assert.ok(!views.renderPlanSheet('L-A').includes(note));
 });

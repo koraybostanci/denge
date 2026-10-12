@@ -612,9 +612,10 @@ button.cal-d::before, button.cal-wk::before { content: ""; position: absolute; i
 #view > .plan-slot { margin-top: 24px; }
 .plan-slot h2 small { margin-left: 8px; font: 500 12px var(--mono); color: var(--ink2); }
 .plan-slot .note { margin-top: 2px; }
-.plan-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
-.plan-card { display: grid; align-content: start; gap: 2px; width: 100%; min-width: 0; padding: 0 0 10px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); text-align: left; overflow: hidden; transition: transform .12s ease; }
-.plan-card:active { transform: scale(.98); }
+.plan-switch { margin-top: 12px; }
+.plan-slot-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.plan-empty { margin-top: 8px; padding: 12px 14px; border: 1px dashed var(--edge); border-radius: var(--r-card); color: var(--ink3); font-size: 13.5px; line-height: 1.3; }
+.plan-delete { margin-top: 20px; }
 .plan-pic { position: relative; display: block; aspect-ratio: 1; background: var(--table); overflow: hidden; border-bottom: 1px solid var(--line); }
 /* The house format: every picture is a round plate with the same rim, on the same table */
 .plan-pic img { position: absolute; top: 50%; left: 50%; height: 84%; width: auto; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px var(--rim), 0 4px 10px -4px rgb(0 0 0 / .25); }
@@ -623,15 +624,6 @@ button.cal-d::before, button.cal-wk::before { content: ""; position: absolute; i
 .plan-pic-empty { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink2); text-align: center; padding: 0 16px; }
 .plan-pic-empty svg { width: 44px; height: 44px; fill: none; stroke: currentColor; stroke-width: 1.5; opacity: .7; }
 .plan-pic-empty em { font-style: normal; font-size: 12.5px; }
-.plan-card .plan-pic { aspect-ratio: 2 / 1; }
-.plan-card .plan-pic img { box-shadow: 0 0 0 2px var(--rim), 0 3px 8px -4px rgb(0 0 0 / .25); }
-.plan-card .plan-pic-empty { gap: 4px; padding: 0 8px; }
-.plan-card .plan-pic-empty svg { width: 34px; height: 34px; }
-.plan-card .plan-pic-empty em { font-size: 12px; }
-.plan-name { padding: 8px 10px 0; font: 600 14px/1.25 var(--txt); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; min-height: calc(2.5em + 8px); }
-.plan-meta { padding: 0 10px; font: 500 12px var(--txt); color: var(--ink2); }
-.plan-meta b { font: 600 13px var(--mono); color: var(--ink); }
-.plan-meta > span { white-space: nowrap; }
 .plan-photo { margin-top: 4px; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; }
 .plan-photo .plan-pic { aspect-ratio: 3 / 2; border-bottom: 0; }
 .plan-photo .plan-pic img { height: 88%; box-shadow: 0 0 0 4px var(--rim), 0 6px 14px -6px rgb(0 0 0 / .25); }
@@ -861,7 +853,7 @@ body.sheet-open .toast { bottom: auto; top: calc(var(--sat) + 12px); }
   button.tile, .tile-main, .day b, .chip, .btn, .meal-main { transition: none; }
   .toast-mark { animation: none; }
   .spin { animation: none; border-top-color: var(--line); border-right-color: var(--ink); }
-  .toggle i, .toggle i::after, .setting summary::after, .rule-group summary::after, .review-ai summary::after, .coach-ai summary::after, .table-details summary::after, .plan-card { transition: none; }
+  .toggle i, .toggle i::after, .setting summary::after, .rule-group summary::after, .review-ai summary::after, .coach-ai summary::after, .table-details summary::after { transition: none; }
 }
 @media (max-width: 350px) {
   .week ol { gap: 4px; }
@@ -869,9 +861,6 @@ body.sheet-open .toast { bottom: auto; top: calc(var(--sat) + 12px); }
   .day b { height: 36px; font-size: 14px; }
   .budget-big b { font-size: 42px; }
   .budget-key { flex-wrap: wrap; gap: 0 10px; }
-  .plan-name { -webkit-line-clamp: 3; line-clamp: 3; min-height: calc(3.75em + 8px); }
-  .plan-meta { font-size: 11px; }
-  .plan-meta b { font-size: 12px; }
   .tile-val b { font-size: 22px; }
   .tile { padding: 10px 11px; }
   .tile-main { padding: 10px 11px; }

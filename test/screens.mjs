@@ -21,12 +21,17 @@ export const at = (d, h) => RealDate.parse(`${d}T${String(h).padStart(2, '0')}:0
 let n = 0;
 export const meal = (d, h, slot, title, kcal, p, extra = {}) => ({ id: `m${n++}`, day: d, ts: at(d, h), createdAt: at(d, h), kind: 'meal', status: 'ok', slot, title, kcal, p, c: 30, f: 12, fib: 5, mult: 1, tier: 'plan', flags: [], items: [], ...extra });
 
+// A plan of the person's own: Default's meals without Snack 2, and one meal they added
+export const MINE = { id: 'P-mine01', name: 'My plan', foods: seedPlan.foods,
+  meals: [...seedPlan.meals.filter((m) => m.slot !== 'snack2'), { id: 'U-oats', slot: 'lunch', name: 'Overnight oats', ingredients: [['muesli', 50], ['skyr', 150]] }] };
+
 export function fixture() {
   S.tab = 'today';
   S.viewDay = T;
   S.sheet = null;
   S.calPick = null;
   S.settings = core.freshSettings();
+  S.plans = { active: 'default', list: [seedPlan] };
   S.plan = buildPlan(seedPlan);
   Object.assign(S.settings, { startDate: day(-9), startKg: 87, targetDate: day(78), targetKg: 78, lastBackup: NOW - 3 * 86400000 });
   S.entries = [];
@@ -82,6 +87,16 @@ export function screens() {
   add('slot-sheet', () => views.renderSlotSheet('lunch', T));
   add('plan-sheet', () => views.renderPlanSheet('L-A'));
   add('frame-sheet', () => views.renderFrameSheet('L-A'));
+  // With a plan of the person's own: active (Snack 2 has no meals), then Default active while it exists
+  S.tab = 'plan';
+  S.plans = { active: MINE.id, list: [seedPlan, MINE] };
+  S.plan = buildPlan(MINE);
+  add('plan-mine', views.renderPlan);
+  S.plans = { active: 'default', list: [seedPlan, MINE] };
+  S.plan = buildPlan(seedPlan);
+  add('plan-default-mine', views.renderPlan);
+  add('plan-sheet-default-mine', () => views.renderPlanSheet('L-A'));
+  S.plans = { active: 'default', list: [seedPlan] };
   // A day a little over its budget with nothing else to note: the one note holds a comma, which the English list joins with "and"
   S.entries.find((x) => x.day === day(-1) && x.slot === 'lunch').p += 10;
   S.tab = 'progress';

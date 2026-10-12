@@ -1106,6 +1106,18 @@ const ACT = {
     return wearPart(el.dataset.part);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
+  // Plan: which plan is active, and deleting My plan (the log stays; pictures of meals no plan holds go)
+  'plan-use': async (el) => {
+    if (el.dataset.id === S.plans.active) return;
+    await writePlans(S.plans.list, el.dataset.id);
+    render();
+  },
+  'plan-delete': async () => {
+    if (!window.confirm(t('Delete My plan? You’ll be back on Default. Your log stays; pictures of meals you added are deleted.'))) return;
+    await writePlans(S.plans.list.filter((p) => p.id === 'default'), 'default');
+    await setPlanPhotos(S.settings.planPhotos);
+    render();
+  },
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
   'check-lib': () => { photoTarget = CHECK_PHOTOS; $('#f-lib').click(); },
   'check-photo-remove': (el) => removeCheckPhoto(el.dataset.id),

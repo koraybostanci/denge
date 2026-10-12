@@ -287,6 +287,10 @@ const multLabel = (m) => ({ 0.5: '½', 1.5: '1½', 2: '2' }[m] || String(m));
 
 const chip = (m, act = 'log-plan') => `<button type="button" class="chip" data-act="${act}" data-id="${m.id}">${esc(td(m.name))} <span>${m.kcal}</span></button>`;
 
+// The stored plans: whether the person has a plan of their own, and whether Default is the active one
+const hasMyPlan = () => !!(S.plans && S.plans.list.length > 1);
+const onDefault = () => !S.plans || S.plans.active === 'default';
+
 // Which slots a day shows, and what the plan offers in each
 function daySlots(day) {
   const dd = S.days[day] || {};
@@ -298,10 +302,11 @@ function daySlots(day) {
   // The meal times of the active plan; one the plan has no meal for shows only when something is logged in it
   const main = new Set(mainSlots().map((x) => x.id));
   SLOTS.filter((x) => x.id !== 'late' && (main.has(x.id) || has(x.id))).forEach((x) => list.push({ id: x.id, name: td(x.name), time: x.time }));
-  if (dd.train || has('workout')) list.push({ id: 'workout', name: t('Workout extras'), time: '', hint: t('Banana before, skyr after') });
+  // The hints describe Default's meals, so they show only while Default is active
+  if (dd.train || has('workout')) list.push({ id: 'workout', name: t('Workout extras'), time: '', hint: onDefault() ? t('Banana before, skyr after') : '' });
   // The late slot only shows once it matters: in the evening, when something is in it, or when skyr would close a protein gap
   const sg = suggest(day);
-  if (has('late') || (isToday && (new Date().getHours() >= 19 || sg.extra))) list.push({ id: 'late', name: lateName(), time: SLOTS.find((x) => x.id === 'late').time, hint: t('Herbal tea; skyr if very hungry') });
+  if (has('late') || (isToday && (new Date().getHours() >= 19 || sg.extra))) list.push({ id: 'late', name: lateName(), time: SLOTS.find((x) => x.id === 'late').time, hint: onDefault() ? t('Herbal tea; skyr if very hungry') : '' });
   return { list, all, sg, isToday };
 }
 const lateName = () => t('After {time}', { time: SLOTS.find((x) => x.id === 'late').time });
@@ -359,6 +364,18 @@ function dayList(day) {
     <ul class="meal-list">${rows.join('')}</ul></section>`;
 }
 
+// A plan meal's round thumbnail: its framed picture, or the empty plate
+function mealThumb(m) {
+  const pid = (S.settings.planPhotos || {})[m.id];
+  return pid ? `<span class="meal-thumb"><img data-photo="${esc(pid)}" alt=""></span>` : `<span class="meal-thumb is-empty">${PLATE}</span>`;
+}
+// One plan meal as a row (slot sheet and Plan tab): the thumbnail, the name with an optional tag, protein, and kcal on the right
+const mealRow = (m, act, thumb, tag = '') => `<li class="meal"><button type="button" class="meal-main" data-act="${act}" data-id="${m.id}">
+      ${thumb}
+      <span class="meal-text"><b>${esc(td(m.name))}${tag}</b><span>${t('{n} g protein', { n: n0(m.p) })}</span></span>
+      <span class="meal-kcal"><b>${m.kcal}</b> kcal</span>
+    </button></li>`;
+
 // The options for one meal, in a bottom sheet
 export function renderSlotSheet(slotId, day) {
   const { list, all, sg, isToday } = daySlots(day);
@@ -368,15 +385,10 @@ export function renderSlotSheet(slotId, day) {
   const ordered = options.slice().sort((a, b) => (a.id === suggested ? -1 : b.id === suggested ? 1 : 0));
   const pics = S.settings.planPhotos || {};
   const anyPic = options.some((m) => pics[m.id]); // thumbnails only when there is at least one to show
-  const thumb = (m) => (!anyPic ? '' : pics[m.id] ? `<span class="meal-thumb"><img data-photo="${esc(pics[m.id])}" alt=""></span>` : `<span class="meal-thumb is-empty">${PLATE}</span>`);
   return `
   <header class="sheet-top"><h2 id="sheet-title">${sl.name}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
   <p class="note">${sl.hint ? sl.hint + '. ' : ''}${isToday ? t('Tap what you are having.') : t('Tap what you had.')}</p>
-  <ul class="meal-list option-list">${ordered.map((m) => `<li class="meal"><button type="button" class="meal-main" data-act="log-plan" data-id="${m.id}">
-      ${thumb(m)}
-      <span class="meal-text"><b>${esc(td(m.name))}${m.id === suggested ? `<small>${t('suggested')}</small>` : ''}</b><span>${t('{n} g protein', { n: n0(m.p) })}</span></span>
-      <span class="meal-kcal"><b>${m.kcal}</b> kcal</span>
-    </button></li>`).join('')}</ul>
+  <ul class="meal-list option-list">${ordered.map((m) => mealRow(m, 'log-plan', anyPic ? mealThumb(m) : '', m.id === suggested ? `<small>${t('suggested')}</small>` : '')).join('')}</ul>
   ${isToday ? `<p class="note">${t('Something that is not on the plan:')}</p>
   <div class="actions"><button type="button" class="btn" data-act="slot-camera">${t('Take a photo')}</button><button type="button" class="btn" data-act="compose">${t('Type it')}</button></div>` : ''}`;
 }
@@ -1300,17 +1312,15 @@ function planPic(id, emptyText) {
 export function renderPlan() {
   const s = S.settings;
   const pictured = S.plan.meals.filter((m) => (s.planPhotos || {})[m.id]).length;
+  const def = onDefault(); // the slot notes and the dinner rotation describe Default, so they show only on it
   const slot = (id, title, time, note) => {
     const meals = S.plan.meals.filter((m) => m.slot === id);
     return `<section class="plan-slot">
-    <h2>${title}${time ? `<small>${time}</small>` : ''}</h2>${note ? `<p class="note">${note}</p>` : ''}
-    <div class="plan-row">${meals.map((m) => `<button type="button" class="plan-card" data-act="plan-meal" data-id="${m.id}" aria-label="${esc(t('{meal}, {kcal} kcal, {p} g protein. Details', { meal: td(m.name), kcal: m.kcal, p: n0(m.p) }))}">
-        ${planPic(m.id, t('Add photo'))}
-        <span class="plan-name">${esc(td(m.name))}</span>
-        <span class="plan-meta"><span><b>${m.kcal}</b> kcal</span> · <span>${t('{n} g protein', { n: n0(m.p) })}</span></span>
-      </button>`).join('')}</div>
+    <div class="plan-slot-head"><h2>${title}${time ? `<small>${time}</small>` : ''}</h2></div>${def && note ? `<p class="note">${note}</p>` : ''}
+    ${meals.length ? `<ul class="meal-list">${meals.map((m) => mealRow(m, 'plan-meal', mealThumb(m))).join('')}</ul>` : `<p class="plan-empty">${t('No meals here; Today won’t suggest one.')}</p>`}
   </section>`;
   };
+  const sw = hasMyPlan() ? `<div class="seg plan-switch" role="group" aria-label="${t('Plan')}">${S.plans.list.map((p) => `<button type="button" data-act="plan-use" data-id="${esc(p.id)}" aria-pressed="${p.id === S.plans.active}">${esc(td(p.name))}</button>`).join('')}</div>` : '';
   const list = (items) => `<ul class="rules">${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
   const group = (title, body) => `<details class="rule-group"><summary><span>${title}</span></summary><div class="rule-body">${body}</div></details>`;
   return `
@@ -1318,6 +1328,7 @@ export function renderPlan() {
     <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
+  ${sw}
   <ul class="plan-targets" aria-label="${t('Daily goals')}">
     <li>${t('Rest day <b>{kcal}</b> kcal', { kcal: n0(s.kcalRest) })}</li>
     <li>${t('Workout day <b>{kcal}</b> kcal', { kcal: n0(s.kcalTrain) })}</li>
@@ -1332,9 +1343,10 @@ export function renderPlan() {
   }).map(([id, note]) => { const x = SLOTS.find((y) => y.id === id); return slot(id, td(x.name), x.time, note); }).join('')}
   ${slot('workout', t('Workout-day extras'), '', t('Only on workout days; together about 200 kcal.'))}
   ${slot('late', lateName(), '', t('Herbal tea by default.'))}
+  ${def ? '' : `<p class="plan-delete"><button type="button" class="link link-danger" data-act="plan-delete">${t('Delete My plan')}</button></p>`}
   <section class="plan-rules">
     <h2>${t('The rules')}</h2>
-    ${group(t('Dinner rotation'), `<p class="note">${t('Fish twice and legumes twice a week.')}</p><table class="table"><tbody>${RULES.rotation.map(([day, meal]) => `<tr><th scope="row">${day}</th><td>${esc(meal)}</td></tr>`).join('')}</tbody></table>`)}
+    ${def ? group(t('Dinner rotation'), `<p class="note">${t('Fish twice and legumes twice a week.')}</p><table class="table"><tbody>${RULES.rotation.map(([day, meal]) => `<tr><th scope="row">${day}</th><td>${esc(meal)}</td></tr>`).join('')}</tbody></table>`) : ''}
     ${group(t('Every day'), list(RULES.daily))}
     ${group(t('The week’s extras'), list(RULES.weekly))}
     ${group(t('Off for the whole period'), list(RULES.off))}
@@ -1361,7 +1373,8 @@ export function renderPlanSheet(id) {
   if (!m) return '';
   const has = !!(S.settings.planPhotos || {})[id];
   return `
-  <header class="sheet-top"><h2 id="sheet-title">${esc(td(m.name))}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
+  <header class="sheet-top"><h2 id="sheet-title">${esc(td(m.name))}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>${hasMyPlan() && onDefault() ? `
+  <p class="note">${t('Built in, can’t be changed. Switch to My plan to change it.')}</p>` : ''}
   <div class="plan-photo">${planPic(id, t('No photo yet. Take one the next time you make this.'))}</div>
   <div class="actions">
     <button type="button" class="btn" data-act="plan-photo-cam" data-id="${id}">${has ? t('Retake') : t('Take a photo')}</button>
