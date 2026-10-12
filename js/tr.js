@@ -123,6 +123,7 @@ export default {
 
   // ——— js/default-plan.js: the shipped plan, its foods ———
   Default: 'Varsayılan',
+  'My plan': 'Planım',
   'Boiled egg': 'Haşlanmış yumurta',
   'Low-fat white cheese': 'Az yağlı beyaz peynir',
   'Cucumber, tomato, greens': 'Salatalık, domates, yeşillik',
@@ -810,6 +811,7 @@ export default {
   'A check takes up to {n} photos': 'Bir kontrol en fazla {n} fotoğraf alır',
   'Nothing to judge was found. Try a closer or sharper photo.': 'Değerlendirilecek bir şey bulunamadı. Daha yakın veya daha net bir fotoğraf dene.',
   'Could not save the picture': 'Resim kaydedilemedi',
+  'The plan has a value outside the limits': 'Planda sınırların dışında bir değer var',
   'Picture saved': 'Resim kaydedildi',
   'Nothing to log was found in that, so the entry is unchanged.': 'Bunda kaydedilecek bir şey bulunamadı, kayıt değişmedi.',
   'Nothing to log was found: no food, weight or step count.': 'Kaydedilecek bir şey bulunamadı: yemek, kilo ya da adım sayısı yok.',

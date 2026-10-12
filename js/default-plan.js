@@ -35,6 +35,7 @@ const foods = {
 };
 
 // ingredients: [food, grams, optional household measure]
+// Meal ids stay stable: pictures and logged entries refer to them. A retired meal id is never reused.
 const meals = [
   // Lunch
   { id: 'L-A', slot: 'lunch', name: T('Egg and cheese plate'),

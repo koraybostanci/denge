@@ -46,6 +46,7 @@ export const S = {
   sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
+  plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
 };
 

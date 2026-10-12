@@ -7,7 +7,7 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
@@ -24,6 +24,29 @@ async function saveSettings() { S.rev++; rememberLang(S.settings.lang); await db
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
   try { await setLang(lang); applyStatic(); return true; } catch { toast(t('Could not load that language. Try again when you are online.')); return false; }
+}
+// The one way plans are written: Default always from the seed, the user plan only as cleanPlan passes it unchanged (else it
+// throws and nothing is written). The record is built from the arguments before anything waits, and stored in one write.
+export async function writePlans(list, active) {
+  const record = plansRecord(seedPlan, list, active);
+  if (!record) throw new Error(t('The plan has a value outside the limits'));
+  await db.kvSet('plans', record);
+  S.plans = record;
+  S.plan = buildPlan(activePlan(record));
+  S.rev++;
+  return record;
+}
+// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo that
+// no picture refers to any more is deleted
+export async function setPlanPhotos(next) {
+  const { planPhotos, gone } = sweepPlanPhotos(S.settings.planPhotos, next, S.plans || plansRecord(seedPlan, [], 'default'));
+  S.settings.planPhotos = planPhotos;
+  await saveSettings();
+  for (const id of gone) {
+    await db.del('photos', id);
+    const u = S.urls.get(id);
+    if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  }
 }
 async function saveDay(day, patch) {
   const d = { ...(S.days[day] || { day }), ...patch };
@@ -454,12 +477,9 @@ async function logCheckOption(id, i) {
 // ——— Pictures of the plan's meals: the person's own photos, kept apart from the log ———
 let photoTarget = null; // the plan meal waiting for the photo picker, if any
 async function storePlanPhoto(mealId, blob, w, h) {
-  const old = (S.settings.planPhotos || {})[mealId];
   const id = db.uid();
   await db.put('photos', { id, buf: await blob.arrayBuffer(), type: 'image/jpeg', w, h, plan: mealId });
-  S.settings.planPhotos = { ...(S.settings.planPhotos || {}), [mealId]: id };
-  await saveSettings();
-  if (old) { await db.del('photos', old); const u = S.urls.get(old); if (u) { URL.revokeObjectURL(u); S.urls.delete(old); } }
+  await setPlanPhotos({ ...(S.settings.planPhotos || {}), [mealId]: id }); // the picture it replaces goes, unless another meal shares it
 }
 // Framing step: the photo is opened with the house treatment applied, the person centres the plate in the
 // circle, and only that square is stored. The original never touches the database.
@@ -535,14 +555,9 @@ function cancelFrame() {
   hydratePhotos();
 }
 async function removePlanPhoto(mealId) {
-  const id = (S.settings.planPhotos || {})[mealId];
-  if (!id) return;
+  if (!(S.settings.planPhotos || {})[mealId]) return;
   const { [mealId]: gone, ...rest } = S.settings.planPhotos;
-  S.settings.planPhotos = rest;
-  await saveSettings();
-  await db.del('photos', id);
-  const u = S.urls.get(id);
-  if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  await setPlanPhotos(rest);
   render();
 }
 
@@ -675,7 +690,9 @@ async function deliverFile(name, content, type) {
 
 async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges };
+  // The user plan travels with the backup; Default is the app's own and never does
+  const plans = { active: S.plans.active, list: S.plans.list.filter((p) => p.id !== 'default') };
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans };
   // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
   // They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
@@ -720,22 +737,22 @@ async function importBackup(file) {
     restored = entries.length;
     await db.putMany('entries', entries);
     await db.putMany('days', (Array.isArray(data.days) ? data.days : []).map(cleanDay).filter(Boolean));
+    let pictures = S.settings.planPhotos || {};
     if (data.settings && typeof data.settings === 'object') {
-      const before = Object.values(S.settings.planPhotos || {});
-      const incoming = cleanSettings(data.settings);
-      if (incoming.planPhotos) incoming.planPhotos = { ...(S.settings.planPhotos || {}), ...incoming.planPhotos }; // pictures are added to, not replaced
+      const { planPhotos, ...incoming } = cleanSettings(data.settings);
+      if (planPhotos) pictures = { ...pictures, ...planPhotos }; // pictures are added to, not replaced
       S.settings = { ...S.settings, ...incoming };
       if (S.settings.kcalMinDay > S.settings.kcalRest) S.settings.kcalMinDay = DEFAULTS.kcalMinDay; // a restore never leaves a minimum no day can reach
       await applyLang(S.settings.lang);
       await saveSettings();
-      // A plan picture that the backup replaces is no longer referred to by anything
-      const now = new Set(Object.values(S.settings.planPhotos || {}));
-      for (const id of before.filter((x) => !now.has(x))) {
-        await db.del('photos', id);
-        const u = S.urls.get(id);
-        if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
-      }
     }
+    // My plan is replaced by the backup's (a backup with plans but no user plan removes it); an older backup has no plans and leaves them alone
+    if (data.plans !== undefined) {
+      const plans = cleanPlans(data.plans);
+      await writePlans(plans.list, plans.active);
+    }
+    // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
+    await setPlanPhotos(pictures);
     if (Array.isArray(data.checks)) {
       const have = new Set(S.checks.map((c) => c.id));
       const added = data.checks.map(cleanCheck).filter((c) => c && !have.has(c.id));
@@ -761,10 +778,20 @@ async function importBackup(file) {
 // ——— Loading and rendering ———
 async function load() {
   S.rev++;
-  S.plan = buildPlan(seedPlan); // the shipped plan, until plans are stored
   const stored = await db.kvGet('settings', null);
-  S.entries = await db.all('entries');
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
+  // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
+  // and a meal it no longer has loses its picture.
+  const plans = loadedPlans(await db.kvGet('plans', null), seedPlan);
+  S.plans = plans.record;
+  S.plan = buildPlan(activePlan(plans.record));
+  if (plans.rewrite) {
+    try {
+      await writePlans(plans.record.list, plans.record.active);
+      if (Object.keys(S.settings.planPhotos || {}).length) await setPlanPhotos(S.settings.planPhotos);
+    } catch { /* tried again on the next start; the plans in memory are right */ }
+  }
+  S.entries = await db.all('entries');
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
   S.checks = await db.kvGet('checks', []);
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
@@ -1417,6 +1444,7 @@ const ACT = {
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept };
     await saveSettings();
+    await writePlans([], 'default'); // the plans start again from the seed
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';

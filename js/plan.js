@@ -43,6 +43,9 @@ export const SLOT_NAME = {
   dinner: T('Dinner'), late: T('Late'), workout: T('Workout'),
 };
 
+// The slots a plan meal can be in: the meal times and the workout-day extras
+export const PLAN_SLOTS = [...SLOTS.map((s) => s.id), 'workout'];
+
 export function slotByTime(d) {
   const h = d.getHours() + d.getMinutes() / 60;
   if (h < 10.5) return 'morning';

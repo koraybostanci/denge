@@ -22,16 +22,16 @@
   been taken in, the parts of your pickle you wear, and your start and goal weights as they were when you first logged something (the weight badges are measured from them, so a later
   change of goals does not move them). Nothing about badges is sent anywhere, and the model never sees them.
 - There is no sync. Back up from Settings → "Backup and export"; the backup is a JSON file you can
-  restore on the same or another device. It holds your entries, goals, favourites, the plan's
-  pictures, the verdicts of your checks, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
+  restore on the same or another device. It holds your entries, goals, favourites, My plan (the
+  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
   entries, days, checks, badges and plan pictures to what is on the device (an entry or day that is in
-  both takes the backup's version); its goals, favourites and saved places replace yours. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
+  both takes the backup's version); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
-  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, checks) and keeps every setting, the plan's
+  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, checks) and keeps every setting, your plans, the plan's
   pictures, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
-  goals, favourites, saved places, the plan's pictures, the badges and the usage totals; the API key and provider
+  goals, favourites, saved places, My plan, the plan's pictures, the badges and the usage totals; the API key and provider
   stay unless you untick the box. It asks you to type DELETE. Both refuse while something is being
   analysed. Neither can be undone, so save a backup first.
 

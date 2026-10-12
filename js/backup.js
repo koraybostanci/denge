@@ -2,7 +2,7 @@
 // type and size before it is stored or shown, so a damaged or hostile file cannot break the screens.
 // Pure functions: no DOM and no storage.
 import { T } from './i18n.js';
-import { SLOT_NAME } from './plan.js';
+import { SLOT_NAME, PLAN_SLOTS } from './plan.js';
 import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
 import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid } from './core.js';
@@ -17,6 +17,12 @@ const txt = (v, n = 400) => (typeof v === 'string' ? v.slice(0, n) : '');
 const oneOf = (v, list, def) => (list.includes(v) ? v : def);
 const isDay = (v) => typeof v === 'string' && DAY_RE.test(v) && !Number.isNaN(Date.parse(v));
 const isId = (v) => typeof v === 'string' && ID_RE.test(v);
+const plain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+// A key that is looked up in a plain object: never one of Object.prototype's own names ("constructor", "toString")
+const ownSafe = (k) => typeof k === 'string' && !(k in Object.prototype);
+const MEAL_ID = /^[A-Za-z][\w-]{0,39}$/;
+const isMealId = (k) => ownSafe(k) && MEAL_ID.test(k);
+const PLAN_PHOTOS_MAX = 200;
 const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 20)).slice(0, 4) : []);
 const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => ({ n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500) }));
 
@@ -110,7 +116,7 @@ export function cleanPhoto(p) {
   let buf;
   try { buf = bufFromB64(p.b64); } catch { return null; }
   const out = { id: p.id, buf, type: 'image/jpeg', w: Math.round(pos(p.w, 10000)), h: Math.round(pos(p.h, 10000)) };
-  if (isId(p.plan)) out.plan = p.plan; // a meal id; plans are the person's own data, so only its shape is checked
+  if (isMealId(p.plan)) out.plan = p.plan; // a meal id of any plan, so only its shape is checked
   return out;
 }
 
@@ -145,15 +151,121 @@ export function cleanSettings(s) {
   }
   if (Array.isArray(s.favorites)) out.favorites = s.favorites.slice(0, 50).map(cleanFavorite).filter(Boolean);
   if (s.planPhotos && typeof s.planPhotos === 'object') {
-    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => isId(meal) && isId(id)));
+    out.planPhotos = Object.fromEntries(Object.entries(s.planPhotos).filter(([meal, id]) => isMealId(meal) && isId(id)).slice(0, PLAN_PHOTOS_MAX));
   }
   if (s.wins && typeof s.wins === 'object') out.wins = { kilos: Math.round(pos(s.wins.kilos, 1000)), perfect: isDay(s.wins.perfect) ? s.wins.perfect : '' };
   return out;
 }
 
+// ——— Plans (kv `plans`: { active, list: [the Default seed, My plan] }) ———
+// The limits of a user plan. A save over one is refused; a file is trimmed to them.
+export const PLAN_CAPS = { grams: 5000, kcal: 1000, per100: 100, ingredients: 12, name: 60, measure: 30, meals: 100, foods: 300 };
+const PLAN_ID = /^P-[\w-]{1,38}$/;
+const FOOD_KEY = /^[A-Za-z][\w-]{0,39}$/;
+const isFoodKey = (k) => ownSafe(k) && FOOD_KEY.test(k);
+const clean1 = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
+
+// One user plan, checked for both a save and a restore. Returns { plan, changed }: plan is null when nothing usable is left
+// (no user plan id), and changed says that something was dropped, cut or clamped to get it. A save takes only an unchanged plan,
+// so it never loses data; a restore takes the cleaned one. Spaces are tidied without counting as a change. Never throws.
+export function cleanPlan(raw) {
+  if (!plain(raw) || typeof raw.id !== 'string' || !PLAN_ID.test(raw.id)) return { plan: null, changed: true };
+  let changed = false;
+  const text = (v, max) => {
+    const x = clean1(v);
+    if (x.length > max) changed = true;
+    return x.slice(0, max);
+  };
+  const clamp = (x, lo, hi) => {
+    const y = Math.min(hi, Math.max(lo, x));
+    if (y !== x) changed = true;
+    return y;
+  };
+  const foods = {};
+  let nFoods = 0;
+  for (const [key, f] of Object.entries(plain(raw.foods) ? raw.foods : {})) {
+    const name = plain(f) ? text(f.name, PLAN_CAPS.name) : '';
+    if (nFoods >= PLAN_CAPS.foods || !isFoodKey(key) || !name || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every(isNum)) { changed = true; continue; }
+    foods[key] = { name, v: f.v.map((x, i) => clamp(x, 0, i === 0 ? PLAN_CAPS.kcal : PLAN_CAPS.per100)) };
+    nFoods += 1;
+  }
+  if (raw.foods !== undefined && !plain(raw.foods)) changed = true;
+  const meals = [];
+  const seen = new Set();
+  for (const m of Array.isArray(raw.meals) ? raw.meals : []) {
+    const name = plain(m) ? text(m.name, PLAN_CAPS.name) : '';
+    if (meals.length >= PLAN_CAPS.meals || !name || !isMealId(m.id) || seen.has(m.id) || !PLAN_SLOTS.includes(m.slot)) { changed = true; continue; }
+    const rows = Array.isArray(m.ingredients) ? m.ingredients : [];
+    if (!Array.isArray(m.ingredients) || rows.length > PLAN_CAPS.ingredients) changed = true;
+    const ingredients = [];
+    for (const row of rows.slice(0, PLAN_CAPS.ingredients)) {
+      if (!Array.isArray(row) || !Object.hasOwn(foods, row[0]) || !isNum(row[1])) { changed = true; continue; }
+      if (row.length > 3 || (row[2] !== undefined && typeof row[2] !== 'string')) changed = true;
+      const g = clamp(row[1], 1, PLAN_CAPS.grams);
+      const measure = text(row[2], PLAN_CAPS.measure);
+      ingredients.push(measure ? [row[0], g, measure] : [row[0], g]);
+    }
+    seen.add(m.id);
+    meals.push({ id: m.id, slot: m.slot, name, ingredients });
+  }
+  if (!Array.isArray(raw.meals)) changed = true;
+  return { plan: { id: raw.id, name: text(raw.name, PLAN_CAPS.name) || T('My plan'), foods, meals }, changed };
+}
+
+// The plans of a backup file ({ active, list }): the first usable user plan only, cleaned, and the active id when that plan exists
+export function cleanPlans(raw) {
+  const r = plain(raw) ? raw : {};
+  let user = null;
+  for (const p of Array.isArray(r.list) ? r.list : []) {
+    user = cleanPlan(p).plan;
+    if (user) break;
+  }
+  return { active: user && r.active === user.id ? user.id : 'default', list: user ? [user] : [] };
+}
+
+// The record to store: Default always from the seed (never from the caller's list), then the user plan given, unchanged by
+// cleanPlan. Null when that plan would not pass unchanged, so a save never drops anything. An unknown active id is 'default'.
+export function plansRecord(seed, list, active) {
+  const given = (Array.isArray(list) ? list : []).find((p) => !(p && p.id === 'default'));
+  let user = null;
+  if (given !== undefined) {
+    const r = cleanPlan(given);
+    if (!r.plan || r.changed) return null;
+    user = r.plan;
+  }
+  return { active: user && active === user.id ? user.id : 'default', list: user ? [seed, user] : [seed] };
+}
+
+// The plan a record makes active (Default for an unknown id)
+export const activePlan = (record) => record.list.find((p) => p.id === record.active) || record.list[0];
+
+// What load makes of the stored record: Default is the seed as shipped, the user plan stays as stored when it is sound
+// (a damaged one is cleaned). rewrite is true when the record on the device differs from that, e.g. after an update changed the seed.
+export function loadedPlans(stored, seed) {
+  const s = plain(stored) ? stored : {};
+  const list = Array.isArray(s.list) ? s.list : [];
+  let user = null;
+  for (const p of list) {
+    if (p && p.id === 'default') continue;
+    user = cleanPlan(p).plan;
+    if (user) break;
+  }
+  const record = plansRecord(seed, user ? [user] : [], s.active);
+  return { record, rewrite: JSON.stringify(record) !== JSON.stringify(stored) };
+}
+
+// The plan pictures to keep from next (only meal ids some stored plan holds), and the photo ids that are no longer
+// referred to: any value of prev or next that the kept map does not hold. A photo shared by two meals stays while one keeps it.
+export function sweepPlanPhotos(prev, next, record) {
+  const known = new Set(record.list.flatMap((p) => p.meals.map((m) => m.id)));
+  const planPhotos = Object.fromEntries(Object.entries(plain(next) ? next : {}).filter(([meal, id]) => isMealId(meal) && known.has(meal) && isId(id)).slice(0, PLAN_PHOTOS_MAX));
+  const kept = new Set(Object.values(planPhotos));
+  const all = [...Object.values(plain(prev) ? prev : {}), ...Object.values(plain(next) ? next : {})];
+  return { planPhotos, gone: [...new Set(all)].filter((id) => isId(id) && !kept.has(id)) };
+}
+
 // Earned badges, from the stored copy or a backup: only catalog ids, steps on the ladder and real calendar days survive, and a worn
 // part the badges do not unlock falls back to the default. Never throws, whatever it is given.
-const plain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 export function cleanBadges(raw) {
   const out = freshBadges();
   if (!plain(raw)) return out;
