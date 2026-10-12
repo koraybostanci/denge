@@ -232,6 +232,26 @@ export function readMeal(meal) {
   return { meal: { id: meal.id, slot: meal.slot, name, ingredients }, bad, valid };
 }
 
+// What the food form holds, read for Done: the name and the five values per 100 g (numbers, or text as typed with a decimal
+// comma allowed), kcal rounded to whole numbers and the rest to 0.1, so that cleanPlan passes the food unchanged. bad marks what
+// is typed and wrong (an empty field is not marked); valid needs a name and all five values in range (kcal 0–1,000, the rest 0–100).
+export function readFood(form) {
+  const name = clean1(form.name);
+  const bad = { name: name.length > PLAN_CAPS.name, v: [] };
+  const v = [];
+  for (let i = 0; i < 5; i++) {
+    const raw = Array.isArray(form.v) ? form.v[i] : '';
+    const typed = String(raw ?? '').trim();
+    const x = typeof raw === 'number' ? raw : parseNum(typed);
+    const r = i === 0 ? Math.round(x) : Math.round(x * 10) / 10;
+    const ok = r >= 0 && r <= (i === 0 ? PLAN_CAPS.kcal : PLAN_CAPS.per100);
+    bad.v.push(!!typed && !ok);
+    v.push(ok ? r : null);
+  }
+  const valid = !!name && !bad.name && v.every((x) => x !== null);
+  return { food: { name, v }, bad, valid };
+}
+
 // The plan a meal editor save writes: the draft plan with the meal put in (replacing the one with its id, else added at the end)
 // or, with remove, taken out. A copy of Default becomes My plan under newId. The input is not changed.
 export function planFromDraft(plan, meal, { remove = false, newId } = {}) {

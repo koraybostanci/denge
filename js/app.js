@@ -5,15 +5,15 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, planFromDraft, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, planFromDraft, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, startFood, doneFood, dropFood,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -317,7 +317,7 @@ async function addUsage(model, usage) {
 // ——— The day's review, written by the model ———
 // `what` names the thing asked for. Each has whole sentences, so a translation never has to fit a fragment into one
 const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.') };
-const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }) };
+const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }), values: (detail) => t('Filling in the values failed. {detail}', { detail }) };
 function modelFailure(err, what = 'review') {
   const code = err && err.code;
   if (code === 'no_key') return NO_KEY[what]();
@@ -765,6 +765,7 @@ async function importBackup(file) {
     await load();
     return render();
   }
+  dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
   await load();
   badgesMode = 'restore';
   restoredFrom = gotBefore;
@@ -1041,7 +1042,7 @@ function closeSheet() {
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
-  dropDraft(); // and so is a meal being edited: nothing is written
+  dropDraft(); // and so is a meal being edited (with its food form's photos): nothing is written
   $('#app').inert = false;
   document.body.classList.remove('sheet-open');
   // A render may have replaced the button that opened the sheet: find it again by its id
@@ -1052,6 +1053,15 @@ function closeSheet() {
   if (back) back.focus({ preventScroll: true });
   sheetOpener = null;
   sheetOpenerId = '';
+}
+// Close, Escape or a tap outside: Settings opened from the food form's Add key goes back to that form (the meal draft is
+// kept); everything else closes the sheet
+function dismissSheet() {
+  if (S.sheet && S.sheet.type === 'settings' && S.draft && S.draft.foodForm) {
+    S.suppEdit = '';
+    return openFood(hasKey() ? null : '[data-act="settings"]');
+  }
+  closeSheet();
 }
 async function openSettings(section, focusSel) {
   if (section) S.openSetting = section;
@@ -1095,11 +1105,107 @@ async function saveDraft(meal, remove) {
   return first;
 }
 
+// ——— The food form (S.draft.food, S.draft.foodForm), over the meal editor; Done and Back both return to it ———
+const FOOD_PHOTOS = '__food'; // marks the photo picker as opened from the food form
+const openFood = (focusSel, keepFocus) => openSheet(renderFoodForm(), { type: 'food', key: S.draft.food }, focusSel, keepFocus);
+// The editor's fields go into the draft first: the form replaces them
+function editFood(key) {
+  syncDraft();
+  startFood(key);
+  openFood(S.draft.foodForm.isNew ? '#fd-name' : null);
+}
+// What the form's fields hold, into S.draft.foodForm (values stay as typed until Done reads them)
+function syncFood() {
+  const form = S.draft && S.draft.foodForm;
+  const name = $('#fd-name');
+  if (!form || !name) return;
+  form.name = keptText(name.value, name.dataset.orig);
+  form.v = form.v.map((x, i) => $(`#fd-v-${i}`).value);
+}
+// After typing: the marks on wrong fields, Done and the AI button, without redrawing the fields
+function checkFood() {
+  syncFood();
+  const form = S.draft.foodForm;
+  const r = readFood(form);
+  const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
+  mark($('#fd-name'), r.bad.name);
+  r.bad.v.forEach((b, i) => mark($(`#fd-v-${i}`), b));
+  $('[data-act="plan-food-done"]').disabled = !r.valid || form.busy;
+  const ai = $('#fd-ai');
+  if (ai) ai.disabled = form.busy || !(r.food.name || form.photos.length);
+}
+function releaseFoodPhotos() {
+  const form = S.draft && S.draft.foodForm;
+  if (form) form.photos.forEach((p) => URL.revokeObjectURL(p.url));
+}
+// Back to the meal editor (dropFood lets the photos go); a new food that is Done is an ingredient there, with its grams
+// field focused, an edited one has its name focused
+function closeFood(row) {
+  const key = S.draft.food;
+  dropFood();
+  const sel = row >= 0 ? `#md-g-${row}` : `[data-act="plan-food"][data-key="${CSS.escape(key)}"]`;
+  openEditor(sel);
+  const el = $(sel);
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+// The photo for the AI fill: shrunk like a check photo, held in memory only (up to two, a new pick replaces them)
+async function addFoodPhotos(files) {
+  const form = S.draft && S.draft.foodForm;
+  if (!form || form.busy) return;
+  const photos = [];
+  for (const f of files.slice(0, 2)) {
+    try {
+      const { blob } = await shrink(f, CHECK_EDGE);
+      photos.push({ blob, url: URL.createObjectURL(blob) });
+    } catch { toast(t('Could not open that photo')); }
+  }
+  if (!photos.length) return;
+  if (S.draft && S.draft.foodForm === form) {
+    syncFood();
+    releaseFoodPhotos();
+    form.photos = photos;
+    form.err = '';
+    openFood('#fd-ai');
+  } else photos.forEach((p) => URL.revokeObjectURL(p.url));
+}
+// Fill in with AI: runs while the person waits, like a check. A reply that comes after Back, after the sheet closed or for
+// another form is dropped (its usage is still counted).
+async function runFood() {
+  const d = S.draft;
+  const form = d && d.foodForm;
+  if (!form || form.busy) return;
+  syncFood();
+  const name = readFood(form).food.name;
+  if (!hasKey()) return openFood();
+  if (!name && !form.photos.length) return;
+  if (navigator.onLine === false) { form.err = modelFailure({ code: 'offline' }, 'values'); form.note = ''; return openFood('#fd-ai'); }
+  const key = d.food;
+  const live = () => S.draft === d && d.food === key && d.foodForm === form;
+  form.busy = true; form.err = ''; form.note = ''; form.status = '';
+  openFood();
+  try {
+    const { data, usage, model } = await foodValues({
+      cfg: aiCfg(), name, blobs: form.photos.map((p) => p.blob),
+      onRetry: (...a) => { if (live()) { form.status = retryNote(...a); syncFood(); openFood(null, true); } },
+    });
+    await addUsage(model, usage);
+    if (!live()) return;
+    form.v = [data.kcal, data.p, data.c, data.f, data.fib];
+    if (!name && data.name) form.name = data.name;
+    form.note = t('Filled in by AI. Check the values.');
+  } catch (err) {
+    if (!live()) return;
+    form.err = err.code === 'empty' ? t('Couldn’t read values. Try the nutrition label, or type them.') : modelFailure(err, 'values');
+  }
+  form.busy = false; form.status = '';
+  openFood('#fd-ai');
+}
+
 // ——— Actions ———
 const ACT = {
   'tab': (el) => go(el.dataset.tab),
-  'settings': (el) => openSettings(el && el.dataset.sec),
-  'close-sheet': () => closeSheet(),
+  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); return openSettings(el && el.dataset.sec); }, // the food form's typing is kept for the way back
+  'close-sheet': () => dismissSheet(),
   'week-prev': () => { S.viewDay = addDays(S.viewDay, -7); render(); },
   'week-next': () => { const d = addDays(S.viewDay, 7); S.viewDay = d > today() ? today() : d; render(); },
   'day-today': () => { S.viewDay = today(); render(); },
@@ -1155,7 +1261,17 @@ const ACT = {
     S.draft.meal.ingredients.splice(Number(el.dataset.i), 1);
     openEditor('#md-add');
   },
-  'plan-food': () => {}, // the food form comes with phase 6
+  // The food form: a tap on an ingredient's food name edits that food
+  'plan-food': (el) => { if (S.draft && Object.hasOwn(S.draft.plan.foods, el.dataset.key)) editFood(el.dataset.key); },
+  'plan-food-back': () => { if (S.draft && S.draft.foodForm) closeFood(-1); },
+  'plan-food-done': () => {
+    if (!S.draft || !S.draft.foodForm || S.draft.foodForm.busy) return;
+    syncFood();
+    const r = readFood(S.draft.foodForm);
+    if (r.valid) closeFood(doneFood(r.food));
+  },
+  'plan-food-photo': () => { photoTarget = FOOD_PHOTOS; $('#f-lib').click(); },
+  'plan-food-ai': () => runFood(),
   'plan-meal-save': async (el) => {
     if (!S.draft) return;
     syncDraft();
@@ -1558,7 +1674,7 @@ document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act],.tabs [data-tab],[data-close-sheet]');
   if (!el) return;
   if (el.matches('input[type=checkbox]')) return; // handled on change
-  if (el.dataset.closeSheet !== undefined) return closeSheet();
+  if (el.dataset.closeSheet !== undefined) return dismissSheet();
   const act = el.dataset.act || (el.dataset.tab ? 'tab' : '');
   if (ACT[act]) { ev.preventDefault(); guard(() => ACT[act](el)); }
 });
@@ -1567,6 +1683,7 @@ document.addEventListener('click', (ev) => {
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
+  if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -1584,16 +1701,19 @@ document.addEventListener('change', (ev) => guard(async () => {
     const target = photoTarget;
     photoTarget = null;
     if (target === CHECK_PHOTOS) { if (files.length) await addCheckPhotos(files); return; }
+    if (target === FOOD_PHOTOS) { if (files.length) await addFoodPhotos(files); return; }
     if (target) { if (files.length) await openFrame(target, files[0]); return; }
     const note = $('#composer-input').value.trim();
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
   if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file) await importBackup(file); return; }
-  // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus ("New food…" comes with phase 6)
+  // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
+  // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {
     const key = el.value;
     el.value = '';
+    if (S.draft && key === '+new' && S.draft.meal.ingredients.length < PLAN_CAPS.ingredients && Object.keys(S.draft.plan.foods).length < PLAN_CAPS.foods) return editFood('u' + db.uid());
     if (!S.draft || !Object.hasOwn(S.draft.plan.foods, key)) return;
     syncDraft();
     if (S.draft.meal.ingredients.length >= PLAN_CAPS.ingredients) return;
@@ -1661,7 +1781,7 @@ $('#composer').addEventListener('submit', (ev) => {
   guard(() => submitText(t), () => { if (!inp.value) inp.value = t; }); // a failed save gives the text back
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet();
+  if (ev.key === 'Escape' && !$('#sheet').hidden) dismissSheet();
   // Enter in the correction box sends it
   if (ev.key === 'Enter' && (ev.target.id === 'supp-name' || ev.target.id === 'supp-dose')) { ev.preventDefault(); guard(ACT['supp-save']); }
   if (ev.key === 'Enter' && ev.target.id === 'check-note') { ev.preventDefault(); ev.target.blur(); guard(runCheck); }

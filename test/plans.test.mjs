@@ -1,11 +1,12 @@
 // The stored plans (kv `plans`): the record a save writes, the one validator, load, restore and the plan pictures. `node --test`
 // js/app.js needs a browser, so its writePlans, setPlanPhotos, load, restore and meal editor saves are tested through the pure
-// functions they call (startDraft and dropDraft in js/core.js; readMeal and planFromDraft in js/backup.js).
+// functions they call (startDraft and dropDraft in js/core.js; readMeal and planFromDraft in js/backup.js), and its food form
+// through startFood, doneFood and dropFood (js/core.js) and readFood (js/backup.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, planFromDraft } from '../js/backup.js';
-import { S, startDraft, dropDraft, canEditPlan } from '../js/core.js';
+import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft } from '../js/backup.js';
+import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, dropFood, foodUses } from '../js/core.js';
 import seedPlan from '../js/default-plan.js';
 
 const copy = (x) => JSON.parse(JSON.stringify(x));
@@ -233,4 +234,126 @@ test('editor: deleting a meal on Default creates My plan without it', () => {
   // The pictures of a meal Default still holds stay
   assert.deepEqual(sweepPlanPhotos({ 'S2-B': 'p1' }, { 'S2-B': 'p1' }, record).planPhotos, { 'S2-B': 'p1' });
   dropDraft();
+});
+
+// ——— The food form over the meal editor: Done keeps the food in the draft plan, Back leaves it, nothing is stored before Save ———
+test('food form: Done adds a new food to the draft plan and as an ingredient with empty grams; the save stores it', () => {
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  startDraft('U-x1');
+  const form = startFood('uabc123');
+  assert.equal(S.draft.food, 'uabc123');
+  assert.deepEqual([form.isNew, form.name, form.v], [true, '', ['', '', '', '', '']]);
+  assert.equal(readFood(form).valid, false); // empty fields block Done without a mark
+  assert.deepEqual(readFood(form).bad, { name: false, v: [false, false, false, false, false] });
+  Object.assign(form, { name: ' Oat  milk ', v: ['46,4', '1,04', '6.55', 1.5, '0'] });
+  const r = readFood(form);
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.food, { name: 'Oat milk', v: [46, 1, 6.6, 1.5, 0] });
+  assert.equal(doneFood(r.food), 2);
+  assert.equal(S.draft.food, 'uabc123'); // the form stays until it is closed, so the editor can be told which food it was
+  assert.equal(S.draft.foodForm, form);
+  dropFood();
+  assert.equal(S.draft.food, undefined);
+  assert.equal(S.draft.foodForm, undefined);
+  assert.deepEqual(S.draft.plan.foods.uabc123, { name: 'Oat milk', v: [46, 1, 6.6, 1.5, 0] });
+  assert.deepEqual(S.draft.meal.ingredients.at(-1), ['uabc123', '']);
+  assert.equal(S.plans.list[1].foods.uabc123, undefined); // nothing stored yet
+  // The save: the food passes cleanPlan unchanged
+  S.draft.meal.ingredients[2][1] = '200';
+  const plan = planFromDraft(S.draft.plan, readMeal(S.draft.meal).meal);
+  const c = cleanPlan(plan);
+  assert.equal(c.changed, false);
+  assert.deepEqual(c.plan, plan);
+  assert.deepEqual(plansRecord(seedPlan, [plan], plan.id).list[1].foods.uabc123, { name: 'Oat milk', v: [46, 1, 6.6, 1.5, 0] });
+  dropDraft();
+});
+
+test('food form: editing a food changes it for every meal of the draft; Back leaves it as it was', () => {
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  startDraft('U-x1');
+  const form = startFood('u1');
+  assert.deepEqual([form.isNew, form.name, form.v], [false, 'Oat drink', [45, 1, 6.5, 1.5, 0.8]]);
+  assert.equal(foodUses('u1'), 1);
+  assert.equal(foodUses('egg'), SEED.meals.slice(0, 3).filter((m) => m.ingredients.some((x) => x[0] === 'egg')).length);
+  form.v[0] = '50';
+  dropFood(); // Back
+  assert.deepEqual(S.draft.plan.foods.u1, { name: 'Oat drink', v: [45, 1, 6.5, 1.5, 0.8] });
+  const again = startFood('u1');
+  again.v = ['50', '1', '6,5', '1,5', '0,8'];
+  assert.equal(doneFood(readFood(again).food), -1); // an existing food adds no row
+  assert.deepEqual(S.draft.plan.foods.u1, { name: 'Oat drink', v: [50, 1, 6.5, 1.5, 0.8] });
+  assert.equal(S.draft.meal.ingredients.length, 2);
+  // Cancelling the meal drops the food change too
+  const before = copy(S.plans);
+  dropDraft();
+  assert.deepEqual(S.plans, before);
+  assert.deepEqual(S.plans.list[1].foods.u1.v, [45, 1, 6.5, 1.5, 0.8]);
+});
+
+test('food form: the AI-fill photos are revoked on Done, on Back and when the meal draft is dropped', () => {
+  const revoked = [];
+  const orig = URL.revokeObjectURL;
+  URL.revokeObjectURL = (u) => revoked.push(u);
+  try {
+    S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+    startDraft('U-x1');
+    let form = startFood('u1');
+    form.photos = [{ url: 'blob:a' }, { url: 'blob:b' }];
+    doneFood(readFood(form).food);
+    assert.deepEqual(revoked, []); // not yet: Done keeps the form until the editor is back
+    dropFood();
+    assert.deepEqual(revoked, ['blob:a', 'blob:b']);
+    form = startFood('u1');
+    form.photos = [{ url: 'blob:c' }];
+    dropFood(); // Back
+    assert.deepEqual(revoked, ['blob:a', 'blob:b', 'blob:c']);
+    form = startFood('unew1');
+    form.photos = [{ url: 'blob:d' }];
+    dropDraft(); // the sheet closed with the form open
+    assert.deepEqual(revoked, ['blob:a', 'blob:b', 'blob:c', 'blob:d']);
+    dropDraft(); // no draft: nothing to do
+  } finally { URL.revokeObjectURL = orig; }
+});
+
+test('food form: Done and Back go back to the editor with the food known; Settings from Add key goes back to the form', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  // closeFood reads the key before the form is dropped, and Done does not drop it first
+  assert.match(src, /function closeFood\(row\) \{\s*const key = S\.draft\.food;\s*dropFood\(\);/);
+  assert.match(src, /if \(r\.valid\) closeFood\(doneFood\(r\.food\)\);/);
+  const core = readFileSync(new URL('../js/core.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(core.slice(core.indexOf('export function doneFood'), core.indexOf('export function dropFood')), /dropFood\(\)/);
+  // Close, Escape and a tap outside go through dismissSheet, which returns from Settings to an open food form
+  assert.match(src, /function dismissSheet\(\) \{\s*if \(S\.sheet && S\.sheet\.type === 'settings' && S\.draft && S\.draft\.foodForm\)/);
+  assert.match(src, /'close-sheet': \(\) => dismissSheet\(\)/);
+  assert.match(src, /ev\.key === 'Escape' && !\$\('#sheet'\)\.hidden\) dismissSheet\(\)/);
+  assert.match(src, /el\.dataset\.closeSheet !== undefined\) return dismissSheet\(\)/);
+});
+
+test('restoring a backup drops the meal being edited, so saving it cannot write over the restored plans', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('async function importBackup'), src.indexOf('// ——— Loading and rendering'));
+  const fail = fn.indexOf('} catch (err) {');
+  const end = fn.indexOf('return render();', fail);
+  const drop = fn.indexOf('dropDraft();');
+  // only after a restore that went through: a file that cannot be read or restored leaves the draft alone
+  assert.ok(fail > 0 && end > fail && drop > end, 'dropDraft after the failure path');
+  assert.equal(fn.indexOf('dropDraft();', drop + 1), -1);
+  assert.ok(drop < fn.indexOf('render();', end + 'return render();'.length), 'dropped before the restored data is shown');
+  // with no draft left, closing Settings closes the sheet instead of reopening the food form
+  assert.match(src, /function dismissSheet\(\) \{\s*if \(S\.sheet && S\.sheet\.type === 'settings' && S\.draft && S\.draft\.foodForm\)/);
+});
+
+test('food form: values out of range or not numbers are marked and block Done', () => {
+  const read = (v, name = 'X') => readFood({ name, v });
+  assert.equal(read([0, 0, 0, 0, 0]).valid, true);
+  assert.equal(read(['1000', '100', '100', '100', '100']).valid, true);
+  for (const [i, x] of [[0, '1001'], [0, 'abc'], [0, '-1'], [1, '100,1'], [2, '1e2'], [4, '101']]) {
+    const v = ['100', '1', '1', '1', '1'];
+    v[i] = x;
+    const r = read(v);
+    assert.equal(r.valid, false, x);
+    assert.equal(r.bad.v[i], true, x);
+  }
+  assert.deepEqual([read([1, 1, 1, 1, 1], ' ').valid, read([1, 1, 1, 1, 1], ' ').bad.name], [false, false]);
+  assert.equal(read([1, 1, 1, 1, 1], 'x'.repeat(61)).bad.name, true);
 });

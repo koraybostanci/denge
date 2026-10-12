@@ -446,3 +446,78 @@ test('meal editor in Turkish: its text, names and measures through td(), the sto
   assert.ok(views.renderPlanSheet('L-A').includes('Öğünü düzenle'));
   fixture();
 });
+
+test('food form: a food of the meal with "Used in", a new food, the AI fill states and the no-key link', () => {
+  fixture();
+  Object.assign(S.settings, { provider: 'anthropic', apiKey: 'k' });
+  core.startDraft('L-A');
+  core.startFood('egg');
+  const ed = views.renderFoodForm();
+  assert.match(ed, /<h2 id="sheet-title">Boiled egg<\/h2>/);
+  assert.ok(ed.includes('value="Boiled egg" data-orig="Boiled egg"'));
+  assert.ok(ed.includes('Used in 4 meals. Changes apply to all of them.'));
+  assert.match(ed, /id="fd-v-1" type="text" inputmode="decimal" autocomplete="off" value="12.6"/);
+  assert.match(ed, /data-act="plan-food-ai">Fill in with AI</);
+  assert.match(ed, /data-act="plan-food-done">Done</);
+  // Used once: the singular; a value out of range is marked and turns Done off
+  S.draft.plan.meals = S.draft.plan.meals.filter((m) => m.id === 'L-A');
+  S.draft.foodForm.v[0] = '1200';
+  const one = views.renderFoodForm();
+  assert.ok(one.includes('Used in 1 meal. Changes apply to it.'));
+  assert.match(one, /id="fd-v-0"[^>]*aria-invalid="true"/);
+  assert.doesNotMatch(one, /id="fd-v-1"[^>]*aria-invalid/);
+  assert.match(one, /data-act="plan-food-done" disabled>/);
+  // While the AI reads: spinner and Reading…, fields and Done off, Back on
+  Object.assign(S.draft.foodForm, { v: [143, 12.6, 0.7, 9.5, 0], busy: true });
+  const busy = views.renderFoodForm();
+  assert.match(busy, /data-act="plan-food-ai" disabled><span class="spin" aria-hidden="true"><\/span>Reading…</);
+  assert.match(busy, /id="fd-name"[^>]*disabled>/);
+  assert.equal((busy.match(/id="fd-v-\d"[^>]*disabled>/g) || []).length, 5);
+  assert.match(busy, /data-act="plan-food-done" disabled>/);
+  assert.match(busy, /data-act="plan-food-back">Back</);
+  // The result and a failure
+  Object.assign(S.draft.foodForm, { busy: false, note: 'Filled in by AI. Check the values.' });
+  assert.match(views.renderFoodForm(), /<p class="note" role="status">Filled in by AI\. Check the values\.<\/p>/);
+  S.draft.foodForm.err = 'Couldn’t read values. Try the nutrition label, or type them.';
+  assert.match(views.renderFoodForm(), /role="alert">Couldn’t read values/);
+  // A new food: no "Used in", the AI button waits for a name or a photo
+  core.startFood('unew1');
+  const nw = views.renderFoodForm();
+  assert.match(nw, /<h2 id="sheet-title">New food<\/h2>/);
+  assert.ok(!nw.includes('Used in'));
+  assert.match(nw, /data-act="plan-food-ai" disabled>/);
+  assert.match(nw, /data-act="plan-food-done" disabled>/);
+  S.draft.foodForm.photos = [{ url: 'blob:x' }];
+  assert.match(views.renderFoodForm(), /data-act="plan-food-ai">/);
+  assert.match(views.renderFoodForm(), /aria-label="Change the photo"><img src="blob:x" alt=""><\/button>/);
+  // No key: the square and the button give way to the link to Settings → Photo and text analysis
+  S.settings.apiKey = '';
+  const nokey = views.renderFoodForm();
+  assert.doesNotMatch(nokey, /plan-food-photo|plan-food-ai/);
+  assert.match(nokey, /<p>Add an API key to fill this in from a photo\.<\/p><button type="button" class="link" data-act="settings" data-sec="analysis">Add key<\/button>/);
+  // The editor's "New food…" option is gone at the foods cap
+  S.draft.meal.ingredients = [];
+  S.draft.plan.foods = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`f${i}`, { name: `F${i}`, v: [1, 1, 1, 1, 1] }]));
+  assert.ok(!views.renderMealEditor().includes('value="+new"'));
+  fixture();
+});
+
+test('food form in Turkish: its text, the name through td() with the stored English kept, decimals with a comma', async () => {
+  fixture();
+  await setLang('tr');
+  Object.assign(S.settings, { provider: 'anthropic', apiKey: 'k' });
+  core.startDraft('L-A');
+  core.startFood('egg');
+  const ed = views.renderFoodForm();
+  assert.ok(ed.includes('value="Haşlanmış yumurta" data-orig="Boiled egg"'));
+  assert.ok(ed.includes('value="12,6"'));
+  for (const s of ['Geri', 'Yapay zekâyla doldur', 'Kullanıldığı öğün sayısı: 4. Değişiklikler her birine uygulanır.', '100 g için değerler', 'Karbonhidrat (g)', 'Yağ (g)', 'Lif (g)', 'Tamam', 'Etiketin ya da yiyeceğin fotoğrafını ekle', 'En iyi sonucu besin değeri tablosunun fotoğrafı verir.']) assert.ok(ed.includes(s), s);
+  S.draft.foodForm.busy = true;
+  assert.ok(views.renderFoodForm().includes('Okunuyor…'));
+  core.startFood('unew1');
+  S.settings.apiKey = '';
+  const nokey = views.renderFoodForm();
+  for (const s of ['Yeni yiyecek<', 'Bunu bir fotoğraftan doldurmak için bir API anahtarı ekle.', 'Anahtar ekle']) assert.ok(nokey.includes(s), s);
+  for (const s of ['Filled in by AI. Check the values.', 'Couldn’t read values. Try the nutrition label, or type them.', 'Filling in the values failed. {detail}']) assert.ok(tr[s], s);
+  fixture();
+});

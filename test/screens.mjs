@@ -1,5 +1,5 @@
 // The fixed state and the screens rendered from it, for the English snapshot and the pseudo-locale test.
-// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, meal editor, badge and avatar sheets, which are
+// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, meal editor, food form, badge and avatar sheets, which are
 // string-returning functions of the state S and run in Node as they are. Not covered: anything that needs the DOM
 // (attachChart, toasts and the other code in app.js, which reads document and window at import time).
 process.env.TZ = 'UTC';
@@ -93,6 +93,16 @@ export function screens() {
   add('meal-editor', views.renderMealEditor);
   core.startDraft(null, 'snack2', 'U-new01');
   add('meal-editor-new', views.renderMealEditor);
+  // The food form over it: a food the meal uses (with "Used in"), a new food, and the same without an API key
+  core.startDraft('L-A');
+  core.startFood('egg');
+  add('food-form', views.renderFoodForm);
+  core.startFood('unew01');
+  add('food-form-new', views.renderFoodForm);
+  const apiKey = S.settings.apiKey;
+  S.settings.apiKey = '';
+  add('food-form-no-key', views.renderFoodForm);
+  S.settings.apiKey = apiKey;
   S.draft = null;
   // With a plan of the person's own: active (Snack 2 has no meals), then Default active while it exists
   S.tab = 'plan';

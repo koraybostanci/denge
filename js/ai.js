@@ -443,6 +443,45 @@ export function cleanVerdict(d) {
   return { kind: ['menu', 'product', 'dish', 'none'].includes(d.kind) ? d.kind : 'none', title: clean(d.title, 80), answer: clean(d.answer, 360), options };
 }
 
+// ——— The values of one food per 100 g, for the food form: from a nutrition label, a package, the food itself or a name ———
+// The prompt is always English, whatever the interface language is
+const FOOD_SYSTEM = () => inEnglish(() => `You give the nutrition values of one food per 100 g, for the food table of a weight-loss plan. Reply with JSON only, in English.
+Input: up to two photos (a nutrition label, a package, or the food itself) and/or the food's name, in any language.
+If a nutrition label is readable, copy its per-100 g values. If it gives values only per serving, convert them to per 100 g using the serving size. If it gives energy only in kJ, divide by 4.184.
+Otherwise estimate typical values per 100 g of the food as shown or named, as it is sold (raw unless it is clearly cooked).
+name: a short name for the food, at most 60 characters: the product name when one is shown, else a plain name.
+kcal: energy per 100 g. p, c, f, fib: protein, carbohydrate, fat and fibre in grams per 100 g.
+If you cannot tell what the food is, set kcal to 0.`);
+const FOOD_SHAPE = '\nReturn exactly one JSON object with these keys: {"name":"","kcal":0,"p":0,"c":0,"f":0,"fib":0}';
+const FOOD_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'kcal', 'p', 'c', 'f', 'fib'],
+  properties: { name: { type: 'string' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
+};
+
+/**
+ * @param {{cfg:object, name?:string, blobs?:Blob[], onRetry?:Function}} o name: what is typed in the form, if anything
+ * @returns {Promise<{data:{name:string,kcal:number,p:number,c:number,f:number,fib:number}, usage:{in:number,out:number}, model:string}>}
+ */
+export async function foodValues(o) {
+  const name = clean(o.name, 60);
+  const req = { system: FOOD_SYSTEM(), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
+  const r = await callWithFallback(o.cfg, req, o.onRetry);
+  return { ...r, data: cleanFoodValues(r.data) };
+}
+
+// Values from the model, the way a plan food stores them: kcal rounded to whole numbers and the rest to 0.1, within cleanPlan's
+// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters. No kcal, 0 kcal or more than 1,000 is no reading.
+export function cleanFoodValues(d) {
+  d = d && typeof d === 'object' ? d : {};
+  const num = (v) => (typeof v === 'number' || typeof v === 'string' ? +v : NaN);
+  const kcal = Math.round(num(d.kcal));
+  if (!(kcal > 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
+  const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
+  return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
+}
+
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message
 export function errorDetail(err, max = 200) {
   const msg = String((err && err.message) || '');

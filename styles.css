@@ -628,6 +628,14 @@ button.cal-d::before, button.cal-wk::before { content: ""; position: absolute; i
 .ing-fields { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 8px; padding-right: 12px; }
 .ing-g { display: flex; align-items: center; gap: 6px; font: 600 14px var(--num); color: var(--ink2); }
 .ing-add { margin-top: 12px; }
+/* The food form: the name with the photo square for the AI fill beside it, the AI button, then the values per 100 g */
+.food-name { display: flex; align-items: flex-end; gap: 10px; margin-top: 14px; }
+.food-name label { flex: 1; min-width: 0; display: grid; gap: 4px; font-size: 13px; color: var(--ink2); }
+.food-photo { flex: none; width: 64px; height: 64px; display: grid; place-items: center; overflow: hidden; border: 1px dashed var(--edge); border-radius: var(--r-ctl); background: var(--raised); color: var(--ink2); }
+.food-photo svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.food-photo img { width: 100%; height: 100%; object-fit: cover; }
+.food-ai { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; }
+.food-name + .notice { margin-top: 12px; }
 .plan-pic { position: relative; display: block; aspect-ratio: 1; background: var(--table); overflow: hidden; border-bottom: 1px solid var(--line); }
 /* The house format: every picture is a round plate with the same rim, on the same table */
 .plan-pic img { position: absolute; top: 50%; left: 50%; height: 84%; width: auto; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px var(--rim), 0 4px 10px -4px rgb(0 0 0 / .25); }

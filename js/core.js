@@ -48,7 +48,7 @@ export const S = {
   openSetting: '', // expanded section in Settings
   plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
-  draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal }; nothing is stored until it is saved
+  draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal, food?, foodForm? }; nothing is stored until it is saved
 };
 
 // Plan meals can be changed while Default is the only plan (a save creates My plan) and while My plan is active,
@@ -62,8 +62,38 @@ export function startDraft(id, slot, newId) {
   S.draft = { plan, meal: meal ? copy(meal) : { id: newId, slot, name: '', ingredients: [] } };
   return S.draft;
 }
-// Closing or cancelling the editor: the draft goes and nothing is written
-export function dropDraft() { S.draft = null; }
+// Closing or cancelling the editor: the draft goes and nothing is written (an open food form's photos are let go too)
+export function dropDraft() { if (S.draft) dropFood(); S.draft = null; }
+
+// ——— The food form, over the meal editor: S.draft.food is the key of the food being edited (a new one is not in the foods
+// yet) and S.draft.foodForm what the form holds: the name, the five values per 100 g (numbers, or text as typed), the photos
+// for the AI fill (in memory only) and its state
+export function startFood(key) {
+  const f = Object.hasOwn(S.draft.plan.foods, key) ? S.draft.plan.foods[key] : null;
+  S.draft.food = key;
+  S.draft.foodForm = { isNew: !f, name: f ? f.name : '', v: f ? [...f.v] : ['', '', '', '', ''], photos: [], busy: false, note: '', err: '' };
+  return S.draft.foodForm;
+}
+// How many meals of the draft use a food: the draft plan's other meals and the meal being edited as it is now
+export const foodUses = (key) => [...S.draft.plan.meals.filter((m) => m.id !== S.draft.meal.id), S.draft.meal]
+  .filter((m) => m.ingredients.some((row) => row[0] === key)).length;
+// Done: the food (read by readFood) goes into the draft plan's foods; a new one also becomes an ingredient of the draft meal,
+// with empty grams. Returns the index of that row, or -1. The form stays open until dropFood, which Back calls alone: it
+// leaves the foods as they were.
+export function doneFood(food) {
+  const d = S.draft;
+  const key = d.food;
+  const isNew = d.foodForm.isNew;
+  d.plan.foods[key] = { name: food.name, v: [...food.v] };
+  if (!isNew) return -1;
+  d.meal.ingredients.push([key, '']);
+  return d.meal.ingredients.length - 1;
+}
+// The form goes, and the object URLs of its photos (held in memory only) are revoked
+export function dropFood() {
+  if (S.draft.foodForm) S.draft.foodForm.photos.forEach((p) => URL.revokeObjectURL(p.url));
+  delete S.draft.food; delete S.draft.foodForm;
+}
 
 // A meal of the active plan by its id, or undefined (a search of the list, so text from outside cannot find "constructor")
 export const mealById = (id) => S.plan.meals.find((m) => m.id === id);

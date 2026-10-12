@@ -1,7 +1,7 @@
 // The model layer (js/ai.js) against a fetch that never leaves the machine. `node --test`
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, review, coach, check, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -175,4 +175,59 @@ test('every prompt is built from the active plan at request time, and stays Engl
       if (name === 'review' || name === 'coach') assert.match(en, /meals are lunch 12:00, snack 1 14:30, dinner 18:00\./, name); // only the meal times the plan has
     }
   } finally { S.plan = saved; await setLang('en'); }
+});
+
+// ——— The food form's AI fill ———
+// Node has no FileReader: a small one that reads a Blob as a data URL, as the browser's does
+globalThis.FileReader ??= class {
+  readAsDataURL(blob) {
+    blob.arrayBuffer().then((buf) => { this.result = `data:${blob.type};base64,${Buffer.from(buf).toString('base64')}`; this.onload(); }, (e) => { this.error = e; this.onerror(); });
+  }
+};
+const FOOD = JSON.stringify({ name: 'Oat drink', kcal: 45.4, p: 1.04, c: 6.5, f: 1.5, fib: 0.8 });
+
+test('food values: the photos (two at most), the schema and the typed name are sent; the reply is cleaned', async () => {
+  mockFetch(() => reply(200, claudeBody(FOOD)));
+  const blobs = ['a', 'b', 'c'].map((x) => new Blob([x], { type: 'image/jpeg' }));
+  const { data, usage } = await foodValues({ cfg: haiku, name: '  Yulaf  içeceği ', blobs });
+  const body = calls[0].body;
+  const content = body.messages[0].content;
+  assert.deepEqual(content.filter((c) => c.type === 'image').map((c) => c.source.data), [btoa('a'), btoa('b')]);
+  assert.equal(content.at(-1).text, 'Food: Yulaf içeceği');
+  assert.deepEqual(body.output_config.format.schema.required, ['name', 'kcal', 'p', 'c', 'f', 'fib']);
+  assert.equal(body.max_tokens, 300);
+  assert.match(body.system, /per 100 g/);
+  assert.match(body.system, /per serving/);
+  assert.deepEqual(data, { name: 'Oat drink', kcal: 45, p: 1, c: 6.5, f: 1.5, fib: 0.8 });
+  assert.deepEqual(usage, { in: 10, out: 5 });
+  // A photo alone, on the OpenAI-compatible route: the shape in words, the image as a data URL
+  mockFetch(() => reply(200, { choices: [{ message: { content: FOOD }, finish_reason: 'stop' }], usage: {} }));
+  await foodValues({ cfg: gemini, blobs: blobs.slice(0, 1) });
+  const user = calls[1].body.messages[1].content;
+  assert.equal(user[0].image_url.url, `data:image/jpeg;base64,${btoa('a')}`);
+  assert.equal(user[1].text, 'No name given; use the photo.');
+  assert.match(calls[1].body.messages[0].content, /\{"name":"","kcal":0,"p":0,"c":0,"f":0,"fib":0\}/);
+});
+
+test('food values: the prompt stays English, with no language line, when the interface is Turkish', async () => {
+  try {
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await setLang('en');
+    await foodValues({ cfg: haiku, name: 'Oat drink' });
+    await setLang('tr');
+    await foodValues({ cfg: haiku, name: 'Oat drink' });
+    const [en, tr] = calls.map((c) => c.body.system);
+    assert.equal(tr, en);
+    assert.ok(!/Turkish/.test(tr));
+    assert.equal(calls[1].body.messages[0].content.at(-1).text, 'Food: Oat drink');
+  } finally { await setLang('en'); }
+});
+
+test('food values: rounded (kcal to 1, the rest to 0.1) and clamped; no kcal, 0 kcal or more than 1,000 is no reading', async () => {
+  assert.deepEqual(cleanFoodValues({ name: ` ${'x'.repeat(70)} `, kcal: '120.6', p: 12.345, c: -3, f: 140, fib: 'n/a' }), { name: 'x'.repeat(60), kcal: 121, p: 12.3, c: 0, f: 100, fib: 0 });
+  assert.deepEqual(cleanFoodValues({ kcal: 1000.4, p: 0.05 }), { name: '', kcal: 1000, p: 0.1, c: 0, f: 0, fib: 0 });
+  for (const kcal of [undefined, null, '', 'x', 0, 0.4, -5, 1001, 1e9, Infinity, true]) assert.throws(() => cleanFoodValues({ name: 'x', kcal }), { code: 'empty' }, String(kcal));
+  assert.throws(() => cleanFoodValues(null), { code: 'empty' });
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'blur', kcal: 0, p: 0, c: 0, f: 0, fib: 0 }))));
+  await assert.rejects(foodValues({ cfg: haiku, name: 'x' }), { code: 'empty' });
 });

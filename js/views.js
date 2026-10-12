@@ -2,9 +2,9 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, foodUses,
 } from './core.js';
-import { readMeal, PLAN_CAPS } from './backup.js';
+import { readMeal, readFood, PLAN_CAPS } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
@@ -1426,12 +1426,45 @@ export function renderMealEditor() {
   <p class="note">${t('Changes apply from now on. Meals you already logged keep their numbers.')}</p>
   ${meal.ingredients.length ? `<ul class="ing-list">${meal.ingredients.map(row).join('')}</ul>` : ''}
   <select id="md-add" class="ing-add" aria-label="${t('Add ingredient')}"${meal.ingredients.length >= PLAN_CAPS.ingredients ? ' disabled' : ''}>
-    <option value="" selected>${t('Add ingredient')}</option>${foods.map((k) => `<option value="${esc(k)}">${esc(td(plan.foods[k].name))}</option>`).join('')}
-    <option value="+new">${t('New food…')}</option>
+    <option value="" selected>${t('Add ingredient')}</option>${foods.map((k) => `<option value="${esc(k)}">${esc(td(plan.foods[k].name))}</option>`).join('')}${Object.keys(plan.foods).length < PLAN_CAPS.foods ? `
+    <option value="+new">${t('New food…')}</option>` : ''}
   </select>
   ${first ? `<p class="note">${t('Default stays as it is. Saving creates My plan with this change, and the app uses My plan from then on.')}</p>` : ''}
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="plan-meal-save"${r.valid ? '' : ' disabled'}>${first ? t('Save to My plan') : t('Save')}</button></div>
   ${saved ? `<p class="plan-delete"><button type="button" class="link link-danger" data-act="plan-meal-delete">${t('Delete meal')}</button></p>` : ''}`;
+}
+
+// The food form, over the meal editor, drawn from S.draft.foodForm: a name, the five values per 100 g, and the AI fill (a photo and
+// one button), or a link to add a key. The name shows through td() with the stored text in data-orig, like the editor's.
+// Values show as typed, or a stored number with the language's decimal mark.
+export function renderFoodForm() {
+  const key = S.draft.food;
+  const form = S.draft.foodForm;
+  const r = readFood(form);
+  const busy = form.busy;
+  const off = busy ? ' disabled' : '';
+  const inv = (bad) => (bad ? ' aria-invalid="true"' : '');
+  const shown = (x) => (typeof x === 'number' && getLang() === 'tr' ? String(x).replace('.', ',') : String(x));
+  const uses = form.isNew ? 0 : foodUses(key);
+  const photo = form.photos[0];
+  const field = (i, label, mode) => `<label for="fd-v-${i}">${label}<input id="fd-v-${i}" type="text" inputmode="${mode}" autocomplete="off" value="${esc(shown(form.v[i]))}"${inv(r.bad.v[i])}${off}></label>`;
+  const ai = hasKey()
+    ? `<button type="button" class="btn btn-wide food-ai" id="fd-ai" data-act="plan-food-ai"${!busy && (r.food.name || photo) ? '' : ' disabled'}>${busy ? `<span class="spin" aria-hidden="true"></span>${t('Reading…')}` : t('Fill in with AI')}</button>
+  ${form.err ? `<p class="note is-error" role="alert">${esc(form.err)}</p>` : `<p class="note" role="status">${busy && form.status ? esc(form.status) : form.note ? esc(form.note) : t('A photo of the nutrition label works best. The photo is not kept.')}</p>`}`
+    : `<div class="notice"><p>${t('Add an API key to fill this in from a photo.')}</p><button type="button" class="link" data-act="settings" data-sec="analysis">${t('Add key')}</button></div>`;
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${form.isNew ? t('New food') : esc(td(S.draft.plan.foods[key].name))}</h2><button type="button" class="btn" id="fd-back" data-act="plan-food-back">${t('Back')}</button></header>
+  <div class="food-name">
+    <label for="fd-name">${t('Name')}<input id="fd-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(td(form.name))}" data-orig="${esc(form.isNew ? '' : S.draft.plan.foods[key].name)}"${inv(r.bad.name)}${off}></label>
+    ${hasKey() ? `<button type="button" class="food-photo" data-act="plan-food-photo" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
+  </div>
+  ${ai}
+  ${uses ? `<p class="note">${tn('Used in {n} meal. Changes apply to it.|Used in {n} meals. Changes apply to all of them.', uses)}</p>` : ''}
+  <p class="note">${t('Values per 100 g')}</p>
+  <div class="field-grid">
+    ${field(0, t('Calories'), 'numeric')}${field(1, t('Protein (g)'), 'decimal')}${field(2, t('Carbs (g)'), 'decimal')}${field(3, t('Fat (g)'), 'decimal')}${field(4, t('Fibre (g)'), 'decimal')}
+  </div>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="plan-food-done"${r.valid && !busy ? '' : ' disabled'}>${t('Done')}</button></div>`;
 }
 
 // ——— Settings: every section starts collapsed and shows its current state in the heading ———

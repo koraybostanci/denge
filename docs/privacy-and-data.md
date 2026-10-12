@@ -13,6 +13,7 @@
   your goals, the weight schedule and where you stand against it. No photos.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
+- A photo taken to fill in a food's values is sent with no other data and is not stored.
 - The API key is stored on the device only, unencrypted like the rest of the app's data, and is
   never written to a backup file.
 - Photo location is off by default. When on, it is read on the device and matched to places you
