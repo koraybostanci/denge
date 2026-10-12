@@ -1,5 +1,5 @@
 // The fixed state and the screens rendered from it, for the English snapshot and the pseudo-locale test.
-// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, badge and avatar sheets, which are
+// What is covered: Today, Log, Check, Progress, Plan, Settings and the entry, number, slot, plan, meal editor, badge and avatar sheets, which are
 // string-returning functions of the state S and run in Node as they are. Not covered: anything that needs the DOM
 // (attachChart, toasts and the other code in app.js, which reads document and window at import time).
 process.env.TZ = 'UTC';
@@ -30,6 +30,7 @@ export function fixture() {
   S.viewDay = T;
   S.sheet = null;
   S.calPick = null;
+  S.draft = null;
   S.settings = core.freshSettings();
   S.plans = { active: 'default', list: [seedPlan] };
   S.plan = buildPlan(seedPlan);
@@ -87,11 +88,20 @@ export function screens() {
   add('slot-sheet', () => views.renderSlotSheet('lunch', T));
   add('plan-sheet', () => views.renderPlanSheet('L-A'));
   add('frame-sheet', () => views.renderFrameSheet('L-A'));
+  // The meal editor while only Default exists: a meal of it, and a new meal in Snack 2
+  core.startDraft('L-A');
+  add('meal-editor', views.renderMealEditor);
+  core.startDraft(null, 'snack2', 'U-new01');
+  add('meal-editor-new', views.renderMealEditor);
+  S.draft = null;
   // With a plan of the person's own: active (Snack 2 has no meals), then Default active while it exists
   S.tab = 'plan';
   S.plans = { active: MINE.id, list: [seedPlan, MINE] };
   S.plan = buildPlan(MINE);
   add('plan-mine', views.renderPlan);
+  core.startDraft('U-oats');
+  add('meal-editor-mine', views.renderMealEditor);
+  S.draft = null;
   S.plans = { active: 'default', list: [seedPlan, MINE] };
   S.plan = buildPlan(seedPlan);
   add('plan-default-mine', views.renderPlan);

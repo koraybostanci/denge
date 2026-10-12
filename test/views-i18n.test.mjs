@@ -362,3 +362,87 @@ test('Plan: the switch, Delete My plan, the empty slot and what only Default sho
   fixture();
   assert.ok(!views.renderPlanSheet('L-A').includes(note));
 });
+
+test('Plan: Edit meal, + Add meal and the meal editor, by which plans exist', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  const { PLAN_CAPS } = await import('../js/backup.js');
+  fixture();
+  S.tab = 'plan';
+  const edit = /data-act="plan-meal-edit"/;
+  const add = /data-act="plan-meal-add" data-slot="lunch"/;
+  const sub = 'Tap a meal to see or change it.';
+  // (a) only Default: Edit meal under Log for today, + Add meal on every slot heading, the new subtitle
+  const only = views.renderPlan();
+  const onlySheet = views.renderPlanSheet('L-A');
+  assert.match(onlySheet, edit);
+  assert.ok(onlySheet.indexOf('data-act="log-plan-today"') < onlySheet.indexOf('data-act="plan-meal-edit"'));
+  assert.equal((only.match(/data-act="plan-meal-add"/g) || []).length, 6);
+  assert.match(only, add);
+  assert.ok(only.includes(sub));
+  // Editor on a meal of Default: Save to My plan with its note, Delete meal
+  core.startDraft('L-A');
+  const ed = views.renderMealEditor();
+  assert.match(ed, /<h2 id="sheet-title">Egg and cheese plate<\/h2>/);
+  assert.match(ed, /data-act="plan-meal-save">Save to My plan</);
+  assert.ok(ed.includes('Default stays as it is. Saving creates My plan with this change, and the app uses My plan from then on.'));
+  assert.ok(ed.includes('Changes apply from now on. Meals you already logged keep their numbers.'));
+  assert.match(ed, /data-act="plan-meal-delete"/);
+  assert.match(ed, /<b>487<\/b> kcal/);
+  assert.match(ed, /<option value="\+new">New food…<\/option>\s*<\/select>/);
+  assert.equal((ed.match(/class="ing"/g) || []).length, 6);
+  // A new meal: its title names the slot, Save waits for a name and an ingredient, no Delete
+  core.startDraft(null, 'workout', 'U-n1');
+  const nw = views.renderMealEditor();
+  assert.match(nw, /<h2 id="sheet-title">New meal · Workout-day extras<\/h2>/);
+  assert.match(nw, /placeholder="e.g. Chicken wrap"/);
+  assert.match(nw, /data-act="plan-meal-save" disabled>/);
+  assert.doesNotMatch(nw, /data-act="plan-meal-delete"/);
+  // Typed values: a wrong one is marked, and at 12 ingredients the food picker is off
+  Object.assign(S.draft.meal, { name: 'Wrap', ingredients: [['egg', '0'], ['bread', '45']] });
+  const marked = views.renderMealEditor();
+  assert.match(marked, /id="md-g-0"[^>]*aria-invalid="true"/);
+  assert.doesNotMatch(marked, /id="md-g-1"[^>]*aria-invalid/);
+  assert.match(marked, /data-act="plan-meal-save" disabled>/);
+  S.draft.meal.ingredients = Array.from({ length: PLAN_CAPS.ingredients }, () => ['egg', '10']);
+  const full = views.renderMealEditor();
+  assert.match(full, /<select id="md-add" class="ing-add" aria-label="Add ingredient" disabled>/);
+  assert.match(full, /data-act="plan-meal-save">Save to My plan</);
+  // (b) My plan active: plain Save, no note
+  S.plans = { active: MINE.id, list: [seedPlan, MINE] };
+  S.plan = buildPlan(MINE);
+  assert.match(views.renderPlan(), add);
+  assert.ok(!views.renderPlan().includes(sub));
+  assert.match(views.renderPlanSheet('U-oats'), edit);
+  core.startDraft('U-oats');
+  const mineEd = views.renderMealEditor();
+  assert.match(mineEd, /data-act="plan-meal-save">Save</);
+  assert.ok(!mineEd.includes('Default stays as it is.'));
+  // + Add meal is gone at the meal cap
+  S.plan = { ...S.plan, meals: Array.from({ length: PLAN_CAPS.meals }, (_, i) => ({ ...S.plan.meals[0], id: `U-${i}` })) };
+  assert.doesNotMatch(views.renderPlan(), /plan-meal-add/);
+  // (c) Default active while My plan exists: no Edit, no + Add
+  S.plans = { active: 'default', list: [seedPlan, MINE] };
+  S.plan = buildPlan(seedPlan);
+  assert.doesNotMatch(views.renderPlan(), /plan-meal-add/);
+  assert.doesNotMatch(views.renderPlanSheet('L-A'), edit);
+  fixture();
+});
+
+test('meal editor in Turkish: its text, names and measures through td(), the stored English kept in data-orig', async () => {
+  fixture();
+  await setLang('tr');
+  core.startDraft('L-A');
+  const ed = views.renderMealEditor();
+  assert.ok(ed.includes('value="Yumurta ve peynir tabağı" data-orig="Egg and cheese plate"'));
+  assert.ok(ed.includes('value="2 yumurta" data-orig="2 eggs"'));
+  assert.ok(ed.includes('>Haşlanmış yumurta</button>'));
+  for (const s of ['Planım’a kaydet', 'Öğünü sil', 'Malzeme ekle', 'Yeni yiyecek…', 'Ölçü (isteğe bağlı)', 'Değişiklikler bundan sonrası için geçerli.', 'Varsayılan olduğu gibi kalır.']) assert.ok(ed.includes(s), s);
+  core.startDraft(null, 'snack2', 'U-n1');
+  assert.match(views.renderMealEditor(), /Yeni öğün · 2\. ara öğün/);
+  S.tab = 'plan';
+  assert.ok(views.renderPlan().includes('Görmek ya da değiştirmek için bir öğüne dokun.'));
+  assert.ok(views.renderPlan().includes('Öğün ekle'));
+  assert.ok(views.renderPlanSheet('L-A').includes('Öğünü düzenle'));
+  fixture();
+});

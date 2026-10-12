@@ -1,7 +1,7 @@
 // A backup file comes from outside the app. Everything read from one is checked and given the right
 // type and size before it is stored or shown, so a damaged or hostile file cannot break the screens.
 // Pure functions: no DOM and no storage.
-import { T } from './i18n.js';
+import { T, parseNum } from './i18n.js';
 import { SLOT_NAME, PLAN_SLOTS } from './plan.js';
 import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
@@ -210,6 +210,34 @@ export function cleanPlan(raw) {
   }
   if (!Array.isArray(raw.meals)) changed = true;
   return { plan: { id: raw.id, name: text(raw.name, PLAN_CAPS.name) || T('My plan'), foods, meals }, changed };
+}
+
+// What the meal editor holds, read for a save: the name and the rows as typed (grams a number or typed text, decimal comma
+// allowed), grams rounded to whole grams so that cleanPlan passes a valid save unchanged. bad marks what is typed and wrong
+// (an empty field is not marked); valid needs a name, at least one ingredient, and every row's grams from 1 to 5,000.
+export function readMeal(meal) {
+  const name = clean1(meal.name);
+  const rows = Array.isArray(meal.ingredients) ? meal.ingredients : [];
+  const bad = { name: name.length > PLAN_CAPS.name, rows: [] };
+  const ingredients = [];
+  for (const [food, g, measure] of rows) {
+    const typed = String(g ?? '').trim();
+    const grams = Math.round(typeof g === 'number' ? g : parseNum(typed));
+    const ok = grams >= 1 && grams <= PLAN_CAPS.grams;
+    const m = clean1(measure);
+    bad.rows.push({ g: !!typed && !ok, m: m.length > PLAN_CAPS.measure });
+    if (ok) ingredients.push(m ? [food, grams, m] : [food, grams]);
+  }
+  const valid = !!name && !bad.name && rows.length > 0 && rows.length <= PLAN_CAPS.ingredients && ingredients.length === rows.length && !bad.rows.some((r) => r.m);
+  return { meal: { id: meal.id, slot: meal.slot, name, ingredients }, bad, valid };
+}
+
+// The plan a meal editor save writes: the draft plan with the meal put in (replacing the one with its id, else added at the end)
+// or, with remove, taken out. A copy of Default becomes My plan under newId. The input is not changed.
+export function planFromDraft(plan, meal, { remove = false, newId } = {}) {
+  const at = plan.meals.findIndex((m) => m.id === meal.id);
+  const meals = remove ? plan.meals.filter((m) => m.id !== meal.id) : at < 0 ? [...plan.meals, meal] : plan.meals.map((m, i) => (i === at ? meal : m));
+  return plan.id === 'default' ? { ...plan, id: newId, name: T('My plan'), meals } : { ...plan, meals };
 }
 
 // The plans of a backup file ({ active, list }): the first usable user plan only, cleaned, and the active id when that plan exists

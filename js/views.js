@@ -2,13 +2,14 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan,
 } from './core.js';
+import { readMeal, PLAN_CAPS } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
 import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
-import { SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm } from './plan.js';
+import { SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm, buildPlan } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n0 = fmtInt;
@@ -1313,10 +1314,11 @@ export function renderPlan() {
   const s = S.settings;
   const pictured = S.plan.meals.filter((m) => (s.planPhotos || {})[m.id]).length;
   const def = onDefault(); // the slot notes and the dinner rotation describe Default, so they show only on it
+  const canAdd = canEditPlan() && S.plan.meals.length < PLAN_CAPS.meals;
   const slot = (id, title, time, note) => {
     const meals = S.plan.meals.filter((m) => m.slot === id);
     return `<section class="plan-slot">
-    <div class="plan-slot-head"><h2>${title}${time ? `<small>${time}</small>` : ''}</h2></div>${def && note ? `<p class="note">${note}</p>` : ''}
+    <div class="plan-slot-head"><h2 id="plan-h-${id}">${title}${time ? `<small>${time}</small>` : ''}</h2>${canAdd ? `<button type="button" class="link plan-add" data-act="plan-meal-add" data-slot="${id}" aria-describedby="plan-h-${id}"><span aria-hidden="true">+ </span>${t('Add meal')}</button>` : ''}</div>${def && note ? `<p class="note">${note}</p>` : ''}
     ${meals.length ? `<ul class="meal-list">${meals.map((m) => mealRow(m, 'plan-meal', mealThumb(m))).join('')}</ul>` : `<p class="plan-empty">${t('No meals here; Today won’t suggest one.')}</p>`}
   </section>`;
   };
@@ -1325,7 +1327,7 @@ export function renderPlan() {
   const group = (title, body) => `<details class="rule-group"><summary><span>${title}</span></summary><div class="rule-body">${body}</div></details>`;
   return `
   <header class="top">
-    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : t('Tap a meal for its ingredients, and to add a photo of your own plate.')}</p></div>
+    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : hasMyPlan() ? t('Tap a meal for its ingredients, and to add a photo of your own plate.') : t('Tap a meal to see or change it.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
   ${sw}
@@ -1386,7 +1388,50 @@ export function renderPlanSheet(id) {
     <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th></tr></thead>
     <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td>${n0(i.kcal)}</td></tr>`).join('')}</tbody>
   </table>
-  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button></div>`;
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button>${canEditPlan() ? `
+    <button type="button" class="btn btn-wide" data-act="plan-meal-edit" data-id="${id}">${t('Edit meal')}</button>` : ''}</div>`;
+}
+
+// The heading a plan slot has on the Plan tab
+const planSlotTitle = (id) => (id === 'workout' ? t('Workout-day extras') : id === 'late' ? lateName() : td(SLOT_NAME[id]));
+
+// The meal editor's live total: the draft meal worked out from the draft plan's foods (rows without valid grams count nothing)
+export function mealEditorTotal() {
+  const m = buildPlan({ foods: S.draft.plan.foods, meals: [readMeal(S.draft.meal).meal] }).meals[0];
+  return `<b>${m.kcal}</b> kcal<span>${t('{p} g protein, {fib} g fibre', { p: n0(m.p), fib: n0(m.fib) })}</span>`;
+}
+
+// The meal editor, an edit state of the plan meal sheet, drawn from S.draft. Names and measures show through td(); data-orig
+// holds the stored text, so one that comes back unchanged keeps it. Fields keep what is typed: grams stay text until a save.
+export function renderMealEditor() {
+  const { plan, meal } = S.draft;
+  const saved = plan.meals.find((m) => m.id === meal.id);
+  const first = plan.id === 'default'; // the first save creates My plan
+  const r = readMeal(meal);
+  const foods = Object.keys(plan.foods).sort((a, b) => td(plan.foods[a].name).localeCompare(td(plan.foods[b].name), LOCALE));
+  const inv = (bad) => (bad ? ' aria-invalid="true"' : '');
+  const row = ([key, g, measure], i) => {
+    const food = td(plan.foods[key].name);
+    return `<li class="ing">
+      <div class="ing-head"><button type="button" class="link" data-act="plan-food" data-key="${esc(key)}">${esc(food)}</button><button type="button" class="ing-x" data-act="plan-ing-remove" data-i="${i}" aria-label="${esc(t('Remove {food}', { food }))}">✕</button></div>
+      <div class="ing-fields">
+        <span class="ing-g"><input id="md-g-${i}" type="text" inputmode="decimal" autocomplete="off" value="${esc(g)}" aria-label="${t('Grams')}"${inv(r.bad.rows[i].g)}><span aria-hidden="true">g</span></span>
+        <input id="md-m-${i}" type="text" autocomplete="off" maxlength="${PLAN_CAPS.measure}" value="${esc(measure ? td(measure) : '')}" data-orig="${esc(measure || '')}" placeholder="${t('Measure (optional)')}" aria-label="${t('Measure (optional)')}"${inv(r.bad.rows[i].m)}>
+      </div></li>`;
+  };
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${saved ? esc(td(saved.name)) : t('New meal · {slot}', { slot: planSlotTitle(meal.slot) })}</h2><button type="button" class="btn" data-act="plan-meal-cancel">${t('Cancel')}</button></header>
+  <div class="field-grid meal-edit-name"><label for="md-name">${t('Name')}<input id="md-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(td(meal.name))}" data-orig="${esc(saved ? saved.name : '')}"${saved ? '' : ` placeholder="${t('e.g. Chicken wrap')}"`}${inv(r.bad.name)}></label></div>
+  <p class="entry-value" id="md-total">${mealEditorTotal()}</p>
+  <p class="note">${t('Changes apply from now on. Meals you already logged keep their numbers.')}</p>
+  ${meal.ingredients.length ? `<ul class="ing-list">${meal.ingredients.map(row).join('')}</ul>` : ''}
+  <select id="md-add" class="ing-add" aria-label="${t('Add ingredient')}"${meal.ingredients.length >= PLAN_CAPS.ingredients ? ' disabled' : ''}>
+    <option value="" selected>${t('Add ingredient')}</option>${foods.map((k) => `<option value="${esc(k)}">${esc(td(plan.foods[k].name))}</option>`).join('')}
+    <option value="+new">${t('New food…')}</option>
+  </select>
+  ${first ? `<p class="note">${t('Default stays as it is. Saving creates My plan with this change, and the app uses My plan from then on.')}</p>` : ''}
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="plan-meal-save"${r.valid ? '' : ' disabled'}>${first ? t('Save to My plan') : t('Save')}</button></div>
+  ${saved ? `<p class="plan-delete"><button type="button" class="link link-danger" data-act="plan-meal-delete">${t('Delete meal')}</button></p>` : ''}`;
 }
 
 // ——— Settings: every section starts collapsed and shows its current state in the heading ———

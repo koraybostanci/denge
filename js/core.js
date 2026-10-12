@@ -43,12 +43,27 @@ export const S = {
   storage: null,
   calPick: null,
   chartRange: 'weeks', // the weight chart: 'week' (7 days), 'weeks' (14) or 'whole' (the plan)
-  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
+  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-edit'|'plan-frame', ...}
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
   plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
+  draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal }; nothing is stored until it is saved
 };
+
+// Plan meals can be changed while Default is the only plan (a save creates My plan) and while My plan is active,
+// not while Default is active and My plan exists
+export const canEditPlan = () => !S.plans || S.plans.list.length < 2 || S.plans.active !== 'default';
+// Opens the meal editor's draft on a deep copy of the active stored plan: the meal with that id, or a new one (newId) in slot
+export function startDraft(id, slot, newId) {
+  const copy = (x) => JSON.parse(JSON.stringify(x));
+  const plan = copy(S.plans.list.find((p) => p.id === S.plans.active) || S.plans.list[0]);
+  const meal = plan.meals.find((m) => m.id === id);
+  S.draft = { plan, meal: meal ? copy(meal) : { id: newId, slot, name: '', ingredients: [] } };
+  return S.draft;
+}
+// Closing or cancelling the editor: the draft goes and nothing is written
+export function dropDraft() { S.draft = null; }
 
 // A meal of the active plan by its id, or undefined (a search of the list, so text from outside cannot find "constructor")
 export const mealById = (id) => S.plan.meals.find((m) => m.id === id);

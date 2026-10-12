@@ -7,13 +7,13 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, planFromDraft, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -1041,6 +1041,7 @@ function closeSheet() {
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
+  dropDraft(); // and so is a meal being edited: nothing is written
   $('#app').inert = false;
   document.body.classList.remove('sheet-open');
   // A render may have replaced the button that opened the sheet: find it again by its id
@@ -1057,6 +1058,41 @@ async function openSettings(section, focusSel) {
   await refreshStorage();
   const wasOpen = !!(S.sheet && S.sheet.type === 'settings');
   openSheet(renderSettings(), { type: 'settings' }, focusSel || null, wasOpen && !focusSel);
+}
+
+// ——— The meal editor (S.draft) ———
+// A stored name or measure that comes back as td() showed it stays the stored text
+const keptText = (typed, stored) => (typed.trim() === td(stored) ? stored : typed);
+// What the editor's fields hold, into the draft (grams stay as typed until a save reads them)
+function syncDraft() {
+  const d = S.draft;
+  const name = $('#md-name');
+  if (!d || !name) return;
+  d.meal.name = keptText(name.value, name.dataset.orig);
+  d.meal.ingredients = d.meal.ingredients.map((row, i) => {
+    const m = keptText($(`#md-m-${i}`).value, $(`#md-m-${i}`).dataset.orig);
+    return m ? [row[0], $(`#md-g-${i}`).value, m] : [row[0], $(`#md-g-${i}`).value];
+  });
+}
+// After typing: the live total, the marks on wrong fields and whether Save can be used, without redrawing the fields
+function checkDraft() {
+  syncDraft();
+  const r = readMeal(S.draft.meal);
+  const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
+  mark($('#md-name'), r.bad.name);
+  r.bad.rows.forEach((b, i) => { mark($(`#md-g-${i}`), b.g); mark($(`#md-m-${i}`), b.m); });
+  $('#md-total').innerHTML = mealEditorTotal();
+  $('[data-act="plan-meal-save"]').disabled = !r.valid;
+}
+const openEditor = (focusSel) => openSheet(renderMealEditor(), { type: 'plan-edit', id: S.draft.meal.id }, focusSel);
+// Every save of the editor: the draft plan with the meal changed (or removed), in one write. A copy of Default becomes My plan
+// and is made active. Says whether My plan was created.
+async function saveDraft(meal, remove) {
+  const first = S.draft.plan.id === 'default';
+  const plan = planFromDraft(S.draft.plan, meal, { remove, newId: 'P-' + db.uid() });
+  await writePlans([plan], plan.id);
+  dropDraft();
+  return first;
 }
 
 // ——— Actions ———
@@ -1106,6 +1142,43 @@ const ACT = {
     return wearPart(el.dataset.part);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
+  // The meal editor: Edit meal from the meal sheet, + Add meal from a slot heading
+  'plan-meal-edit': (el) => { startDraft(el.dataset.id); openEditor(); },
+  'plan-meal-add': (el) => { startDraft(null, el.dataset.slot, 'U-' + db.uid()); openEditor('#md-name'); },
+  'plan-meal-cancel': () => {
+    const id = S.draft && S.draft.meal.id;
+    dropDraft();
+    if (mealById(id)) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
+  },
+  'plan-ing-remove': (el) => {
+    syncDraft();
+    S.draft.meal.ingredients.splice(Number(el.dataset.i), 1);
+    openEditor('#md-add');
+  },
+  'plan-food': () => {}, // the food form comes with phase 6
+  'plan-meal-save': async (el) => {
+    if (!S.draft) return;
+    syncDraft();
+    const r = readMeal(S.draft.meal);
+    if (!r.valid) return;
+    el.disabled = true; // no second save while this one is written (typing enables it again)
+    const first = await saveDraft(r.meal);
+    openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id });
+    render();
+    toast(first ? t('Saved to My plan. Default is unchanged.') : t('{title} saved', { title: td(r.meal.name) }));
+  },
+  'plan-meal-delete': async () => {
+    if (!S.draft) return;
+    const meal = S.draft.plan.meals.find((m) => m.id === S.draft.meal.id);
+    const first = S.draft.plan.id === 'default';
+    const name = td(meal.name);
+    if (!window.confirm(first ? t('Delete {meal}? This creates My plan without it. Default stays as it is.', { meal: name }) : t('Delete {meal}? Logged entries stay.', { meal: name }))) return;
+    await saveDraft(meal, true);
+    await setPlanPhotos(S.settings.planPhotos);
+    closeSheet();
+    render();
+    if (first) toast(t('Saved to My plan. Default is unchanged.'));
+  },
   // Plan: which plan is active, and deleting My plan (the log stays; pictures of meals no plan holds go)
   'plan-use': async (el) => {
     if (el.dataset.id === S.plans.active) return;
@@ -1493,6 +1566,7 @@ document.addEventListener('click', (ev) => {
 // The zoom slider of the framing step
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
+  if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -1516,6 +1590,19 @@ document.addEventListener('change', (ev) => guard(async () => {
     return;
   }
   if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file) await importBackup(file); return; }
+  // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus ("New food…" comes with phase 6)
+  if (el.id === 'md-add') {
+    const key = el.value;
+    el.value = '';
+    if (!S.draft || !Object.hasOwn(S.draft.plan.foods, key)) return;
+    syncDraft();
+    if (S.draft.meal.ingredients.length >= PLAN_CAPS.ingredients) return;
+    S.draft.meal.ingredients.push([key, '']);
+    const sel = `#md-g-${S.draft.meal.ingredients.length - 1}`;
+    openEditor(sel);
+    $(sel).scrollIntoView({ block: 'nearest' });
+    return;
+  }
   if (el.dataset.act === 'loc-toggle') return ACT['loc-toggle'](el);
   if (el.dataset.act === 'review-toggle') return ACT['review-toggle'](el);
   if (el.dataset.chg === 'provider') { S.settings.provider = el.value; await saveSettings(); render(); return openSettings(); }
@@ -1607,7 +1694,7 @@ setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay
 let swReg = null;
 function safeToReload() {
   const c = S.check;
-  const working = S.busy.size || S.reviewing.size || S.coaching.size || preparing || c.busy || c.photos.length || c.note; // nothing in flight or half-written
+  const working = S.busy.size || S.reviewing.size || S.coaching.size || preparing || c.busy || c.photos.length || c.note || S.draft; // nothing in flight or half-written
   return $('#sheet').hidden && !$('#composer-input').value && !working && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName));
 }
 function setupUpdates() {

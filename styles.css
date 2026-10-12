@@ -504,6 +504,7 @@ input[type="text"], input[type="password"], input[type="time"], input[type="date
   width: 100%; min-width: 0; height: 44px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--r-ctl);
   background: var(--raised); font-size: 16px; color: var(--ink); -webkit-appearance: none; appearance: none;
 }
+input[aria-invalid="true"] { border-color: var(--over); }
 .btn { min-height: 44px; padding: 0 14px; border-radius: var(--r-ctl); border: 1px solid var(--edge); font-size: 14.5px; font-weight: 600; background: var(--raised); }
 .btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn-wide { width: 100%; min-height: 50px; font-size: 16px; }
@@ -616,6 +617,17 @@ button.cal-d::before, button.cal-wk::before { content: ""; position: absolute; i
 .plan-slot-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .plan-empty { margin-top: 8px; padding: 12px 14px; border: 1px dashed var(--edge); border-radius: var(--r-card); color: var(--ink3); font-size: 13.5px; line-height: 1.3; }
 .plan-delete { margin-top: 20px; }
+.plan-add { flex: none; font-size: 14px; }
+/* The meal editor: the name, one card per ingredient, then the food picker */
+.meal-edit-name { grid-template-columns: 1fr; }
+.ing-list { display: grid; gap: 8px; margin-top: 12px; }
+.ing { padding: 0 0 10px 12px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
+.ing-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ing-head .link { min-width: 0; color: var(--ink); text-align: left; font-weight: 600; }
+.ing-x { flex: none; width: 44px; height: 44px; color: var(--ink2); font-size: 15px; }
+.ing-fields { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 8px; padding-right: 12px; }
+.ing-g { display: flex; align-items: center; gap: 6px; font: 600 14px var(--num); color: var(--ink2); }
+.ing-add { margin-top: 12px; }
 .plan-pic { position: relative; display: block; aspect-ratio: 1; background: var(--table); overflow: hidden; border-bottom: 1px solid var(--line); }
 /* The house format: every picture is a round plate with the same rim, on the same table */
 .plan-pic img { position: absolute; top: 50%; left: 50%; height: 84%; width: auto; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px var(--rim), 0 4px 10px -4px rgb(0 0 0 / .25); }

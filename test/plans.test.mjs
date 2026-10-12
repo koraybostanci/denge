@@ -1,8 +1,11 @@
 // The stored plans (kv `plans`): the record a save writes, the one validator, load, restore and the plan pictures. `node --test`
-// js/app.js needs a browser, so its writePlans, setPlanPhotos, load and restore are tested through the pure functions they call.
+// js/app.js needs a browser, so its writePlans, setPlanPhotos, load, restore and meal editor saves are tested through the pure
+// functions they call (startDraft and dropDraft in js/core.js; readMeal and planFromDraft in js/backup.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS } from '../js/backup.js';
+import { readFileSync } from 'node:fs';
+import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, planFromDraft } from '../js/backup.js';
+import { S, startDraft, dropDraft, canEditPlan } from '../js/core.js';
 import seedPlan from '../js/default-plan.js';
 
 const copy = (x) => JSON.parse(JSON.stringify(x));
@@ -123,4 +126,111 @@ test('settings and photos from a file: no Object.prototype meal id, and a cap on
   const many = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`M-${i}`, `p${i}`]));
   assert.equal(Object.keys(cleanSettings({ planPhotos: many }).planPhotos).length, 200);
   assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), plan: 'constructor' }).plan, undefined);
+});
+
+// ——— The meal editor: S.draft, read for a save, and the plan its one writePlans call stores ———
+// What saveDraft in js/app.js passes to writePlans([plan], plan.id): the record plansRecord builds from it
+const saveRecord = (meal, opts) => { const plan = planFromDraft(S.draft.plan, meal, { newId: 'P-new01', ...opts }); return plansRecord(seedPlan, [plan], plan.id); };
+
+test('editor: the first save on Default creates My plan with the change and makes it active; Default stays the seed', () => {
+  S.plans = { active: 'default', list: [seedPlan] };
+  assert.equal(canEditPlan(), true);
+  startDraft('L-A');
+  assert.notEqual(S.draft.plan, seedPlan); // a deep copy
+  S.draft.meal.ingredients[1] = ['cheese', '80'];
+  const r = readMeal(S.draft.meal);
+  assert.equal(r.valid, true);
+  const record = saveRecord(r.meal);
+  assert.ok(record);
+  assert.equal(record.active, 'P-new01');
+  assert.deepEqual(record.list[0], SEED);
+  assert.deepEqual(copy(seedPlan), SEED); // nothing wrote into the seed
+  const my = record.list[1];
+  assert.equal(my.id, 'P-new01');
+  assert.equal(my.name, 'My plan');
+  assert.deepEqual(my.meals.find((m) => m.id === 'L-A').ingredients[1], ['cheese', 80]);
+  assert.deepEqual(my.meals.map((m) => m.id), SEED.meals.map((m) => m.id)); // replaced in place
+  assert.deepEqual(my.foods, SEED.foods);
+  // A new meal is added at the end
+  startDraft(null, 'snack2', 'U-new1');
+  assert.deepEqual(S.draft.meal, { id: 'U-new1', slot: 'snack2', name: '', ingredients: [] });
+  Object.assign(S.draft.meal, { name: 'Chicken wrap', ingredients: [['chicken', '120'], ['bread', '45', '1 slice']] });
+  const added = saveRecord(readMeal(S.draft.meal).meal).list[1];
+  assert.deepEqual(added.meals.at(-1), { id: 'U-new1', slot: 'snack2', name: 'Chicken wrap', ingredients: [['chicken', 120], ['bread', 45, '1 slice']] });
+  dropDraft();
+});
+
+test('editor: on My plan a save keeps its id and name; while Default is active next to My plan nothing can be edited', () => {
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  assert.equal(canEditPlan(), true);
+  startDraft('U-x1');
+  S.draft.meal.name = 'Oats and berries';
+  const record = saveRecord(readMeal(S.draft.meal).meal);
+  assert.equal(record.active, 'P-abc123');
+  assert.equal(record.list[1].name, 'My plan');
+  assert.equal(record.list[1].meals.find((m) => m.id === 'U-x1').name, 'Oats and berries');
+  S.plans = { active: 'default', list: [seedPlan, mine()] };
+  assert.equal(canEditPlan(), false);
+  dropDraft();
+});
+
+test('editor: cancelling drops the draft and writes nothing', () => {
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  const before = copy(S.plans);
+  startDraft('U-x1');
+  S.draft.meal.name = 'Changed';
+  S.draft.meal.ingredients.push(['egg', '50']);
+  S.draft.plan.meals.length = 0;
+  dropDraft();
+  assert.equal(S.draft, null);
+  assert.deepEqual(S.plans, before);
+  assert.deepEqual(copy(seedPlan), SEED);
+  // closeSheet, which every way of closing the sheet goes through, drops it
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /function closeSheet\(\) \{[^}]*dropDraft\(\);/);
+  // and an open draft counts as half-typed for the update check
+  assert.match(src, /const working = [^;]*\|\| S\.draft;/);
+});
+
+test('editor: a valid save passes cleanPlan unchanged (whole grams, decimal comma); what is wrong blocks it', () => {
+  S.plans = { active: 'default', list: [seedPlan] };
+  startDraft(null, 'lunch', 'U-r1');
+  Object.assign(S.draft.meal, { name: '  Chicken   wrap ', ingredients: [['chicken', '12,5'], ['bread', '0,6', '1 slice'], ['salad', '99.4', ' '], ['egg', 50.5]] });
+  const r = readMeal(S.draft.meal);
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.meal.ingredients, [['chicken', 13], ['bread', 1, '1 slice'], ['salad', 99], ['egg', 51]]);
+  assert.equal(r.meal.name, 'Chicken wrap');
+  const plan = planFromDraft(S.draft.plan, r.meal, { newId: 'P-r1' });
+  const c = cleanPlan(plan);
+  assert.equal(c.changed, false);
+  assert.deepEqual(c.plan, plan);
+  assert.ok(plansRecord(seedPlan, [plan], plan.id));
+  // Wrong values are marked; empty ones only block the save
+  const check = (meal) => readMeal({ id: 'U-r1', slot: 'lunch', name: 'X', ingredients: [['egg', '50']], ...meal });
+  for (const g of ['0', '0,4', '5001', 'abc', '-5', '1e3']) {
+    const x = check({ ingredients: [['egg', g]] });
+    assert.equal(x.valid, false, g);
+    assert.equal(x.bad.rows[0].g, true, g);
+  }
+  assert.equal(check({ ingredients: [['egg', '5000']] }).valid, true);
+  assert.deepEqual([check({ ingredients: [['egg', '']] }).valid, check({ ingredients: [['egg', '']] }).bad.rows[0].g], [false, false]);
+  assert.deepEqual([check({ name: ' ' }).valid, check({ name: ' ' }).bad.name], [false, false]);
+  assert.equal(check({ name: 'x'.repeat(61) }).bad.name, true);
+  assert.equal(check({ ingredients: [] }).valid, false);
+  assert.equal(check({ ingredients: Array.from({ length: 13 }, () => ['egg', '10']) }).valid, false);
+  assert.equal(check({ ingredients: Array.from({ length: 12 }, () => ['egg', '10']) }).valid, true);
+  assert.equal(check({ ingredients: [['egg', '10', 'x'.repeat(31)]] }).bad.rows[0].m, true);
+  dropDraft();
+});
+
+test('editor: deleting a meal on Default creates My plan without it', () => {
+  S.plans = { active: 'default', list: [seedPlan] };
+  startDraft('S2-B');
+  const record = saveRecord(S.draft.plan.meals.find((m) => m.id === 'S2-B'), { remove: true });
+  assert.equal(record.active, 'P-new01');
+  assert.deepEqual(record.list[0], SEED);
+  assert.deepEqual(record.list[1].meals.map((m) => m.id), SEED.meals.map((m) => m.id).filter((id) => id !== 'S2-B'));
+  // The pictures of a meal Default still holds stay
+  assert.deepEqual(sweepPlanPhotos({ 'S2-B': 'p1' }, { 'S2-B': 'p1' }, record).planPhotos, { 'S2-B': 'p1' });
+  dropDraft();
 });
