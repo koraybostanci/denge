@@ -90,7 +90,7 @@ version is shown under Settings → "Version and updates".
 - `js/tr.js`: the Turkish text, keyed by the English; `js/parse-tr.js`: the Turkish words the typed-entry parser accepts
 - `js/briefs.js`: what is sent to the model, always in English
 - `js/standalone.js`: the install screen shown in a browser tab (its two languages are inline)
-- `test/`: `node --test` tests (`badges`, `badge-art`, `unlock` and `avatar` cover the badge system); `extract.mjs` finds the strings, `screens.mjs` renders the screens
+- `test/`: `node --test` tests (`badges`, `badge-art`, `unlock` and `avatar` cover the badge system; `plans` covers stored plans, the meal editor and the food form); `extract.mjs` finds the strings, `screens.mjs` renders the screens
 - `sw.js`: offline cache and updates
 - `icons/`: `icon.svg` is the source; the PNG files are rendered from it for the Home Screen and
   the web app manifest
