@@ -695,6 +695,7 @@ export default {
   'e.g. Chicken wrap': 'ör. Tavuk dürüm',
   'Changes apply from now on. Meals you already logged keep their numbers.': 'Değişiklikler bundan sonrası için geçerli. Kaydettiğin öğünler kendi değerlerini korur.',
   'Add ingredient': 'Malzeme ekle',
+  'Discard your changes?': 'Değişiklikler silinsin mi?',
   'New food…': 'Yeni yiyecek…',
   'Default stays as it is. Saving creates My plan with this change, and the app uses My plan from then on.': 'Varsayılan olduğu gibi kalır. Kaydetmek bu değişiklikle Planım’ı oluşturur ve uygulama bundan sonra Planım’ı kullanır.',
   'Save to My plan': 'Planım’a kaydet',

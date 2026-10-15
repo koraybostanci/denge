@@ -63,6 +63,7 @@ export function startDraft(id, slot, newId) {
   const plan = copy(S.plans.list.find((p) => p.id === S.plans.active) || S.plans.list[0]);
   const meal = plan.meals.find((m) => m.id === id);
   S.draft = { plan, meal: meal ? copy(meal) : { id: newId, slot, name: '', ingredients: [] }, base: copy(plan.foods) };
+  S.draft.orig = draftKey(S.draft);
   return S.draft;
 }
 // What an editor name field shows: the stored name through td() while the draft still holds it (a seed name shows translated),
@@ -70,6 +71,9 @@ export function startDraft(id, slot, newId) {
 export const shownName = (draft, stored) => (draft === stored ? td(draft) : draft);
 // Closing or cancelling the editor: the draft goes and nothing is written (an open food form's photos are let go too)
 export function dropDraft() { if (S.draft) dropFood(); S.draft = null; }
+// Whether the editor's meal or plan differs from what startDraft cloned (grams count as typed text, as syncDraft leaves them)
+const draftKey = (d) => JSON.stringify({ meal: { ...d.meal, ingredients: d.meal.ingredients.map((r) => [r[0], String(r[1]), ...r.slice(2)]) }, plan: d.plan });
+export function draftChanged() { return !!S.draft && draftKey(S.draft) !== S.draft.orig; }
 
 // ——— The food form, over the meal editor: S.draft.food is the key of the food being edited (a new one is not in the foods
 // yet) and S.draft.foodForm what the form holds: the name, the five values per 100 g (numbers, or text as typed), the photos
@@ -371,14 +375,14 @@ export function parseLocal(text) {
     return { type: 'water', ml: Math.round(ml) };
   }
   if (TRAIN_RE.test(t)) return { type: 'train' };
+  const c = parseCount(t); // before the names: a plan meal called "Coffee" does not take the typed shortcut
+  if (c) return { type: 'count', ...c };
   const meal = S.plan.meals.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
   if (meal) return { type: 'plan', meal };
   const flex = FLEX.find((x) => norm(x.name) === t || norm(td(x.name)) === t);
   if (flex) return { type: 'flex', flex };
   const favorite = (S.settings.favorites || []).find((x) => norm(x.name) === t);
   if (favorite) return { type: 'favorite', favorite };
-  const c = parseCount(t);
-  if (c) return { type: 'count', ...c };
   return null;
 }
 // A day's coffee count and the totals for the Monday-to-Sunday week of `day` and the week before

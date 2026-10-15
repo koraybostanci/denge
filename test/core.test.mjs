@@ -478,3 +478,12 @@ test('a review goes stale when the minimum changes', () => {
   assert.equal(reviewState(day(-1)), 'stale');
   delete S.days[day(-1)];
 });
+
+test('the typed coffee and beer shortcuts win over a plan meal with the same name', () => {
+  S.plan = buildPlan({ id: 'mine', name: 'Mine', foods: seedPlan.foods, meals: [{ id: 'X-1', slot: 'snack1', name: 'Coffee', ingredients: [['salad', 100]] }, { id: 'X-2', slot: 'lunch', name: 'Big salad', ingredients: [['salad', 400]] }] });
+  try {
+    assert.deepEqual(parseLocal('coffee'), { type: 'count', key: 'coffee', n: 1 });
+    assert.equal(parseLocal('big salad').type, 'plan');
+    assert.equal(parseLocal('x-1').meal.id, 'X-1');
+  } finally { S.plan = SEED; }
+});

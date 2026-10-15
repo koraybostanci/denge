@@ -10,7 +10,7 @@ import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, startFood, doneFood, dropFood,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, startFood, doneFood, dropFood,
 } from './core.js';
 import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
@@ -1064,6 +1064,7 @@ function dismissSheet() {
     S.suppEdit = '';
     return openFood(hasKey() ? null : '[data-act="settings"]');
   }
+  if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
   closeSheet();
 }
 async function openSettings(section, focusSel) {
@@ -1152,7 +1153,7 @@ function releaseFoodPhotos() {
 function closeFood(row) {
   const key = S.draft.food;
   dropFood();
-  const sel = row >= 0 ? `#md-g-${row}` : `[data-act="plan-food"][data-key="${CSS.escape(key)}"]`;
+  const sel = row >= 0 ? `#md-g-${row}` : Object.hasOwn(S.draft.plan.foods, key) ? `[data-act="plan-food"][data-key="${CSS.escape(key)}"]` : '#md-add'; // a new food that is dropped has no row: the Add ingredient select
   openEditor(sel);
   const el = $(sel);
   if (el) el.scrollIntoView({ block: 'nearest' });

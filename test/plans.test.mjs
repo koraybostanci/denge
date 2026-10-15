@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft, savedPlan } from '../js/backup.js';
-import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, dropFood, foodUses, shownName } from '../js/core.js';
+import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, draftChanged, dropFood, foodUses, shownName } from '../js/core.js';
 import { td } from '../js/i18n.js';
 import seedPlan from '../js/default-plan.js';
 
@@ -494,4 +494,26 @@ test('setPlanPhotos writes settings only when the pictures map changes', () => {
 test('plan-meal-save re-enables the Save button when the write throws, and rethrows for guard()', () => {
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(src, /el\.disabled = true;[^\n]*\n\s*let first;\s*try \{ first = await saveDraft\(r\.meal\); \} catch \(e\) \{ el\.disabled = false; throw e; \}/);
+});
+
+test('draftChanged: false until the meal or the plan differs from what startDraft cloned', () => {
+  S.plans = { active: 'default', list: [seedPlan] };
+  assert.equal(draftChanged(), false); // no draft
+  startDraft('L-A');
+  assert.equal(draftChanged(), false);
+  S.draft.meal.ingredients = S.draft.meal.ingredients.map((r) => [r[0], String(r[1]), ...r.slice(2)]); // grams as typed text
+  assert.equal(draftChanged(), false);
+  S.draft.meal.name += 'x';
+  assert.equal(draftChanged(), true);
+  startDraft('L-A');
+  S.draft.plan.foods.uabc = { name: 'Oat', v: [1, 1, 1, 1, 1] };
+  assert.equal(draftChanged(), true);
+  dropDraft();
+  assert.equal(draftChanged(), false);
+});
+
+test('app.js: Back from a new food focuses the Add ingredient select; a dismissed edited draft asks first', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /Object\.hasOwn\(S\.draft\.plan\.foods, key\) \? `\[data-act="plan-food"\][^:]*: '#md-add'/);
+  assert.match(src, /draftChanged\(\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;/);
 });
