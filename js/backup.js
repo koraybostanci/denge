@@ -272,7 +272,11 @@ export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
   const base = plain(draft.base) ? draft.base : {};
   const changed = Object.entries(draft.plan.foods).filter(([k, f]) => !Object.hasOwn(base, k) || JSON.stringify(base[k]) !== JSON.stringify(f));
   const plan = JSON.parse(JSON.stringify(current));
-  return planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...JSON.parse(JSON.stringify(changed))]) }, meal, { remove, newId });
+  const saved = planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...JSON.parse(JSON.stringify(changed))]) }, meal, { remove, newId });
+  // a food the draft added (in neither draft.base nor the stored plan) that no meal uses is not kept; earlier foods always are
+  const used = new Set(saved.meals.flatMap((m) => m.ingredients.map((i) => i[0])));
+  const drop = changed.map(([k]) => k).filter((k) => !Object.hasOwn(base, k) && !Object.hasOwn(plan.foods, k) && !used.has(k));
+  return drop.length ? { ...saved, foods: Object.fromEntries(Object.entries(saved.foods).filter(([k]) => !drop.includes(k))) } : saved;
 }
 
 // An earlier build stored (and backed up) the plans as a bare list of user plans, with the active id in settings.activePlan

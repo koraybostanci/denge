@@ -428,6 +428,22 @@ test('a save after a plans write while the editor was open keeps the newer data:
   dropDraft();
 });
 
+test('a save drops a food added in the draft that no meal uses; kept rows and earlier foods stay', () => {
+  S.plans = plansRecord(seedPlan, [mine()], 'P-abc123');
+  startDraft('L-A');
+  S.draft.plan.foods.tofu = { name: 'Firm tofu', v: [120, 13, 2, 7, 1] }; // added, row removed
+  S.draft.plan.foods.oats2 = { name: 'More oats', v: [370, 13, 60, 7, 10] }; // added, row kept
+  S.draft.meal.ingredients.push(['oats2', 40]);
+  const unused = Object.keys(S.plans.list[1].foods).find((k) => !S.draft.meal.ingredients.some((i) => i[0] === k)); // an earlier food no meal uses
+  const plan = savedPlan(S.plans, S.draft, S.draft.meal);
+  assert.equal(Object.hasOwn(plan.foods, 'tofu'), false);
+  assert.equal(plan.foods.oats2.name, 'More oats');
+  assert.ok(unused && Object.hasOwn(plan.foods, unused));
+  assert.ok(plansRecord(seedPlan, [plan], plan.id));
+  assert.deepEqual(cleanPlan(plan).plan, plan);
+  dropDraft();
+});
+
 test('a save is refused when My plan the draft started from is gone, or a draft of Default would meet a user plan', () => {
   S.plans = plansRecord(seedPlan, [mine()], 'P-abc123');
   startDraft('L-A');
