@@ -1287,7 +1287,8 @@ const ACT = {
     const r = readMeal(S.draft.meal);
     if (!r.valid) return;
     el.disabled = true; // no second save while this one is written (typing enables it again)
-    const first = await saveDraft(r.meal);
+    let first;
+    try { first = await saveDraft(r.meal); } catch (e) { el.disabled = false; throw e; }
     if (first === null) { closeSheet(); return render(); }
     openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id });
     render();

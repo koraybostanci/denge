@@ -474,3 +474,8 @@ test('setPlanPhotos writes settings only when the pictures map changes', () => {
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(src, /const same = JSON\.stringify\(planPhotos\) === JSON\.stringify\(S\.settings\.planPhotos\);\s*S\.settings\.planPhotos = planPhotos;\s*if \(!same\) await saveSettings\(\);/);
 });
+
+test('plan-meal-save re-enables the Save button when the write throws, and rethrows for guard()', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /el\.disabled = true;[^\n]*\n\s*let first;\s*try \{ first = await saveDraft\(r\.meal\); \} catch \(e\) \{ el\.disabled = false; throw e; \}/);
+});
