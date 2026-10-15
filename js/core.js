@@ -413,7 +413,7 @@ export function suggest(day) {
   const open = openSlots(day);
   if (!open.length) {
     const late = S.plan.meals.find((m) => m.slot === 'late');
-    if (late && remP > 12 && rem >= 90) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
+    if (late && remP > 12 && rem >= late.kcal - 5) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
     return { rem, remP, meal: null };
   }
   const next = open[0];

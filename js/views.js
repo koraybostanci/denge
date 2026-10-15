@@ -356,7 +356,7 @@ function dayList(day) {
   }
   return `<section class="meals">
     <div class="meals-head"><h2>${isToday ? t('Today’s meals') : t('Meals')}<small>${t('{n} of {total}', { n: done, total: main })}</small></h2>
-      <button type="button" class="toggle" role="switch" aria-checked="${dd.train ? 'true' : 'false'}" data-act="train" data-v="${dd.train ? 0 : 1}" aria-label="${t('Workout day: budget {kcal} kcal, banana and skyr added', { kcal: n0(S.settings.kcalTrain) })}"><i aria-hidden="true"></i>${t('Workout day')}</button>
+      <button type="button" class="toggle" role="switch" aria-checked="${dd.train ? 'true' : 'false'}" data-act="train" data-v="${dd.train ? 0 : 1}"${onDefault() ? ` aria-label="${t('Workout day: budget {kcal} kcal, banana and skyr added', { kcal: n0(S.settings.kcalTrain) })}"` : ''}><i aria-hidden="true"></i>${t('Workout day')}</button>
     </div>
     <ul class="meal-list">${rows.join('')}</ul></section>`;
 }
@@ -447,7 +447,8 @@ function coachLine(day) {
     if (sg.meal && sg.slot) line = t('First up: {meal} at {time}.', { meal: td(sg.meal.name), time: sg.slot.time });
   } else if (sg.extra) {
     head = t('Meals done.');
-    line = t('Protein is {n} g short; 150 g of plain skyr closes the gap and fits the budget.', { n: n0(sg.remP) });
+    const g = sg.meal.items.reduce((a, i) => a + i.g, 0), name = td(sg.meal.name);
+    line = t('Protein is {n} g short; {g} g of {meal} closes the gap and fits the budget.', { n: n0(sg.remP), g: n0(g), meal: name.charAt(0).toLowerCase() + name.slice(1) });
   } else if (sg.meal && sg.slot) {
     head = t('You’re on track.');
     const meal = td(sg.meal.name);

@@ -317,6 +317,16 @@ test('Today: a meal time the active plan has no meal for is not listed, unless s
   fixture();
 });
 
+test('Today: the workout toggle label and the late-meal line follow the active plan', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  assert.match(views.renderToday(), /aria-label="Workout day: budget [\d,]+ kcal, banana and skyr added"/);
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.map((m) => (m.slot === 'late' ? { ...m, name: 'Warm milk' } : m)) });
+  S.plans = { active: 'P-x', list: [seedPlan, { id: 'P-x', name: 'My plan' }] };
+  try { assert.doesNotMatch(views.renderToday(), /banana and skyr added/); } finally { S.plans = { active: 'default', list: [seedPlan] }; S.plan = buildPlan(seedPlan); fixture(); }
+});
+
 test('Plan: the switch, Delete My plan, the empty slot and what only Default shows', async () => {
   const { buildPlan } = await import('../js/plan.js');
   const { default: seedPlan } = await import('../js/default-plan.js');

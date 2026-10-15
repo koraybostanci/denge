@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
   parseLocal, mealById,
@@ -172,6 +172,18 @@ test('the late snack is suggested only when every planned meal is logged', () =>
   const s = suggest(T);
   assert.equal(s.extra, true);
   assert.equal(s.slot.id, 'late');
+});
+
+test('the late snack needs room for the plan\u2019s own late meal, not a fixed 90 kcal', () => {
+  const left = (n) => { reset(); for (const slot of ['lunch', 'snack1', 'snack2', 'dinner']) meal(T, 0, 0, { slot }); meal(T, dayTarget(T) - n, 5, { slot: 'dinner' }); };
+  try {
+    left(90); assert.equal(suggest(T).extra, true); // Default's 95 kcal skyr, unchanged
+    left(89); assert.ok(!suggest(T).extra);
+    S.plan = buildPlan({ ...seedPlan, meals: [...seedPlan.meals.filter((m) => m.slot !== 'late'), { id: 'N-X', slot: 'late', name: 'Big shake', ingredients: [['skyr', 311]] }] });
+    assert.equal(Math.round(S.plan.meals.find((m) => m.id === 'N-X').kcal), 196);
+    left(190); assert.ok(!suggest(T).extra);
+    left(191); assert.equal(suggest(T).extra, true);
+  } finally { S.plan = SEED; }
 });
 
 test('weights never print as -0.0', () => {

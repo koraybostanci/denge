@@ -388,7 +388,7 @@ export default {
   'A fresh day.': 'Yeni bir gün.',
   'First up: {meal} at {time}.': 'İlk sırada: {meal}, saat {time}.',
   'Meals done.': 'Öğünler tamam.',
-  'Protein is {n} g short; 150 g of plain skyr closes the gap and fits the budget.': 'Protein {n} g eksik; 150 g sade skyr açığı kapatır ve bütçeye uyar.',
+  'Protein is {n} g short; {g} g of {meal} closes the gap and fits the budget.': 'Protein {n} g eksik; {g} g {meal} açığı kapatır ve bütçeye uyar.',
   'You’re on track.': 'Yolundasın.',
   'Next: {meal} at {time}, which also helps with protein.': 'Sıradaki: {meal}, saat {time}; proteine de katkı sağlar.',
   'Next: {meal} at {time}.': 'Sıradaki: {meal}, saat {time}.',
