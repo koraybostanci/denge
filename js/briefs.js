@@ -2,7 +2,7 @@
 // Always English, whatever the interface language is (inEnglish), and no DOM, so the tests build them too.
 import { inEnglish } from './i18n.js';
 import { SLOT_NAME, parseDay, targetAt, hhmm } from './plan.js';
-import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, planRate, dayVerdict, VERDICT, verdictText } from './core.js';
+import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText } from './core.js';
 
 // The day in plain lines: what the model gets to read. Text only, a few hundred tokens.
 export const reviewBrief = (day) => inEnglish(() => reviewBriefText(day));
@@ -67,12 +67,13 @@ function checkBriefText(note) {
   const target = dayTarget(t);
   const r = (x) => Math.round(x);
   const open = openSlots(t).map((x) => x.name.toLowerCase());
+  const times = mealTimesLine();
   // Like the review brief, this one is read by the model and stays English (hence 'en-GB' below)
   const lines = [
     `Time ${hhmm(now)} on ${new Intl.DateTimeFormat('en-GB', { weekday: 'long' }).format(now)}, a ${S.days[t] && S.days[t].train ? 'workout' : 'rest'} day.`,
     tot.n
-      ? `Today so far: ${r(tot.kcal)} of ${target} kcal eaten, ${r(target - tot.kcal) >= 0 ? `${r(target - tot.kcal)} kcal left` : `${r(tot.kcal - target)} kcal above`}; protein ${r(tot.p)} of ${s.protein} g.${open.length ? ` Not eaten yet: ${open.join(', ')}.` : ' All meals of the day are logged.'}`
-      : `Nothing eaten yet today: the whole ${target} kcal and ${s.protein} g of protein are open.${mainSlots().length ? ` The plan's meals: ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.` : ''}`,
+      ? `Today so far: ${r(tot.kcal)} of ${target} kcal eaten, ${r(target - tot.kcal) >= 0 ? `${r(target - tot.kcal)} kcal left` : `${r(tot.kcal - target)} kcal above`}; protein ${r(tot.p)} of ${s.protein} g.${open.length ? ` Not eaten yet: ${open.join(', ')}.` : mainSlots().length ? ' All meals of the day are logged.' : ''}`
+      : `Nothing eaten yet today: the whole ${target} kcal and ${s.protein} g of protein are open.${times ? ` The plan's meals: ${times}.` : ''}`,
     `Daily budget and goals: ${s.kcalRest} kcal on rest days, ${s.kcalTrain} on workout days, protein ${s.protein} g, fibre ${s.fiber} g.`,
   ];
   const f = weekFlex(t);

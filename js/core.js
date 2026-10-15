@@ -117,7 +117,8 @@ export function dropFood() {
 export const mealById = (id) => S.plan.meals.find((m) => m.id === id);
 // The main meal times (not the late snack) that the active plan has a meal for, in order
 export const mainSlots = () => SLOTS.filter((s) => s.id !== 'late' && S.plan.meals.some((m) => m.slot === s.id));
-
+// "lunch 12:30, dinner 19:00" for the main meals of the plan, or '' when it has none
+export const mealTimesLine = () => mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ');
 
 // Call configuration for the selected provider
 export function aiCfg() {
@@ -424,9 +425,10 @@ export function suggest(day) {
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
   if (!open.length) {
+    const noMain = !mainSlots().length; // a plan without main meals is not "done": no meal was ever planned
     const late = S.plan.meals.find((m) => m.slot === 'late');
-    if (late && remP > 12 && rem >= late.kcal - 5) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true };
-    return { rem, remP, meal: null };
+    if (late && remP > 12 && rem >= late.kcal - 5) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true, noMain };
+    return { rem, remP, meal: null, noMain };
   }
   const next = open[0];
   const minKcal = (id) => { const k = S.plan.meals.filter((m) => m.slot === id).map((m) => m.kcal); return k.length ? Math.min(...k) : 0; };

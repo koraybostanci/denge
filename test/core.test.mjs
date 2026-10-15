@@ -5,8 +5,9 @@ import {
   S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
-  parseLocal, mealById, titleFor, releasePhotos,
+  parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
 } from '../js/core.js';
+import { checkBrief } from '../js/briefs.js';
 import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -263,6 +264,28 @@ test('a plan with an empty slot and no late meal: suggestions and the pace skip 
     assert.deepEqual(planSteps(1550), []);
     assert.equal(plannedBy(1550, 20), 0);
     assert.equal(suggest(T).meal, null);
+  } finally { S.plan = SEED; }
+});
+
+test('a plan with no main meals is not "done": no done state in suggest, no "all meals logged" in the brief; Default unchanged', () => {
+  reset();
+  try {
+    for (const meals of [[], seedPlan.meals.filter((m) => m.slot === 'late')]) {
+      S.plan = buildPlan({ ...seedPlan, meals });
+      reset();
+      assert.equal(suggest(T).noMain, true);
+      assert.equal(mealTimesLine(), '');
+      assert.ok(!/All meals/.test(checkBrief('')));
+      meal(T, 100, 5, { slot: 'late' });
+      assert.ok(!/All meals/.test(checkBrief('')));
+    }
+    S.plan = SEED;
+    reset();
+    assert.ok(!suggest(T).noMain);
+    assert.equal(mealTimesLine(), mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', '));
+    assert.match(mealTimesLine(), /^lunch \S+, snack 1 \S+/);
+    for (const slot of ['lunch', 'snack1', 'snack2', 'dinner']) meal(T, 100, 5, { slot });
+    assert.match(checkBrief(''), /All meals of the day are logged\./);
   } finally { S.plan = SEED; }
 });
 

@@ -178,12 +178,12 @@ test('every prompt is built from the active plan at request time, and stays Engl
   } finally { S.plan = saved; await setLang('en'); }
 });
 
-test('the workout slot line follows the plan: the Default text unchanged, other extras by name, none just "workout"', async () => {
+test('the workout slot line follows the plan: the workout meal names, other extras by name, none just "workout"', async () => {
   const saved = S.plan;
   const slotLine = async () => { mockFetch(() => reply(200, claudeBody(meal))); await ask(sonnet); return calls.splice(0)[0].body.system.split('\n').find((l) => l.startsWith('slot:')); };
   try {
     S.plan = buildPlan(seedPlan);
-    assert.match(await slotLine(), /, or workout \(pre\/post-workout banana or skyr\)\. Choose/);
+    assert.match(await slotLine(), /, or workout \(pre-workout banana or post-workout skyr\)\. Choose/);
     S.plan = buildPlan({ ...seedPlan, meals: [...seedPlan.meals.filter((m) => m.slot !== 'workout'), { id: 'U-w1', slot: 'workout', name: 'Rice cake', ingredients: [['salad', 50]] }, { id: 'U-w2', slot: 'workout', name: 'Protein Shake', ingredients: [['salad', 50]] }] });
     assert.match(await slotLine(), /, or workout \(rice cake or protein shake\)\. Choose/);
     S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot !== 'workout') });

@@ -546,7 +546,7 @@ test('Today: the coach line lowercases the late meal with the locale (Turkish I 
     S.days[TODAY] = { day: TODAY };
     await setLang(lang);
     const html = views.renderToday();
-    const m = html.match(/<p class="coach-line">[^<]*<b>[^<]*<\/b>[^<]*/);
+    const m = html.match(/<p class="coach-line">(?:<b>[^<]*<\/b>)?[^<]*/);
     return m && m[0];
   };
   const en = await line('en', 'Işık yoghurt');

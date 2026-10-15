@@ -446,7 +446,7 @@ function coachLine(day) {
     head = t('A fresh day.');
     if (sg.meal && sg.slot) line = t('First up: {meal} at {time}.', { meal: td(sg.meal.name), time: sg.slot.time });
   } else if (sg.extra) {
-    head = t('Meals done.');
+    head = sg.noMain ? '' : t('Meals done.'); // no "done" for a plan with no main meals
     const g = sg.meal.items.reduce((a, i) => a + i.g, 0), name = td(sg.meal.name);
     line = t('Protein is {n} g short; {g} g of {meal} closes the gap and fits the budget.', { n: n0(sg.remP), g: n0(g), meal: lower(name) });
   } else if (sg.meal && sg.slot) {
@@ -455,6 +455,9 @@ function coachLine(day) {
     const helps = sg.remP > 12 && sg.meal.p >= 15;
     line = sg.slot.time ? (helps ? t('Next: {meal} at {time}, which also helps with protein.', { meal, time: sg.slot.time }) : t('Next: {meal} at {time}.', { meal, time: sg.slot.time }))
       : (helps ? t('Next: {meal}, which also helps with protein.', { meal }) : t('Next: {meal}.', { meal }));
+  } else if (sg.noMain) {
+    head = '';
+    if (sg.remP > 12) line = t('Protein is {n} g short.', { n: n0(sg.remP) });
   } else if (sg.remP > 12) {
     head = t('Meals done.');
     line = t('Protein is {n} g short.', { n: n0(sg.remP) });
@@ -462,7 +465,7 @@ function coachLine(day) {
     head = t('All meals in, on budget.');
     line = t('Nicely done.');
   }
-  return `<section class="coach${over ? ' is-over' : ''}">${POISE}<div><p class="coach-line"><b>${esc(head)}</b> ${esc(line)}</p>${coachAi(day)}</div></section>`;
+  return `<section class="coach${over ? ' is-over' : ''}">${POISE}<div>${head || line ? `<p class="coach-line">${head ? `<b>${esc(head)}</b> ` : ''}${esc(line)}</p>` : ''}${coachAi(day)}</div></section>`;
 }
 
 // The model's quick note on the day so far, under the coach line: asked for, never sent by itself

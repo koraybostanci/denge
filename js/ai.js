@@ -3,7 +3,7 @@
 // instruction, short JSON output.
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
-import { S, mainSlots } from './core.js';
+import { S, mealTimesLine } from './core.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -14,14 +14,10 @@ export const STRONG_MODEL = 'claude-sonnet-5-5';
 const IMG_EDGE = 768; // long edge; 768×576 is about 590 image tokens
 export const CHECK_EDGE = 1536; // menus and nutrition tables have small print, so checks send a larger copy
 
-// The workout-slot meals of the plan, for the slot line: "workout (pre/post-workout banana or skyr)" for the Default ones, their names
-// (lowercase) joined with "or" for others, and plain "workout" when the plan has none
+// The workout-slot meals of the plan, for the slot line: their names (lowercase) joined with "or", and plain "workout" when the plan has none
 function workoutNote(plan) {
   const names = plan.meals.filter((m) => m.slot === 'workout').map((m) => String(m.name).toLowerCase());
-  if (!names.length) return 'workout';
-  const parts = names.map((n) => /^(pre|post)-workout (.+)$/.exec(n));
-  if (parts.every(Boolean)) return `workout (${[...new Set(parts.map((x) => x[1]))].join('/')}-workout ${parts.map((x) => x[2]).join(' or ')})`;
-  return `workout (${names.join(' or ')})`;
+  return names.length ? `workout (${names.join(' or ')})` : 'workout';
 }
 
 // Built at each request, from the active plan
@@ -308,7 +304,7 @@ const FALLBACK_ON = ['server', 'rate', 'no_quota'];
 
 // The meal times of the plan, or a plain line when it has no main meals
 const mealTimes = () => {
-  const m = mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ');
+  const m = mealTimesLine();
   return m ? `; meals are ${m}.` : '. The plan has no set meal times.';
 };
 
