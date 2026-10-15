@@ -56,13 +56,14 @@ export const S = {
 export const hasMyPlan = () => !!(S.plans && S.plans.list.length > 1);
 export const onDefault = () => !S.plans || S.plans.active === 'default';
 export const canEditPlan = () => !(hasMyPlan() && onDefault());
+// A deep copy of plain data (numbers, strings, arrays, objects); JSON rather than structuredClone, so a value it would reject is not newly refused
+export const clone = (x) => JSON.parse(JSON.stringify(x));
 // Opens the meal editor's draft on a deep copy of the active stored plan: the meal with that id, or a new one (newId) in slot.
 // base keeps the foods as they were, so a save can tell which ones the draft added or changed.
 export function startDraft(id, slot, newId) {
-  const copy = (x) => JSON.parse(JSON.stringify(x));
-  const plan = copy(S.plans.list.find((p) => p.id === S.plans.active) || S.plans.list[0]);
+  const plan = clone(S.plans.list.find((p) => p.id === S.plans.active) || S.plans.list[0]);
   const meal = plan.meals.find((m) => m.id === id);
-  S.draft = { plan, meal: meal ? copy(meal) : { id: newId, slot, name: '', ingredients: [] }, base: copy(plan.foods) };
+  S.draft = { plan, meal: meal ? clone(meal) : { id: newId, slot, name: '', ingredients: [] }, base: clone(plan.foods) };
   S.draft.orig = draftKey(S.draft);
   return S.draft;
 }
@@ -583,6 +584,7 @@ export function titleOf(e) {
 }
 // { title, tk } for a new generated entry: the English title, built with English formats whatever the language is
 export function titleFor(kind, params) {
+  if (kind === 'plan') return { tk: { kind, params } }; // no generated title: the caller sets the meal's name as the title
   const title = inEnglish(() => TITLES[kind](params));
   return title ? { title, tk: { kind, params } } : { title: '' };
 }

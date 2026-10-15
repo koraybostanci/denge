@@ -5,7 +5,7 @@ import {
   S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
-  parseLocal, mealById,
+  parseLocal, mealById, titleFor,
 } from '../js/core.js';
 import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
@@ -486,4 +486,16 @@ test('the typed coffee and beer shortcuts win over a plan meal with the same nam
     assert.equal(parseLocal('big salad').type, 'plan');
     assert.equal(parseLocal('x-1').meal.id, 'X-1');
   } finally { S.plan = SEED; }
+});
+
+test('titleFor: a plan kind gives only its tk, the other kinds a title and tk', () => {
+  const p = titleFor('plan', { id: 'L-A' });
+  assert.equal(p.tk.kind, 'plan');
+  assert.equal(p.tk.params.id, 'L-A');
+  assert.equal(p.title, undefined);
+  for (const [kind, params] of [['weight', { kg: 82.5 }], ['steps', { steps: 8200 }], ['photo', {}]]) {
+    const r = titleFor(kind, params);
+    assert.equal(r.tk.kind, kind);
+    assert.ok(r.title);
+  }
 });

@@ -5,7 +5,7 @@ import { T, parseNum } from './i18n.js';
 import { SLOT_NAME, PLAN_SLOTS } from './plan.js';
 import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
-import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid } from './core.js';
+import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid, clone } from './core.js';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ID_RE = /^[\w-]{1,40}$/;
@@ -271,8 +271,8 @@ export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
   if (!current) return null;
   const base = plain(draft.base) ? draft.base : {};
   const changed = Object.entries(draft.plan.foods).filter(([k, f]) => !Object.hasOwn(base, k) || JSON.stringify(base[k]) !== JSON.stringify(f));
-  const plan = JSON.parse(JSON.stringify(current));
-  const saved = planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...JSON.parse(JSON.stringify(changed))]) }, meal, { remove, newId });
+  const plan = clone(current);
+  const saved = planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...clone(changed)]) }, meal, { remove, newId });
   // a food the draft added (in neither draft.base nor the stored plan) that no meal uses is not kept; earlier foods always are
   const used = new Set(saved.meals.flatMap((m) => m.ingredients.map((i) => i[0])));
   const drop = changed.map(([k]) => k).filter((k) => !Object.hasOwn(base, k) && !Object.hasOwn(plan.foods, k) && !used.has(k));

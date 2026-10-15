@@ -1088,11 +1088,12 @@ function syncDraft() {
     return m ? [row[0], $(`#md-g-${i}`).value, m] : [row[0], $(`#md-g-${i}`).value];
   });
 }
+// Marks a field as wrong (or clears it) for assistive technology
+const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
 // After typing: the live total, the marks on wrong fields and whether Save can be used, without redrawing the fields
 function checkDraft() {
   syncDraft();
   const r = readMeal(S.draft.meal);
-  const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
   mark($('#md-name'), r.bad.name);
   r.bad.rows.forEach((b, i) => { mark($(`#md-g-${i}`), b.g); mark($(`#md-m-${i}`), b.m); });
   $('#md-total').innerHTML = mealEditorTotal();
@@ -1137,7 +1138,6 @@ function checkFood() {
   syncFood();
   const form = S.draft.foodForm;
   const r = readFood(form);
-  const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
   mark($('#fd-name'), r.bad.name);
   r.bad.v.forEach((b, i) => mark($(`#fd-v-${i}`), b));
   $('[data-act="plan-food-done"]').disabled = !r.valid || form.busy;
