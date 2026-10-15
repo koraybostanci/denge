@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft, savedPlan } from '../js/backup.js';
-import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, dropFood, foodUses } from '../js/core.js';
+import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, dropFood, foodUses, shownName } from '../js/core.js';
+import { td } from '../js/i18n.js';
 import seedPlan from '../js/default-plan.js';
 
 const copy = (x) => JSON.parse(JSON.stringify(x));
@@ -94,6 +95,32 @@ test('restore: a backup of the earlier build, with plans as a bare list and the 
   assert.equal(cleanPlans([mine()]).active, 'default');
   const record = plansRecord(seedPlan, r.list, r.active);
   assert.equal(activePlan(record).name, 'Other');
+});
+
+test('old bare list: the plan that was active is kept, else the first usable one (backup and device)', () => {
+  const a = { ...mine(), id: 'P-a', name: 'Cutting' };
+  const b = { ...mine(), id: 'P-b', name: 'Maintenance' };
+  const bare = { id: 'P-bare01' };
+  assert.deepEqual(cleanPlans([a, b], 'P-b'), { active: 'P-b', list: [b] });
+  assert.deepEqual(cleanPlans([a, b], 'P-zzz'), { active: 'default', list: [a] });
+  assert.deepEqual(cleanPlans([a, b]), { active: 'default', list: [a] });
+  assert.deepEqual(cleanPlans([a, bare, b], 'P-bare01'), { active: 'default', list: [a] });
+  const r = loadedPlans([a, b], SEED, 'P-b');
+  assert.deepEqual(r.record, { active: 'P-b', list: [SEED, b] });
+  assert.equal(loadedPlans([a, b], SEED, 'P-nope').record.list[1].id, 'P-a');
+});
+
+test('editor: a fractional grams value survives open, rename and save; a decimal comma reads as a decimal', () => {
+  const meal = { id: 'U-f1', slot: 'lunch', name: 'Old', ingredients: [['egg', 100.5], ['bread', '100,5']] };
+  const r = readMeal({ ...meal, name: 'New' });
+  assert.deepEqual(r.meal.ingredients, [['egg', 100.5], ['bread', 100.5]]);
+  assert.equal(readMeal({ ...meal, ingredients: [['egg', 106]] }).meal.ingredients[0][1], 106);
+});
+
+test('editor: a typed name is shown as typed; only the stored name shows translated', () => {
+  assert.equal(shownName('Banana', 'Oats'), 'Banana');
+  assert.equal(shownName('Banana', ''), 'Banana');
+  assert.equal(shownName('Oats', 'Oats'), td('Oats'));
 });
 
 test('restore: an older backup without plans leaves the device alone (its app.js path only runs when the file has plans)', async () => {
@@ -213,13 +240,13 @@ test('editor: cancelling drops the draft and writes nothing', () => {
   assert.match(src, /const working = [^;]*\|\| S\.draft;/);
 });
 
-test('editor: a valid save passes cleanPlan unchanged (whole grams, decimal comma); what is wrong blocks it', () => {
+test('editor: a valid save passes cleanPlan unchanged (grams to 0.1, decimal comma); what is wrong blocks it', () => {
   S.plans = { active: 'default', list: [seedPlan] };
   startDraft(null, 'lunch', 'U-r1');
-  Object.assign(S.draft.meal, { name: '  Chicken   wrap ', ingredients: [['chicken', '12,5'], ['bread', '0,6', '1 slice'], ['salad', '99.4', ' '], ['egg', 50.5]] });
+  Object.assign(S.draft.meal, { name: '  Chicken   wrap ', ingredients: [['chicken', '12,5'], ['bread', '0,96', '1 slice'], ['salad', '99.4', ' '], ['egg', 50.5]] });
   const r = readMeal(S.draft.meal);
   assert.equal(r.valid, true);
-  assert.deepEqual(r.meal.ingredients, [['chicken', 13], ['bread', 1, '1 slice'], ['salad', 99], ['egg', 51]]);
+  assert.deepEqual(r.meal.ingredients, [['chicken', 12.5], ['bread', 1, '1 slice'], ['salad', 99.4], ['egg', 50.5]]);
   assert.equal(r.meal.name, 'Chicken wrap');
   const plan = planFromDraft(S.draft.plan, r.meal, { newId: 'P-r1' });
   const c = cleanPlan(plan);

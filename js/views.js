@@ -2,7 +2,7 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses, shownName,
 } from './core.js';
 import { readMeal, readFood, PLAN_CAPS } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
@@ -1417,7 +1417,7 @@ export function renderMealEditor() {
   };
   return `
   <header class="sheet-top"><h2 id="sheet-title">${saved ? esc(td(saved.name)) : t('New meal · {slot}', { slot: planSlotTitle(meal.slot) })}</h2><button type="button" class="btn" data-act="plan-meal-cancel">${t('Cancel')}</button></header>
-  <div class="field-grid meal-edit-name"><label for="md-name">${t('Name')}<input id="md-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(td(meal.name))}" data-orig="${esc(saved ? saved.name : '')}"${saved ? '' : ` placeholder="${t('e.g. Chicken wrap')}"`}${inv(r.bad.name)}></label></div>
+  <div class="field-grid meal-edit-name"><label for="md-name">${t('Name')}<input id="md-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(shownName(meal.name, saved ? saved.name : ''))}" data-orig="${esc(saved ? saved.name : '')}"${saved ? '' : ` placeholder="${t('e.g. Chicken wrap')}"`}${inv(r.bad.name)}></label></div>
   <p class="entry-value" id="md-total">${mealEditorTotal()}</p>
   <p class="note">${t('Changes apply from now on. Meals you already logged keep their numbers.')}</p>
   ${meal.ingredients.length ? `<ul class="ing-list">${meal.ingredients.map(row).join('')}</ul>` : ''}
@@ -1451,7 +1451,7 @@ export function renderFoodForm() {
   return `
   <header class="sheet-top"><h2 id="sheet-title">${form.isNew ? t('New food') : esc(td(S.draft.plan.foods[key].name))}</h2><button type="button" class="btn" id="fd-back" data-act="plan-food-back">${t('Back')}</button></header>
   <div class="food-name">
-    <label for="fd-name">${t('Name')}<input id="fd-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(td(form.name))}" data-orig="${esc(form.isNew ? '' : S.draft.plan.foods[key].name)}"${inv(r.bad.name)}${off}></label>
+    <label for="fd-name">${t('Name')}<input id="fd-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(shownName(form.name, form.isNew ? '' : S.draft.plan.foods[key].name))}" data-orig="${esc(form.isNew ? '' : S.draft.plan.foods[key].name)}"${inv(r.bad.name)}${off}></label>
     ${hasKey() ? `<button type="button" class="food-photo" data-act="plan-food-photo" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
   </div>
   ${ai}

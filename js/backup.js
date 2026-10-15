@@ -214,7 +214,7 @@ export function cleanPlan(raw) {
 }
 
 // What the meal editor holds, read for a save: the name and the rows as typed (grams a number or typed text, decimal comma
-// allowed), grams rounded to whole grams so that cleanPlan passes a valid save unchanged. bad marks what is typed and wrong
+// allowed), grams rounded to 0.1 (as stored, so an untouched 100.5 stays) so that cleanPlan passes a valid save unchanged. bad marks what is typed and wrong
 // (an empty field is not marked); valid needs a name, at least one ingredient, and every row's grams from 1 to 5,000.
 export function readMeal(meal) {
   const name = clean1(meal.name);
@@ -223,7 +223,7 @@ export function readMeal(meal) {
   const ingredients = [];
   for (const [food, g, measure] of rows) {
     const typed = String(g ?? '').trim();
-    const grams = Math.round(typeof g === 'number' ? g : parseNum(typed));
+    const grams = Math.round((typeof g === 'number' ? g : parseNum(typed)) * 10) / 10;
     const ok = grams >= 1 && grams <= PLAN_CAPS.grams;
     const m = clean1(measure);
     bad.rows.push({ g: !!typed && !ok, m: m.length > PLAN_CAPS.measure });
@@ -278,18 +278,20 @@ export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
 // An earlier build stored (and backed up) the plans as a bare list of user plans, with the active id in settings.activePlan
 const plansShape = (raw, oldActive) => (Array.isArray(raw) ? { active: oldActive, list: raw } : plain(raw) ? raw : {});
 
-// The plans of a backup file ({ active, list }, or the older bare list with oldActive from its settings.activePlan): the first
-// usable user plan only, cleaned, and the active id when that plan exists. In the older bare list a plan with no foods and no
-// meals (e.g. a bare { id }) is not usable, so it does not become an empty My plan.
+// The plans of a backup file ({ active, list }, or the older bare list with oldActive from its settings.activePlan): one user
+// plan only, cleaned, and the active id when that plan exists. In the older bare list the plan that was active is kept, else
+// the first usable one; a plan with no foods and no meals is not usable there, so it does not become an empty My plan.
 export function cleanPlans(raw, oldActive) {
   const r = plansShape(raw, oldActive);
   const old = Array.isArray(raw);
-  let user = null;
+  const usable = [];
   for (const p of Array.isArray(r.list) ? r.list : []) {
-    user = cleanPlan(p).plan;
-    if (user && old && !user.meals.length && !Object.keys(user.foods).length) user = null;
-    if (user) break;
+    const user = cleanPlan(p).plan;
+    if (user && old && !user.meals.length && !Object.keys(user.foods).length) continue;
+    if (user) usable.push(user);
+    if (user && !old) break;
   }
+  const user = (old && usable.find((p) => p.id === r.active)) || usable[0] || null;
   return { active: user && r.active === user.id ? user.id : 'default', list: user ? [user] : [] };
 }
 

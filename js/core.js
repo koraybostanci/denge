@@ -65,6 +65,9 @@ export function startDraft(id, slot, newId) {
   S.draft = { plan, meal: meal ? copy(meal) : { id: newId, slot, name: '', ingredients: [] }, base: copy(plan.foods) };
   return S.draft;
 }
+// What an editor name field shows: the stored name through td() while the draft still holds it (a seed name shows translated),
+// else the draft text as typed, so a typed 'Banana' is not turned into 'Muz' by a redraw
+export const shownName = (draft, stored) => (draft === stored ? td(draft) : draft);
 // Closing or cancelling the editor: the draft goes and nothing is written (an open food form's photos are let go too)
 export function dropDraft() { if (S.draft) dropFood(); S.draft = null; }
 
