@@ -10,7 +10,7 @@ import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
@@ -108,7 +108,7 @@ async function logMeal(tpl, src, day = S.viewDay) {
   const e = {
     id: db.uid(), ts, day, createdAt: Date.now(), kind: 'meal', status: 'ok', src,
     slot: tpl.slot && tpl.slot !== 'any' ? tpl.slot : slotByTime(new Date(ts)),
-    planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? { tk: { kind: 'plan', params: { id: tpl.id } } } : {}),
+    planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? titleFor('plan', { id: tpl.id }) : {}),
     items: (tpl.items || []).map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
     kcal: tpl.kcal, p: tpl.p, c: tpl.c, f: tpl.f, fib: tpl.fib,
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
@@ -601,7 +601,7 @@ async function analyzeEntry(id, opts = {}) {
       const plan = mealById(data.plan) || null;
       if (plan) {
         Object.assign(e, {
-          planId: plan.id, title: plan.name, tk: { kind: 'plan', params: { id: plan.id } }, items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
+          planId: plan.id, title: plan.name, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
           kcal: plan.kcal, p: plan.p, c: plan.c, f: plan.f, fib: plan.fib, tier: 'plan',
         });
         // A plan meal without a picture takes this photo as its own
@@ -1148,10 +1148,6 @@ function checkFood() {
   const ai = $('#fd-ai');
   if (ai) ai.disabled = form.busy || !(r.food.name || form.photos.length);
 }
-function releaseFoodPhotos() {
-  const form = S.draft && S.draft.foodForm;
-  if (form) form.photos.forEach((p) => URL.revokeObjectURL(p.url));
-}
 // Back to the meal editor (dropFood lets the photos go); a new food that is Done is an ingredient there, with its grams
 // field focused, an edited one has its name focused
 function closeFood(row) {
@@ -1176,7 +1172,7 @@ async function addFoodPhotos(files) {
   if (!photos.length) return;
   if (S.draft && S.draft.foodForm === form) {
     syncFood();
-    releaseFoodPhotos();
+    releasePhotos(form);
     form.photos = photos;
     form.err = '';
     openFood('#fd-ai');

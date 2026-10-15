@@ -5,7 +5,7 @@ import {
   S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
-  parseLocal, mealById, titleFor,
+  parseLocal, mealById, titleFor, releasePhotos,
 } from '../js/core.js';
 import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
@@ -488,11 +488,37 @@ test('the typed coffee and beer shortcuts win over a plan meal with the same nam
   } finally { S.plan = SEED; }
 });
 
+test('a favourite or extra named like the counter wins over it; only a plan meal yields to the counter', () => {
+  const saved = S.settings.favorites;
+  S.settings.favorites = [{ id: 'f1', name: 'Coffee' }];
+  try {
+    assert.equal(parseLocal('coffee').type, 'favorite');
+    S.settings.favorites = [];
+    assert.deepEqual(parseLocal('coffee'), { type: 'count', key: 'coffee', n: 1 });
+    assert.equal(parseLocal('Beer 0.5 l').type, 'flex');
+  } finally { S.settings.favorites = saved; }
+});
+
+test('releasePhotos revokes every photo URL of a form, and a missing form is nothing', () => {
+  const revoked = [];
+  const orig = URL.revokeObjectURL;
+  URL.revokeObjectURL = (u) => revoked.push(u);
+  try {
+    releasePhotos(undefined);
+    releasePhotos({ photos: [{ url: 'a' }, { url: 'b' }] });
+    assert.deepEqual(revoked, ['a', 'b']);
+    assert.match(readFileSync(new URL('../js/app.js', import.meta.url), 'utf8'), /releasePhotos\(form\)/);
+  } finally { URL.revokeObjectURL = orig; }
+});
+
 test('titleFor: a plan kind gives only its tk, the other kinds a title and tk', () => {
   const p = titleFor('plan', { id: 'L-A' });
   assert.equal(p.tk.kind, 'plan');
   assert.equal(p.tk.params.id, 'L-A');
   assert.equal(p.title, undefined);
+  assert.deepEqual(p, { tk: { kind: 'plan', params: { id: 'L-A' } } }); // what logMeal and analyzeEntry spread into the entry
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.equal((src.match(/kind: 'plan'/g) || []).length, 0); // no hand-built copies
   for (const [kind, params] of [['weight', { kg: 82.5 }], ['steps', { steps: 8200 }], ['photo', {}]]) {
     const r = titleFor(kind, params);
     assert.equal(r.tk.kind, kind);

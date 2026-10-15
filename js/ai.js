@@ -14,6 +14,16 @@ export const STRONG_MODEL = 'claude-sonnet-5-5';
 const IMG_EDGE = 768; // long edge; 768×576 is about 590 image tokens
 export const CHECK_EDGE = 1536; // menus and nutrition tables have small print, so checks send a larger copy
 
+// The workout-slot meals of the plan, for the slot line: "workout (pre/post-workout banana or skyr)" for the Default ones, their names
+// (lowercase) joined with "or" for others, and plain "workout" when the plan has none
+function workoutNote(plan) {
+  const names = plan.meals.filter((m) => m.slot === 'workout').map((m) => String(m.name).toLowerCase());
+  if (!names.length) return 'workout';
+  const parts = names.map((n) => /^(pre|post)-workout (.+)$/.exec(n));
+  if (parts.every(Boolean)) return `workout (${[...new Set(parts.map((x) => x[1]))].join('/')}-workout ${parts.map((x) => x[2]).join(' or ')})`;
+  return `workout (${names.join(' or ')})`;
+}
+
 // Built at each request, from the active plan
 const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
@@ -21,7 +31,7 @@ kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step co
 For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
-slot: morning, lunch, snack1, snack2, dinner, late, or workout (pre/post-workout banana or skyr). Choose by time and content.
+slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
 tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = sugary drinks, fried food, crisps, salted nuts, pastries (simit, börek, poğaça, croissant, pretzel), white bread or toast.
 flags: add "alcohol" for any alcohol.
 conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
@@ -480,12 +490,13 @@ export async function foodValues(o) {
 }
 
 // Values from the model, the way a plan food stores them: kcal rounded to whole numbers and the rest to 0.1, within cleanPlan's
-// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters. `known` must be true (0 kcal is a reading, as for water); known false, no kcal or more than 1,000 is no reading.
+// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters. `known` is true or "true"; when it is missing, kcal above 0 counts as known (providers without a strict schema may omit it). An explicit false, no kcal or more than 1,000 is no reading (0 kcal is a reading only when known is true, as for water).
 export function cleanFoodValues(d) {
   d = d && typeof d === 'object' ? d : {};
   const num = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim()) ? +v : NaN);
   const kcal = Math.round(num(d.kcal));
-  if (d.known !== true || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
+  const known = d.known === undefined || d.known === null ? kcal > 0 : d.known === true || (typeof d.known === 'string' && d.known.trim().toLowerCase() === 'true');
+  if (!known || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
   const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
   return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
 }

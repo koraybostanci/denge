@@ -105,9 +105,11 @@ export function doneFood(food) {
   d.meal.ingredients.push([key, '']);
   return d.meal.ingredients.length - 1;
 }
+// Lets go of the object URLs of a form's photos (held in memory only); no form is nothing to release
+export function releasePhotos(form) { if (form) form.photos.forEach((p) => URL.revokeObjectURL(p.url)); }
 // The form goes, and the object URLs of its photos (held in memory only) are revoked
 export function dropFood() {
-  if (S.draft.foodForm) S.draft.foodForm.photos.forEach((p) => URL.revokeObjectURL(p.url));
+  releasePhotos(S.draft.foodForm);
   delete S.draft.food; delete S.draft.foodForm;
 }
 
@@ -381,14 +383,14 @@ export function parseLocal(text) {
     return { type: 'water', ml: Math.round(ml) };
   }
   if (TRAIN_RE.test(t)) return { type: 'train' };
-  const c = parseCount(t); // before the names: a plan meal called "Coffee" does not take the typed shortcut
-  if (c) return { type: 'count', ...c };
-  const meal = S.plan.meals.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
-  if (meal) return { type: 'plan', meal };
   const flex = FLEX.find((x) => norm(x.name) === t || norm(td(x.name)) === t);
   if (flex) return { type: 'flex', flex };
   const favorite = (S.settings.favorites || []).find((x) => norm(x.name) === t);
   if (favorite) return { type: 'favorite', favorite };
+  const c = parseCount(t); // after the extras and favourites, but before the plan meals: a plan meal called "Coffee" does not take the typed shortcut
+  if (c) return { type: 'count', ...c };
+  const meal = S.plan.meals.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
+  if (meal) return { type: 'plan', meal };
   return null;
 }
 // A day's coffee count and the totals for the Monday-to-Sunday week of `day` and the week before

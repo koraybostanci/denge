@@ -178,6 +178,19 @@ test('every prompt is built from the active plan at request time, and stays Engl
   } finally { S.plan = saved; await setLang('en'); }
 });
 
+test('the workout slot line follows the plan: the Default text unchanged, other extras by name, none just "workout"', async () => {
+  const saved = S.plan;
+  const slotLine = async () => { mockFetch(() => reply(200, claudeBody(meal))); await ask(sonnet); return calls.splice(0)[0].body.system.split('\n').find((l) => l.startsWith('slot:')); };
+  try {
+    S.plan = buildPlan(seedPlan);
+    assert.match(await slotLine(), /, or workout \(pre\/post-workout banana or skyr\)\. Choose/);
+    S.plan = buildPlan({ ...seedPlan, meals: [...seedPlan.meals.filter((m) => m.slot !== 'workout'), { id: 'U-w1', slot: 'workout', name: 'Rice cake', ingredients: [['salad', 50]] }, { id: 'U-w2', slot: 'workout', name: 'Protein Shake', ingredients: [['salad', 50]] }] });
+    assert.match(await slotLine(), /, or workout \(rice cake or protein shake\)\. Choose/);
+    S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot !== 'workout') });
+    assert.match(await slotLine(), /, or workout\. Choose/);
+  } finally { S.plan = saved; }
+});
+
 test('a plan with no main meals gives the review and coach prompts a plain line, not "meals are ."', async () => {
   const saved = S.plan;
   try {
@@ -245,7 +258,10 @@ test('food values: rounded (kcal to 1, the rest to 0.1) and clamped; no kcal, 0 
   assert.throws(() => cleanFoodValues(null), { code: 'empty' });
   // 0 kcal is a reading when the model knows the food (diet cola); known false or missing is none
   assert.deepEqual(cleanFoodValues({ name: 'Diet cola', known: true, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }), { name: 'Diet cola', kcal: 0, p: 0, c: 0, f: 0, fib: 0 });
-  for (const known of [false, undefined, 'true', 1]) assert.throws(() => cleanFoodValues({ name: 'x', known, kcal: 50 }), { code: 'empty' }, String(known));
+  for (const known of [false, 'false', ' FALSE ', 1, 'yes']) assert.throws(() => cleanFoodValues({ name: 'x', known, kcal: 50 }), { code: 'empty' }, String(known));
+  for (const known of [true, 'true', 'True', undefined, null]) assert.equal(cleanFoodValues({ name: 'x', known, kcal: 50 }).kcal, 50, String(known)); // a missing known counts when kcal is above 0
+  for (const kcal of [0, undefined]) assert.throws(() => cleanFoodValues({ name: 'x', kcal }), { code: 'empty' }, String(kcal)); // a missing known with no kcal is no reading
+  assert.equal(cleanFoodValues({ name: 'Water', known: 'true', kcal: 0 }).kcal, 0);
   mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'blur', known: false, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }))));
   await assert.rejects(foodValues({ cfg: haiku, name: 'x' }), { code: 'empty' });
 });
