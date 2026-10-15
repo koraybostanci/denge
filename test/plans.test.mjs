@@ -421,3 +421,10 @@ test('a save is refused when My plan the draft started from is gone, or a draft 
   assert.deepEqual(plan.foods, SEED.foods);
   dropDraft();
 });
+
+test('restoring a backup asks first, before the file is read, and the confirmations name the plans', () => {
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(file && window\.confirm\(t\('Restore this backup\?[^']*My plan[^']*'\)\)\) await importBackup\(file\)/);
+  assert.match(app, /Clear your log\?[^']*plans \(My plan and Default\)/);
+  assert.match(app, /Factory reset: [^']*My plan \(Default comes back\)/);
+});

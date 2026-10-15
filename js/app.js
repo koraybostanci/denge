@@ -1616,7 +1616,7 @@ const ACT = {
   },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
     await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []);
     for (const id of await db.keys('photos')) {
@@ -1638,7 +1638,7 @@ const ACT = {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
     const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
+    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
     if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -1714,7 +1714,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {
