@@ -53,7 +53,9 @@ export const S = {
 
 // Plan meals can be changed while Default is the only plan (a save creates My plan) and while My plan is active,
 // not while Default is active and My plan exists
-export const canEditPlan = () => !S.plans || S.plans.list.length < 2 || S.plans.active !== 'default';
+export const hasMyPlan = () => !!(S.plans && S.plans.list.length > 1);
+export const onDefault = () => !S.plans || S.plans.active === 'default';
+export const canEditPlan = () => !(hasMyPlan() && onDefault());
 // Opens the meal editor's draft on a deep copy of the active stored plan: the meal with that id, or a new one (newId) in slot.
 // base keeps the foods as they were, so a save can tell which ones the draft added or changed.
 export function startDraft(id, slot, newId) {

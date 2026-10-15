@@ -40,8 +40,9 @@ export async function writePlans(list, active) {
 // no picture refers to any more is deleted
 export async function setPlanPhotos(next) {
   const { planPhotos, gone } = sweepPlanPhotos(S.settings.planPhotos, next, S.plans || plansRecord(seedPlan, [], 'default'));
+  const same = JSON.stringify(planPhotos) === JSON.stringify(S.settings.planPhotos);
   S.settings.planPhotos = planPhotos;
-  await saveSettings();
+  if (!same) await saveSettings();
   for (const id of gone) {
     await db.del('photos', id);
     const u = S.urls.get(id);
@@ -783,12 +784,14 @@ async function load() {
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
   // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
   // and a meal it no longer has loses its picture.
-  const plans = loadedPlans(await db.kvGet('plans', null), seedPlan, S.settings.activePlan);
+  const storedPlans = await db.kvGet('plans', null);
+  const plans = loadedPlans(storedPlans, seedPlan, S.settings.activePlan);
   S.plans = plans.record;
   S.plan = buildPlan(activePlan(plans.record));
   if (plans.rewrite) {
     try {
       await writePlans(plans.record.list, plans.record.active);
+      if (Array.isArray(storedPlans) && 'activePlan' in S.settings) { delete S.settings.activePlan; await saveSettings(); } // the older build's active id now lives in the record
       if (Object.keys(S.settings.planPhotos || {}).length) await setPlanPhotos(S.settings.planPhotos);
     } catch { /* tried again on the next start; the plans in memory are right */ }
   }

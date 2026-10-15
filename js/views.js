@@ -2,7 +2,7 @@ import {
   S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
-  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, foodUses,
+  plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses,
 } from './core.js';
 import { readMeal, readFood, PLAN_CAPS } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
@@ -287,10 +287,6 @@ function entryState(e) {
 const multLabel = (m) => ({ 0.5: '½', 1.5: '1½', 2: '2' }[m] || String(m));
 
 const chip = (m, act = 'log-plan') => `<button type="button" class="chip" data-act="${act}" data-id="${m.id}">${esc(td(m.name))} <span>${m.kcal}</span></button>`;
-
-// The stored plans: whether the person has a plan of their own, and whether Default is the active one
-const hasMyPlan = () => !!(S.plans && S.plans.list.length > 1);
-const onDefault = () => !S.plans || S.plans.active === 'default';
 
 // Which slots a day shows, and what the plan offers in each
 function daySlots(day) {

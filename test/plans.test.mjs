@@ -428,3 +428,22 @@ test('restoring a backup asks first, before the file is read, and the confirmati
   assert.match(app, /Clear your log\?[^']*plans \(My plan and Default\)/);
   assert.match(app, /Factory reset: [^']*My plan \(Default comes back\)/);
 });
+
+test('old list format: a bare { id } entry is not an empty My plan, on load or on restore; a normal plan after it is used', () => {
+  assert.deepEqual(cleanPlans([{ id: 'P-bare01' }], 'P-bare01'), { active: 'default', list: [] });
+  assert.deepEqual(loadedPlans([{ id: 'P-bare01' }], SEED, 'P-bare01'), { record: { active: 'default', list: [SEED] }, rewrite: true });
+  assert.deepEqual(cleanPlans([{ id: 'P-bare01' }, mine()], 'P-abc123'), { active: 'P-abc123', list: [mine()] });
+  // the editor's own saves are unaffected: cleanPlan still accepts such a plan
+  assert.ok(cleanPlan({ id: 'P-bare01' }).plan);
+});
+
+test('settings.activePlan: a restore does not carry it forward, and load clears it once the old list is migrated', () => {
+  assert.equal('activePlan' in cleanSettings({ activePlan: 'P-abc123', protein: 100 }), false);
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /Array\.isArray\(storedPlans\) && 'activePlan' in S\.settings\) \{ delete S\.settings\.activePlan; await saveSettings\(\);/);
+});
+
+test('setPlanPhotos writes settings only when the pictures map changes', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /const same = JSON\.stringify\(planPhotos\) === JSON\.stringify\(S\.settings\.planPhotos\);\s*S\.settings\.planPhotos = planPhotos;\s*if \(!same\) await saveSettings\(\);/);
+});

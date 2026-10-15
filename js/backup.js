@@ -279,12 +279,15 @@ export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
 const plansShape = (raw, oldActive) => (Array.isArray(raw) ? { active: oldActive, list: raw } : plain(raw) ? raw : {});
 
 // The plans of a backup file ({ active, list }, or the older bare list with oldActive from its settings.activePlan): the first
-// usable user plan only, cleaned, and the active id when that plan exists
+// usable user plan only, cleaned, and the active id when that plan exists. In the older bare list a plan with no foods and no
+// meals (e.g. a bare { id }) is not usable, so it does not become an empty My plan.
 export function cleanPlans(raw, oldActive) {
   const r = plansShape(raw, oldActive);
+  const old = Array.isArray(raw);
   let user = null;
   for (const p of Array.isArray(r.list) ? r.list : []) {
     user = cleanPlan(p).plan;
+    if (user && old && !user.meals.length && !Object.keys(user.foods).length) user = null;
     if (user) break;
   }
   return { active: user && r.active === user.id ? user.id : 'default', list: user ? [user] : [] };
@@ -310,15 +313,8 @@ export const activePlan = (record) => record.list.find((p) => p.id === record.ac
 // (a damaged one is cleaned). rewrite is true when the record on the device differs from that, e.g. after an update changed the seed
 // or when it is the older bare list of user plans (oldActive is then settings.activePlan).
 export function loadedPlans(stored, seed, oldActive) {
-  const s = plansShape(stored, oldActive);
-  const list = Array.isArray(s.list) ? s.list : [];
-  let user = null;
-  for (const p of list) {
-    if (p && p.id === 'default') continue;
-    user = cleanPlan(p).plan;
-    if (user) break;
-  }
-  const record = plansRecord(seed, user ? [user] : [], s.active);
+  const { list, active } = cleanPlans(stored, oldActive);
+  const record = plansRecord(seed, list, active);
   return { record, rewrite: JSON.stringify(record) !== JSON.stringify(stored) };
 }
 
