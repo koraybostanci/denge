@@ -448,7 +448,7 @@ function coachLine(day) {
   } else if (sg.extra) {
     head = t('Meals done.');
     const g = sg.meal.items.reduce((a, i) => a + i.g, 0), name = td(sg.meal.name);
-    line = t('Protein is {n} g short; {g} g of {meal} closes the gap and fits the budget.', { n: n0(sg.remP), g: n0(g), meal: name.charAt(0).toLowerCase() + name.slice(1) });
+    line = t('Protein is {n} g short; {g} g of {meal} closes the gap and fits the budget.', { n: n0(sg.remP), g: n0(g), meal: lower(name) });
   } else if (sg.meal && sg.slot) {
     head = t('You’re on track.');
     const meal = td(sg.meal.name);
@@ -1324,7 +1324,7 @@ export function renderPlan() {
   const group = (title, body) => `<details class="rule-group"><summary><span>${title}</span></summary><div class="rule-body">${body}</div></details>`;
   return `
   <header class="top">
-    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : hasMyPlan() ? t('Tap a meal for its ingredients, and to add a photo of your own plate.') : t('Tap a meal to see or change it.')}</p></div>
+    <div><h1>${t('Plan')}</h1><p class="sub">${pictured ? t('{n} of {total} meals show your own photo.', { n: pictured, total: S.plan.meals.length }) : !canEditPlan() ? t('Tap a meal for its ingredients, and to add a photo of your own plate.') : t('Tap a meal to see or change it.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
   ${sw}

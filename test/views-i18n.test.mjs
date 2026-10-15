@@ -422,7 +422,7 @@ test('Plan: Edit meal, + Add meal and the meal editor, by which plans exist', as
   S.plans = { active: MINE.id, list: [seedPlan, MINE] };
   S.plan = buildPlan(MINE);
   assert.match(views.renderPlan(), add);
-  assert.ok(!views.renderPlan().includes(sub));
+  assert.ok(views.renderPlan().includes(sub)); // editable (My plan active): the edit hint
   assert.match(views.renderPlanSheet('U-oats'), edit);
   core.startDraft('U-oats');
   const mineEd = views.renderMealEditor();
@@ -530,4 +530,34 @@ test('food form in Turkish: its text, the name through td() with the stored Engl
   for (const s of ['Yeni yiyecek<', 'Bunu bir fotoğraftan doldurmak için bir API anahtarı ekle.', 'Anahtar ekle']) assert.ok(nokey.includes(s), s);
   for (const s of ['Filled in by AI. Check the values.', 'Couldn’t read values. Try the nutrition label, or type them.', 'Filling in the values failed. {detail}']) assert.ok(tr[s], s);
   fixture();
+});
+
+test('Today: the coach line lowercases the late meal with the locale (Turkish I and İ), the default text unchanged', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  const line = async (lang, name) => {
+    fixture();
+    S.plan = buildPlan(seedPlan);
+    S.plan.meals = S.plan.meals.filter((m) => m.slot === 'late').slice(0, 1);
+    S.plan.meals[0].name = name;
+    S.entries = [meal(TODAY, 8, 'breakfast', 'Oats', 300, 10)]; // no main slot is open and something is logged: the late meal is the suggestion
+    S.settings.protein = 500;
+    S.settings.startDate = day(-1);
+    S.days[TODAY] = { day: TODAY };
+    await setLang(lang);
+    const html = views.renderToday();
+    const m = html.match(/<p class="coach-line">[^<]*<b>[^<]*<\/b>[^<]*/);
+    return m && m[0];
+  };
+  const en = await line('en', 'Işık yoghurt');
+  assert.match(en, /g of işık yoghurt closes/); // English lowercases I to i
+  const tr1 = await line('tr', 'Işık yoğurt');
+  assert.ok(tr1.includes('ışık yoğurt'), tr1);
+  const tr2 = await line('tr', 'İçli köfte');
+  assert.ok(tr2.includes('içli köfte'), tr2);
+});
+
+test('Plan: the subtitle follows canEditPlan, not hasMyPlan', async () => {
+  const src = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
+  assert.match(src, /!canEditPlan\(\) \? t\('Tap a meal for its ingredients, and to add a photo of your own plate\.'\) : t\('Tap a meal to see or change it\.'\)/);
 });

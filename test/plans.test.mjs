@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { cleanPlan, cleanPlans, plansRecord, activePlan, loadedPlans, sweepPlanPhotos, cleanSettings, cleanPhoto, PLAN_CAPS, readMeal, readFood, planFromDraft, savedPlan } from '../js/backup.js';
-import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, draftChanged, dropFood, foodUses, shownName } from '../js/core.js';
+import { S, startDraft, dropDraft, canEditPlan, startFood, doneFood, draftChanged, foodFormChanged, dropFood, foodUses, shownName } from '../js/core.js';
 import { td } from '../js/i18n.js';
 import seedPlan from '../js/default-plan.js';
 
@@ -516,4 +516,33 @@ test('app.js: Back from a new food focuses the Add ingredient select; a dismisse
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(src, /Object\.hasOwn\(S\.draft\.plan\.foods, key\) \? `\[data-act="plan-food"\][^:]*: '#md-add'/);
   assert.match(src, /draftChanged\(\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;/);
+});
+
+test('foodFormChanged: false until the name, a value or the photos differ from what startFood opened the form with', () => {
+  S.plans = { active: 'default', list: [seedPlan] };
+  assert.equal(foodFormChanged(undefined), false);
+  startDraft('L-A');
+  const key = Object.keys(S.draft.plan.foods)[0];
+  const form = startFood(key);
+  assert.equal(foodFormChanged(form), false);
+  form.v = form.v.map(String); // values as typed text, as syncFood leaves them
+  assert.equal(foodFormChanged(form), false);
+  form.name += 'x';
+  assert.equal(foodFormChanged(form), true);
+  form.name = form.name.slice(0, -1);
+  assert.equal(foodFormChanged(form), false);
+  form.v[0] = '99';
+  assert.equal(foodFormChanged(form), true);
+  const fresh = startFood('new1');
+  assert.equal(foodFormChanged(fresh), false);
+  fresh.photos.push({ url: 'blob:x' });
+  assert.equal(foodFormChanged(fresh), true);
+  fresh.photos = [];
+  dropDraft();
+});
+
+test('app.js: Cancel, and Escape, Close or a backdrop tap on the food form, ask before dropping edits', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /'plan-meal-cancel': \(\) => \{\n\s*if \(draftChanged\(\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;/);
+  assert.match(src, /S\.sheet\.type === 'food' && S\.draft && S\.draft\.foodForm\) \{\n\s*if \(foodFormChanged\(S\.draft\.foodForm\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;[^\n]*\n\s*return closeFood\(-1\);/);
 });

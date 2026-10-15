@@ -10,7 +10,7 @@ import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, startFood, doneFood, dropFood,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood,
 } from './core.js';
 import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
@@ -1058,11 +1058,15 @@ function closeSheet() {
   sheetOpenerId = '';
 }
 // Close, Escape or a tap outside: Settings opened from the food form's Add key goes back to that form (the meal draft is
-// kept); everything else closes the sheet
+// kept); the food form goes back to the meal editor like Back, asking first when it holds edits; everything else closes the sheet
 function dismissSheet() {
   if (S.sheet && S.sheet.type === 'settings' && S.draft && S.draft.foodForm) {
     S.suppEdit = '';
     return openFood(hasKey() ? null : '[data-act="settings"]');
+  }
+  if (S.sheet && S.sheet.type === 'food' && S.draft && S.draft.foodForm) {
+    if (foodFormChanged(S.draft.foodForm) && !window.confirm(t('Discard your changes?'))) return; // the form stays open
+    return closeFood(-1);
   }
   if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
   closeSheet();
@@ -1262,6 +1266,7 @@ const ACT = {
   'plan-meal-edit': (el) => { startDraft(el.dataset.id); openEditor(); },
   'plan-meal-add': (el) => { startDraft(null, el.dataset.slot, 'U-' + db.uid()); openEditor('#md-name'); },
   'plan-meal-cancel': () => {
+    if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
     const id = S.draft && S.draft.meal.id;
     dropDraft();
     if (mealById(id)) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
