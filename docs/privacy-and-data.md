@@ -10,7 +10,9 @@
   640 px framed and colour-corrected one. Both are re-encoded, so the stored file carries no
   location, capture time or camera details. The capture time is read once, to time the entry.
 - The day's review and the quick note on Today send text only: that day's meals with their numbers, steps, water, weigh-in,
-  your goals, the weight schedule and where you stand against it. No photos.
+  your goals, the weight schedule and where you stand against it. No photos. These requests, and the
+  check, also carry the meals and foods of the plan in use (names, amounts, calories), so anything you
+  typed into My plan is sent too.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
 - A photo taken to fill in a food's values is sent with no other data and is not stored.
