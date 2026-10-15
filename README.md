@@ -25,9 +25,9 @@ No backend, no account. Your data stays on your device.
 |---|---|
 | **Today** | What is left of the day's calories, protein, weight, steps, water and the week at a glance |
 | **Log** | Every entry, newest first, with a short review of each day |
-| **Check** | Photograph a menu, a dish or a product before you order or buy, and get a verdict against your plan |
 | **Progress** | Weight against your line, projected arrival date, runs of days on plan, a consistency calendar, and the badges you have earned |
-| **Plan** | Your meal options with ingredients, and the rules |
+| **Plan** | Your meal options with ingredients, and the rules. Change a meal or add one, and it is saved as My plan |
+| **Check** | Photograph a menu, a dish or a product before you order or buy, and get a verdict against your plan |
 | **Your pickle** | The avatar in the header: its growth, face and accessory are unlocked by badges |
 
 Weight, steps, water, coffee, workouts and planned meals need no model and no key. Type `85.4`,
@@ -46,7 +46,7 @@ Built for and used on an iPhone. Other modern mobile browsers should work.
 ## Read more
 
 - [Photo and text analysis](docs/analysis.md): providers, keys, retries, daily reviews
-- [Make it your plan](docs/your-plan.md): meals, foods and rules in `js/plan.js`
+- [Make it your plan](docs/your-plan.md): changing meals and foods in the app, and the default plan for a fork
 - [Privacy and data](docs/privacy-and-data.md): what stays on the device, backup, reset, SQLite export
 - [Development](docs/development.md): running, tests, languages, releasing, project layout
 

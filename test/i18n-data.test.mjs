@@ -6,7 +6,8 @@ import { setLang, getLang, inEnglish } from '../js/i18n.js';
 import {
   S, today, dayVerdict, verdictText, dayNotes, dayReasons, dayGoals, budgetVerdict, VERDICT, WEEK_TIERS, titleOf, titleFor, TK_KINDS, parseLocal, parseCount, fmtInt,
 } from '../js/core.js';
-import { addDays, planDigest, planFoods, RULES, MEALS } from '../js/plan.js';
+import { addDays, planDigest, planFoods, RULES, buildPlan } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
 import { reviewBrief, coachBrief, checkBrief } from '../js/briefs.js';
 import { AI_ERRORS, AI_ERROR_LABEL } from '../js/ai.js';
 import { cleanEntry } from '../js/backup.js';
@@ -22,6 +23,7 @@ afterEach(async () => {
   await setLang('en');
 });
 
+S.plan = buildPlan(seedPlan);
 const T = today();
 const day = (off) => addDays(T, off);
 const meal = (d, kcal, p, extra = {}) => S.entries.push({ id: `e${S.entries.length}`, day: d, ts: Date.now(), kind: 'meal', status: 'ok', slot: 'lunch', title: 'Egg', kcal, p, c: 0, f: 0, fib: 0, mult: 1, tier: 'plan', ...extra });
@@ -43,7 +45,7 @@ const leakTr = () => {
 
 test('the briefs and the plan digest are byte-identical in Turkish and English', async () => {
   setup();
-  const before = { review: reviewBrief(day(-1)), coach: coachBrief(day(-1)), check: checkBrief('a note'), digest: planDigest(), foods: planFoods(), weekly: RULES.weekly.join(' ') };
+  const before = { review: reviewBrief(day(-1)), coach: coachBrief(day(-1)), check: checkBrief('a note'), digest: planDigest(S.plan), foods: planFoods(S.plan), weekly: RULES.weekly.join(' ') };
   assert.match(before.review, /App verdict: /);
   assert.match(before.review, /kcal above budget/);
   leakTr();
@@ -55,8 +57,8 @@ test('the briefs and the plan digest are byte-identical in Turkish and English',
   assert.equal(reviewBrief(day(-1)), before.review);
   assert.equal(coachBrief(day(-1)), before.coach);
   assert.equal(checkBrief('a note'), before.check);
-  assert.equal(planDigest(), before.digest);
-  assert.equal(planFoods(), before.foods);
+  assert.equal(planDigest(S.plan), before.digest);
+  assert.equal(planFoods(S.plan), before.foods);
   assert.equal(getLang(), 'tr'); // and the language is back after the English call
   assert.equal(fmtInt(8200), (8200).toLocaleString('tr-TR'));
   assert.doesNotMatch(reviewBrief(day(-1)), /TR\[/);
@@ -88,8 +90,6 @@ test('generated titles: the English title stays, titleOf translates from tk', as
   assert.deepEqual(w, { title: 'Weight 82.5 kg', tk: { kind: 'weight', params: { kg: 82.5 } } });
   assert.equal(titleFor('steps', { steps: 8200 }).title, '8,200 steps'); // English formats whatever the language is
   assert.equal(titleFor('photo', {}).title, 'Photo');
-  assert.equal(titleFor('plan', { id: 'L-A' }).title, 'Egg and cheese plate');
-  assert.equal(titleFor('plan', { id: 'F-BEER50' }).title, 'Beer 0.5 l');
   assert.deepEqual(TK_KINDS, ['weight', 'steps', 'photo', 'plan']);
   const steps = { title: '8,200 steps', tk: { kind: 'steps', params: { steps: 8200 } } };
   assert.equal(titleOf(steps), '8,200 steps');
@@ -108,7 +108,34 @@ test('generated titles: the English title stays, titleOf translates from tk', as
   assert.equal(titleOf({ title: 'Egg and cheese plate', tk: { kind: 'plan', params: { id: 'L-A' } } }), 'Yumurta ve peynir tabağı');
   assert.equal(titleOf({ title: 'Egg and cheese plate', planId: 'L-A' }), 'Yumurta ve peynir tabağı'); // older entry without tk
   assert.equal(titleOf({ title: 'My own name', planId: 'L-A' }), 'My own name');
+  // Re-estimated as a weigh-in or steps entry, an entry keeps its old planId; the valid tk wins
+  assert.equal(titleOf({ ...w, planId: 'L-A' }), 'Kilo 82,5 kg');
+  assert.equal(titleOf({ ...steps, planId: 'L-A' }), `${(8200).toLocaleString('tr-TR')} adım`);
   assert.equal(titleFor('steps', { steps: 8200 }).title, '8,200 steps'); // the stored title is English in any language
+});
+
+test('a plan entry keeps its title when the active plan is edited or switched', async () => {
+  const saved = S.plan;
+  try {
+    const e = { title: 'Egg and cheese plate', planId: 'L-A', tk: { kind: 'plan', params: { id: 'L-A' } } };
+    const flex = { title: 'Beer 0.5 l', planId: '', tk: { kind: 'plan', params: { id: 'F-BEER50' } } };
+    const old = { title: 'Egg and cheese plate', planId: 'L-A' }; // an older entry without tk
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    // The meal renamed in the active plan
+    S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.map((m) => (m.id === 'L-A' ? { ...m, name: 'Renamed plate' } : m)) });
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    assert.equal(titleOf(old), 'Egg and cheese plate');
+    // A plan without that meal
+    S.plan = buildPlan({ ...seedPlan, id: 'P-x', name: 'Mine', meals: seedPlan.meals.filter((m) => m.id !== 'L-A') });
+    assert.equal(titleOf(e), 'Egg and cheese plate');
+    assert.equal(titleOf(old), 'Egg and cheese plate');
+    assert.equal(titleOf(flex), 'Beer 0.5 l');
+    await setLang('tr');
+    addTr('Egg and cheese plate', 'Yumurta ve peynir tabağı');
+    assert.equal(titleOf(e), 'Yumurta ve peynir tabağı'); // a default name still shows in the interface language
+    assert.equal(titleOf(old), 'Yumurta ve peynir tabağı');
+    assert.equal(titleOf({ title: 'Oat drink bowl', tk: { kind: 'plan', params: { id: 'U-x1' } } }), 'Oat drink bowl'); // a name of the person's own: as written
+  } finally { S.plan = saved; }
 });
 
 test('backup: tk is kept when valid, dropped when not, and old entries still import', () => {
@@ -226,10 +253,10 @@ test('AI error labels are the first sentence in lower case, as the code made the
 });
 
 test('plan tables keep stable English ids and names', () => {
-  assert.equal(MEALS[0].id, 'L-A');
-  assert.equal(MEALS[0].name, 'Egg and cheese plate');
-  assert.equal(MEALS[0].items[0].n, 'Boiled egg');
-  assert.equal(MEALS[0].items[0].measure, '2 eggs');
+  assert.equal(S.plan.meals[0].id, 'L-A');
+  assert.equal(S.plan.meals[0].name, 'Egg and cheese plate');
+  assert.equal(S.plan.meals[0].items[0].n, 'Boiled egg');
+  assert.equal(S.plan.meals[0].items[0].measure, '2 eggs');
   assert.equal(RULES.daily[1], '8,000 steps a day. With a desk job this is the cheapest part of the deficit.');
   assert.equal(RULES.rotation[0][0], 'Monday');
 });

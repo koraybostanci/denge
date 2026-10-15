@@ -2,12 +2,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
+  parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
 } from '../js/core.js';
-import { addDays, diffDays, hhmm, planDigest, planFoods, FOODS, MEALS, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import { checkBrief } from '../js/briefs.js';
+import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
+import { readFileSync, readdirSync } from 'node:fs';
 
+const SEED = buildPlan(seedPlan);
+S.plan = SEED;
 const T = today();
 const day = (off) => addDays(T, off);
 const reset = () => {
@@ -169,6 +175,18 @@ test('the late snack is suggested only when every planned meal is logged', () =>
   assert.equal(s.slot.id, 'late');
 });
 
+test('the late snack needs room for the plan\u2019s own late meal, not a fixed 90 kcal', () => {
+  const left = (n) => { reset(); for (const slot of ['lunch', 'snack1', 'snack2', 'dinner']) meal(T, 0, 0, { slot }); meal(T, dayTarget(T) - n, 5, { slot: 'dinner' }); };
+  try {
+    left(90); assert.equal(suggest(T).extra, true); // Default's 95 kcal skyr, unchanged
+    left(89); assert.ok(!suggest(T).extra);
+    S.plan = buildPlan({ ...seedPlan, meals: [...seedPlan.meals.filter((m) => m.slot !== 'late'), { id: 'N-X', slot: 'late', name: 'Big shake', ingredients: [['skyr', 311]] }] });
+    assert.equal(Math.round(S.plan.meals.find((m) => m.id === 'N-X').kcal), 196);
+    left(190); assert.ok(!suggest(T).extra);
+    left(191); assert.equal(suggest(T).extra, true);
+  } finally { S.plan = SEED; }
+});
+
 test('weights never print as -0.0', () => {
   assert.equal(fmtKg(-0.028), '0.0');
   assert.equal(fmtKg(-0.4), '-0.4');
@@ -180,16 +198,112 @@ test('hhmm takes a Date or a timestamp', () => {
   assert.equal(hhmm(new Date(2026, 0, 1, 7, 5).getTime()), '07:05');
 });
 
-test('a food added to the plan without a short name does not put "undefined" in the model digest', () => {
-  FOODS.testfood = { name: 'Test food', v: [1, 1, 1, 1, 1] };
-  MEALS[0].ingredients.push(['testfood', 10]);
-  try {
-    assert.ok(!/undefined/.test(planDigest()));
-    assert.ok(!/undefined/.test(planFoods()));
-  } finally {
-    MEALS[0].ingredients.pop();
-    delete FOODS.testfood;
+test('a seed food renamed in My plan goes by its new name in the digest; one left as it is keeps its short name', () => {
+  const plan = buildPlan({ ...seedPlan, foods: { ...seedPlan.foods, chicken: { name: 'Firm tofu', v: [120, 13, 2, 7, 1] } } });
+  for (const text of [planDigest(plan), planFoods(plan)]) {
+    assert.match(text, /Firm tofu/);
+    assert.ok(!/chicken breast/.test(text));
+    assert.match(text, /boiled potato/);
   }
+  assert.match(planDigest(plan), /D-E: lentils 250g, Firm tofu 100g/);
+});
+
+test('a food added to the plan without a short name does not put "undefined" in the model digest', () => {
+  const plan = buildPlan({ ...seedPlan, foods: { ...seedPlan.foods, testfood: { name: 'Test food', v: [1, 1, 1, 1, 1] }, constructor: { name: 'Odd key', v: [1, 1, 1, 1, 1] } },
+    meals: [{ ...seedPlan.meals[0], ingredients: [...seedPlan.meals[0].ingredients, ['testfood', 10], ['constructor', 5]] }, ...seedPlan.meals.slice(1)] });
+  for (const text of [planDigest(plan), planFoods(plan)]) {
+    assert.ok(!/undefined|function/.test(text));
+    assert.match(text, /Test food/); // its own name stands in for the short one
+  }
+  assert.ok(!/undefined/.test(planDigest(SEED)));
+  assert.equal(planDigest(buildPlan({ id: 'x', name: '', foods: {}, meals: [] })), '');
+});
+
+test('buildPlan works out the macros from the food table and skips an ingredient whose food is missing', () => {
+  const foods = { a: { name: 'A', v: [100, 10, 20, 5, 2] } };
+  const plan = buildPlan({ id: 'p', name: 'P', foods, meals: [{ id: 'M-1', slot: 'lunch', name: 'M', ingredients: [['a', 150, '1 cup'], ['gone', 100], ['toString', 50]] }] });
+  const m = plan.meals[0];
+  assert.deepEqual([m.kcal, m.p, m.c, m.f, m.fib], [150, 15, 30, 7.5, 3]);
+  assert.deepEqual(m.items, [{ n: 'A', g: 150, measure: '1 cup', kcal: 150, p: 15 }]);
+  assert.deepEqual(m.ingredients, [['a', 150, '1 cup']]);
+  assert.equal(SEED.meals.find((x) => x.id === 'L-A').kcal, 487); // the shipped plan's numbers are unchanged
+});
+
+test('typed text matches only the meals of the active plan', () => {
+  assert.equal(parseLocal('Egg and cheese plate').meal.id, 'L-A');
+  assert.equal(mealById('L-A').name, 'Egg and cheese plate');
+  assert.equal(mealById('constructor'), undefined);
+  S.plan = buildPlan({ id: 'mine', name: 'Mine', foods: seedPlan.foods, meals: [{ id: 'X-1', slot: 'lunch', name: 'Big salad', ingredients: [['salad', 400]] }] });
+  try {
+    assert.equal(parseLocal('Egg and cheese plate'), null);
+    assert.equal(parseLocal('l-a'), null);
+    assert.equal(mealById('L-A'), undefined);
+    assert.equal(parseLocal('big salad').meal.id, 'X-1');
+    assert.equal(parseLocal('x-1').meal.id, 'X-1');
+  } finally { S.plan = SEED; }
+});
+
+test('a plan with an empty slot and no late meal: suggestions and the pace skip what the plan does not have', () => {
+  reset();
+  const meals = seedPlan.meals.filter((m) => m.slot !== 'snack2' && m.slot !== 'late');
+  S.plan = buildPlan({ ...seedPlan, meals });
+  try {
+    assert.deepEqual(openSlots(T).map((s) => s.id), ['lunch', 'snack1', 'dinner']);
+    const s = suggest(T);
+    assert.equal(s.slot.id, 'lunch');
+    assert.ok(Number.isFinite(s.rem) && s.meal);
+    assert.deepEqual(planSteps(1550).map((x) => x.id), ['lunch', 'snack1', 'dinner']);
+    assert.ok(Math.abs(planSteps(1550).reduce((a, x) => a + x.kcal, 0) - 1550) < 1e-6);
+    for (const slot of ['lunch', 'snack1', 'dinner']) meal(T, 100, 5, { slot });
+    const after = suggest(T); // every planned meal logged, protein short, and no late meal to offer
+    assert.equal(after.meal, null);
+    assert.ok(!after.extra);
+    S.plan = buildPlan({ id: 'empty', name: '', foods: {}, meals: [] });
+    reset();
+    assert.deepEqual(openSlots(T), []);
+    assert.deepEqual(planSteps(1550), []);
+    assert.equal(plannedBy(1550, 20), 0);
+    assert.equal(suggest(T).meal, null);
+  } finally { S.plan = SEED; }
+});
+
+test('a plan with no main meals is not "done": no done state in suggest, no "all meals logged" in the brief; Default unchanged', () => {
+  reset();
+  try {
+    for (const meals of [[], seedPlan.meals.filter((m) => m.slot === 'late')]) {
+      S.plan = buildPlan({ ...seedPlan, meals });
+      reset();
+      assert.equal(suggest(T).noMain, true);
+      assert.equal(mealTimesLine(), '');
+      assert.ok(!/All meals/.test(checkBrief('')));
+      meal(T, 100, 5, { slot: 'late' });
+      assert.ok(!/All meals/.test(checkBrief('')));
+    }
+    S.plan = SEED;
+    reset();
+    assert.ok(!suggest(T).noMain);
+    assert.equal(mealTimesLine(), mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', '));
+    assert.match(mealTimesLine(), /^lunch \S+, snack 1 \S+/);
+    for (const slot of ['lunch', 'snack1', 'snack2', 'dinner']) meal(T, 100, 5, { slot });
+    assert.match(checkBrief(''), /All meals of the day are logged\./);
+  } finally { S.plan = SEED; }
+});
+
+test('a slot the plan has no meal for adds nothing to the reserve for the next meal', () => {
+  reset();
+  // A plan whose dinner slot is empty but whose lunch is: the reserve stays a number, so a fitting meal is found
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot === 'lunch' || m.slot === 'snack1') });
+  try {
+    const s = suggest(T);
+    assert.equal(s.slot.id, 'lunch');
+    assert.equal(s.tight, false);
+  } finally { S.plan = SEED; }
+});
+
+test('only js/app.js imports the shipped plan; everything else reads S.plan', () => {
+  const dir = new URL('../js/', import.meta.url);
+  const importers = readdirSync(dir).filter((f) => f.endsWith('.js') && /default-plan\.js['"]/.test(readFileSync(new URL(f, dir), 'utf8')));
+  assert.deepEqual(importers, ['app.js']);
 });
 
 test('fresh settings are those of a new install, as new objects each time', () => {
@@ -386,4 +500,51 @@ test('a review goes stale when the minimum changes', () => {
   S.settings.kcalMinDay = 1400;
   assert.equal(reviewState(day(-1)), 'stale');
   delete S.days[day(-1)];
+});
+
+test('the typed coffee and beer shortcuts win over a plan meal with the same name', () => {
+  S.plan = buildPlan({ id: 'mine', name: 'Mine', foods: seedPlan.foods, meals: [{ id: 'X-1', slot: 'snack1', name: 'Coffee', ingredients: [['salad', 100]] }, { id: 'X-2', slot: 'lunch', name: 'Big salad', ingredients: [['salad', 400]] }] });
+  try {
+    assert.deepEqual(parseLocal('coffee'), { type: 'count', key: 'coffee', n: 1 });
+    assert.equal(parseLocal('big salad').type, 'plan');
+    assert.equal(parseLocal('x-1').meal.id, 'X-1');
+  } finally { S.plan = SEED; }
+});
+
+test('a favourite or extra named like the counter wins over it; only a plan meal yields to the counter', () => {
+  const saved = S.settings.favorites;
+  S.settings.favorites = [{ id: 'f1', name: 'Coffee' }];
+  try {
+    assert.equal(parseLocal('coffee').type, 'favorite');
+    S.settings.favorites = [];
+    assert.deepEqual(parseLocal('coffee'), { type: 'count', key: 'coffee', n: 1 });
+    assert.equal(parseLocal('Beer 0.5 l').type, 'flex');
+  } finally { S.settings.favorites = saved; }
+});
+
+test('releasePhotos revokes every photo URL of a form, and a missing form is nothing', () => {
+  const revoked = [];
+  const orig = URL.revokeObjectURL;
+  URL.revokeObjectURL = (u) => revoked.push(u);
+  try {
+    releasePhotos(undefined);
+    releasePhotos({ photos: [{ url: 'a' }, { url: 'b' }] });
+    assert.deepEqual(revoked, ['a', 'b']);
+    assert.match(readFileSync(new URL('../js/app.js', import.meta.url), 'utf8'), /releasePhotos\(form\)/);
+  } finally { URL.revokeObjectURL = orig; }
+});
+
+test('titleFor: a plan kind gives only its tk, the other kinds a title and tk', () => {
+  const p = titleFor('plan', { id: 'L-A' });
+  assert.equal(p.tk.kind, 'plan');
+  assert.equal(p.tk.params.id, 'L-A');
+  assert.equal(p.title, undefined);
+  assert.deepEqual(p, { tk: { kind: 'plan', params: { id: 'L-A' } } }); // what logMeal and analyzeEntry spread into the entry
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.equal((src.match(/kind: 'plan'/g) || []).length, 0); // no hand-built copies
+  for (const [kind, params] of [['weight', { kg: 82.5 }], ['steps', { steps: 8200 }], ['photo', {}]]) {
+    const r = titleFor(kind, params);
+    assert.equal(r.tk.kind, kind);
+    assert.ok(r.title);
+  }
 });

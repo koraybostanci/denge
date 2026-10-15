@@ -1,8 +1,9 @@
 // Model calls. Two routes: Claude (Anthropic Messages API) or any OpenAI-compatible endpoint
 // (Gemini, OpenCode Zen/Go, OpenRouter…). Kept token-lean: small image, short fixed
 // instruction, short JSON output.
-import { planDigest, planFoods, RULES, SLOTS, hhmm } from './plan.js';
+import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
+import { S, mealTimesLine } from './core.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -13,20 +14,27 @@ export const STRONG_MODEL = 'claude-sonnet-5-5';
 const IMG_EDGE = 768; // long edge; 768×576 is about 590 image tokens
 export const CHECK_EDGE = 1536; // menus and nutrition tables have small print, so checks send a larger copy
 
-const SYSTEM = `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
+// The workout-slot meals of the plan, for the slot line: their names (lowercase) joined with "or", and plain "workout" when the plan has none
+function workoutNote(plan) {
+  const names = plan.meals.filter((m) => m.slot === 'workout').map((m) => String(m.name).toLowerCase());
+  return names.length ? `workout (${names.join(' or ')})` : 'workout';
+}
+
+// Built at each request, from the active plan
+const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
 For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
-slot: morning, lunch, snack1, snack2, dinner, late, or workout (pre/post-workout banana or skyr). Choose by time and content.
+slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
 tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = sugary drinks, fried food, crisps, salted nuts, pastries (simit, börek, poğaça, croissant, pretzel), white bread or toast.
 flags: add "alcohol" for any alcohol.
 conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
 Plan meals:
-${planDigest()}`;
+${planDigest(S.plan)}`;
 
-// The prompts are English and built once, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
+// The prompts are English and built at each request from the active plan, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
 // Entries keep English food names and titles (the plan and the favourites match on them), so only the question is asked for in Turkish.
 const TURKISH = {
@@ -268,7 +276,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
+  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -294,10 +302,16 @@ async function callWithFallback(cfg, req, onRetry) {
 }
 const FALLBACK_ON = ['server', 'rate', 'no_quota'];
 
+// The meal times of the plan, or a plain line when it has no main meals
+const mealTimes = () => {
+  const m = mealTimesLine();
+  return m ? `; meals are ${m}.` : '. The plan has no set meal times.';
+};
+
 // ——— The day's review: text only, a few hundred tokens ———
 // The prompts are always English, whatever the interface language is
-const REVIEW_SYSTEM = inEnglish(() => `You review one day of a food log for one person on a weight-loss plan, against the plan and the goal. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${SLOTS.filter((x) => x.id !== 'late').map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+const REVIEW_SYSTEM = () => inEnglish(() => `You review one day of a food log for one person on a weight-loss plan, against the plan and the goal. Reply with JSON only, in English.
+The plan: the calorie budget and protein goal given with the day${mealTimes()}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 The calories against the budget are the main goal; protein, fibre and the rest are secondary, so never call a day a miss for those alone. Use only the foods and numbers given; never invent an amount. Name the actual foods. Be supportive and encouraging, like a kind coach reading the numbers: name what went well first, stay concrete, never scold or moralise, and treat a bigger day as one day, not a failure. No medical advice.
@@ -305,7 +319,9 @@ head: one sentence. How did the day go against the plan, and what is the main re
 good: up to 2 things that helped, each naming the food or habit. Empty if there were none.
 cut: up to 2 things that cost the most and what would have reduced them, with the kcal that would save. Empty if nothing needed cutting.
 next: one concrete thing to do tomorrow; for a day still in progress, for the rest of today.
-Every string at most 22 words.`);
+Every string at most 22 words.
+Plan meals:
+${planDigest(S.plan)}`);
 const REVIEW_SHAPE = '\nReturn exactly one JSON object with these keys: {"head":"","good":[""],"cut":[""],"next":""}';
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -324,7 +340,7 @@ const REVIEW_SCHEMA = {
  * @returns {Promise<{data:{head:string,good:string[],cut:string[],next:string}, usage:{in:number,out:number}, model:string}>}
  */
 export async function review(o) {
-  const req = { system: REVIEW_SYSTEM + langLine(), shape: REVIEW_SHAPE, text: o.brief, schema: REVIEW_SCHEMA, json: true, maxTokens: 400 };
+  const req = { system: REVIEW_SYSTEM() + langLine(), shape: REVIEW_SHAPE, text: o.brief, schema: REVIEW_SCHEMA, json: true, maxTokens: 400 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanReview(r.data);
   if (!data.head) throw new AiError('empty', 'The model returned no review');
@@ -341,12 +357,14 @@ export function cleanReview(d) {
 
 // ——— The quick note on the day so far: text only, a few sentences ———
 // The prompts are always English, whatever the interface language is
-const COACH_SYSTEM = inEnglish(() => `You give one person on a weight-loss plan a quick, supportive check-in on their day so far. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${SLOTS.filter((x) => x.id !== 'late').map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+const COACH_SYSTEM = () => inEnglish(() => `You give one person on a weight-loss plan a quick, supportive check-in on their day so far. Reply with JSON only, in English.
+The plan: the calorie budget and protein goal given with the day${mealTimes()}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 note: two or three short sentences, at most 45 words in all. Say how the day is going so far, then what is left of the budget and which macros (protein first, then fibre) are still worth adding, with a concrete food or meal from the plan for the rest of the day. Warm and encouraging, never scolding; if the day is already above budget, be kind and say what to do next without skipping meals.
-The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.`);
+The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.
+Plan meals:
+${planDigest(S.plan)}`);
 const COACH_SHAPE = '\nReturn exactly one JSON object with this key: {"note":""}';
 const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string' } } };
 
@@ -355,7 +373,7 @@ const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['
  * @returns {Promise<{data:{note:string}, usage:{in:number,out:number}, model:string}>}
  */
 export async function coach(o) {
-  const req = { system: COACH_SYSTEM + langLine(), shape: COACH_SHAPE, text: o.brief, schema: COACH_SCHEMA, json: true, maxTokens: 250 };
+  const req = { system: COACH_SYSTEM() + langLine(), shape: COACH_SHAPE, text: o.brief, schema: COACH_SCHEMA, json: true, maxTokens: 250 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanCoach(r.data);
   if (!data.note) throw new AiError('empty', 'The model returned no note');
@@ -365,8 +383,10 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 
 // ——— Check before ordering or buying: photos of a menu, a dish or a product, judged against the plan ———
 // The prompts are always English, whatever the interface language is
-const CHECK_SYSTEM = inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
-The plan is built from: ${planFoods()}.
+const CHECK_SYSTEM = () => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
+The plan is built from: ${planFoods(S.plan)}.
+Plan meals:
+${planDigest(S.plan)}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 kind: "menu", "product" (one or several packaged products), "dish" (prepared food in front of them), or "none" when there is nothing to judge or the text is too small or blurred to read.
@@ -413,7 +433,7 @@ const CHECK_SCHEMA = {
  * @returns {Promise<{data:{kind:string,title:string,answer:string,options:object[]}, usage:{in:number,out:number}, model:string}>}
  */
 export async function check(o) {
-  const req = { system: CHECK_SYSTEM + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
+  const req = { system: CHECK_SYSTEM() + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanVerdict(r.data);
   if (!data.answer && !data.options.length) throw new AiError('empty', 'The model returned no verdict');
@@ -435,6 +455,46 @@ export function cleanVerdict(d) {
     };
   }).filter((x) => x.name);
   return { kind: ['menu', 'product', 'dish', 'none'].includes(d.kind) ? d.kind : 'none', title: clean(d.title, 80), answer: clean(d.answer, 360), options };
+}
+
+// ——— The values of one food per 100 g, for the food form: from a nutrition label, a package, the food itself or a name ———
+// The prompt is always English, whatever the interface language is
+const FOOD_SYSTEM = () => inEnglish(() => `You give the nutrition values of one food per 100 g, for the food table of a weight-loss plan. Reply with JSON only, in English.
+Input: up to two photos (a nutrition label, a package, or the food itself) and/or the food's name, in any language.
+If a nutrition label is readable, copy its per-100 g values. If it gives values only per serving, convert them to per 100 g using the serving size. If it gives energy only in kJ, divide by 4.184.
+Otherwise estimate typical values per 100 g of the food as shown or named, as it is sold (raw unless it is clearly cooked).
+name: a short name for the food, at most 60 characters: the product name when one is shown, else a plain name.
+kcal: energy per 100 g. p, c, f, fib: protein, carbohydrate, fat and fibre in grams per 100 g.
+known: true if you can tell what the food is or read its values, false if you cannot (then the other values do not matter). A food with 0 kcal, such as water, is known.`);
+const FOOD_SHAPE = '\nReturn exactly one JSON object with these keys: {"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0}';
+const FOOD_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'known', 'kcal', 'p', 'c', 'f', 'fib'],
+  properties: { name: { type: 'string' }, known: { type: 'boolean' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
+};
+
+/**
+ * @param {{cfg:object, name?:string, blobs?:Blob[], onRetry?:Function}} o name: what is typed in the form, if anything
+ * @returns {Promise<{data:{name:string,kcal:number,p:number,c:number,f:number,fib:number}, usage:{in:number,out:number}, model:string}>}
+ */
+export async function foodValues(o) {
+  const name = clean(o.name, 60);
+  const req = { system: FOOD_SYSTEM(), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
+  const r = await callWithFallback(o.cfg, req, o.onRetry);
+  return { ...r, data: cleanFoodValues(r.data) };
+}
+
+// Values from the model, the way a plan food stores them: kcal rounded to whole numbers and the rest to 0.1, within cleanPlan's
+// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters. `known` is true or "true"; when it is missing, kcal above 0 counts as known (providers without a strict schema may omit it). An explicit false, no kcal or more than 1,000 is no reading (0 kcal is a reading only when known is true, as for water).
+export function cleanFoodValues(d) {
+  d = d && typeof d === 'object' ? d : {};
+  const num = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim()) ? +v : NaN);
+  const kcal = Math.round(num(d.kcal));
+  const known = d.known === undefined || d.known === null ? kcal > 0 : d.known === true || (typeof d.known === 'string' && d.known.trim().toLowerCase() === 'true');
+  if (!known || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
+  const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
+  return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
 }
 
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message

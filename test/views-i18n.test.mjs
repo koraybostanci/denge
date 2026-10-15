@@ -7,7 +7,7 @@ import { setLang, t } from '../js/i18n.js';
 import tr from '../js/tr.js';
 import { MODELS, PRESETS } from '../js/ai.js';
 import { extract, literals } from './extract.mjs';
-import { screens, fixture, core, views, day, at, meal, T as TODAY } from './screens.mjs';
+import { screens, fixture, core, views, day, at, meal, MINE, T as TODAY } from './screens.mjs';
 
 const { S } = core;
 const VIEWS = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
@@ -22,8 +22,8 @@ const ALLOW_WORDS = new Set(['kg', 'kcal', 'mg', 'ml', 'pickle', 'claude', 'engl
 const CODE_WORDS = new Set(['numeric', 'long', 'short', 'future', 'before', 'over', 'top', 'more', 'morning', 'late', 'workout', 'true', 'false', 'decimal', 'start', 'middle',
   'hidden', 'visible', 'span', 'pointermove', 'pointerdown', 'pointerleave', 'conjunction', 'going', 'target', 'min', 'near', 'disabled', 'selected', 'checked', 'open',
   'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned']);
-// A class name or a piece of one: is-done, cal-d, day-${st}, pill-good, log-plan
-const CLASS_NAME = /^(?:is|pill|day|cal|log|way)-[a-z0-9\0-]*$/;
+// A class name or a piece of one, or an action name: is-done, cal-d, day-${st}, pill-good, log-plan, plan-meal
+const CLASS_NAME = /^(?:is|pill|day|cal|log|way|plan)-[a-z0-9\0-]*$/;
 // An attribute whose value a person reads
 const TEXT_ATTR = /\s(?:aria-label|title|placeholder|alt)="([^"]*)"/g;
 // The English-looking words of a piece of text: 3 letters or more, not a unit or brand, not part of a name like is-done, a:b or a/b
@@ -120,7 +120,7 @@ async function pseudoOn() {
 // What is allowed to stay as it is in the pseudo-locale, and why:
 const EXCEPT = {
   // Text the person typed, or the model wrote, in the fixtures (shown as written; user data is never translated)
-  data: ['Oats with yoghurt', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
+  data: ['Oats with yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
   // Names from ai.js that are not marked with T() yet (the models and providers of the Settings sheet): brand names with a few English words
   models: [...Object.values(MODELS).map((m) => m.name), ...PRESETS.map((p) => p.name), ...Object.values(MODELS).map((m) => m.name.split(' (')[0]), ...PRESETS.map((p) => p.name.split(' (')[0])],
   // Words that are not English text: units, brand names, the two language names, and the host part of a placeholder
@@ -301,4 +301,263 @@ test('badge sheet: no placeholder is left on screen for any badge, in English or
   assert.equal(views.renderBadgeSheet('nope'), '');
   assert.equal(views.renderBadgeSheet('constructor'), '');
   assert.ok(BY_ID.days_on);
+});
+
+test('Today: a meal time the active plan has no meal for is not listed, unless something is logged in it', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  assert.match(views.renderToday(), /Snack 2/);
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot !== 'snack2') });
+  const html = views.renderToday();
+  assert.doesNotMatch(html, /Snack 2/);
+  assert.match(html, /<small>2 of 3<\/small>/);
+  S.entries.push(meal(TODAY, 16, 'snack2', 'Apple', 80, 0));
+  assert.match(views.renderToday(), /Snack 2/); // a logged meal is never hidden
+  fixture();
+});
+
+test('Today: the workout toggle label and the late-meal line follow the active plan', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  assert.match(views.renderToday(), /aria-label="Workout day: budget [\d,]+ kcal, banana and skyr added"/);
+  S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.map((m) => (m.slot === 'late' ? { ...m, name: 'Warm milk' } : m)) });
+  S.plans = { active: 'P-x', list: [seedPlan, { id: 'P-x', name: 'My plan' }] };
+  try { assert.doesNotMatch(views.renderToday(), /banana and skyr added/); } finally { S.plans = { active: 'default', list: [seedPlan] }; S.plan = buildPlan(seedPlan); fixture(); }
+});
+
+test('Plan: the switch, Delete My plan, the empty slot and what only Default shows', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  fixture();
+  S.tab = 'plan';
+  const only = views.renderPlan(); // (a) only Default
+  S.plans = { active: MINE.id, list: [seedPlan, MINE] };
+  S.plan = buildPlan(MINE);
+  const mine = views.renderPlan(); // (b) My plan active, Snack 2 empty
+  const slotWorkout = views.renderSlotSheet('workout', TODAY);
+  const mineSheet = views.renderPlanSheet('L-A');
+  S.plans = { active: 'default', list: [seedPlan, MINE] };
+  S.plan = buildPlan(seedPlan);
+  const both = views.renderPlan(); // (c) Default active while My plan exists
+  const defSheet = views.renderPlanSheet('L-A');
+  const sw = /class="seg plan-switch"/;
+  assert.doesNotMatch(only, sw);
+  assert.match(mine, sw);
+  assert.match(both, sw);
+  assert.match(mine, /data-id="P-mine01" aria-pressed="true">My plan</);
+  assert.match(both, /data-id="default" aria-pressed="true">Default</);
+  const del = /data-act="plan-delete"/;
+  assert.doesNotMatch(only, del);
+  assert.match(mine, del);
+  assert.doesNotMatch(both, del);
+  assert.ok(mine.indexOf('data-act="plan-delete"') < mine.indexOf('class="plan-rules"'));
+  const empty = /class="plan-empty">No meals here; Today won’t suggest one.</;
+  assert.match(mine, empty);
+  assert.doesNotMatch(only, empty);
+  // Rows open the plan meal sheet; the notes and the dinner rotation show only on Default
+  assert.match(only, /<li class="meal"><button type="button" class="meal-main" data-act="plan-meal" data-id="L-A">/);
+  assert.doesNotMatch(only, /plan-card|plan-row/);
+  for (const x of ['The first meal of the day.', 'Herbal tea by default.', 'Dinner rotation']) {
+    assert.ok(only.includes(x) && both.includes(x), x);
+    assert.ok(!mine.includes(x), x);
+  }
+  assert.doesNotMatch(slotWorkout, /Banana before, skyr after/); // the Today hints describe Default's meals
+  assert.match(views.renderSlotSheet('workout', TODAY), /Banana before, skyr after/);
+  // The read-only note: only on Default while My plan exists
+  const note = 'Built in, can’t be changed. Switch to My plan to change it.';
+  assert.ok(defSheet.includes(note));
+  assert.ok(!mineSheet.includes(note));
+  fixture();
+  assert.ok(!views.renderPlanSheet('L-A').includes(note));
+});
+
+test('Plan: Edit meal, + Add meal and the meal editor, by which plans exist', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  const { PLAN_CAPS } = await import('../js/backup.js');
+  fixture();
+  S.tab = 'plan';
+  const edit = /data-act="plan-meal-edit"/;
+  const add = /data-act="plan-meal-add" data-slot="lunch"/;
+  const sub = 'Tap a meal to see or change it.';
+  // (a) only Default: Edit meal under Log for today, + Add meal on every slot heading, the new subtitle
+  const only = views.renderPlan();
+  const onlySheet = views.renderPlanSheet('L-A');
+  assert.match(onlySheet, edit);
+  assert.ok(onlySheet.indexOf('data-act="log-plan-today"') < onlySheet.indexOf('data-act="plan-meal-edit"'));
+  assert.equal((only.match(/data-act="plan-meal-add"/g) || []).length, 6);
+  assert.match(only, add);
+  assert.ok(only.includes(sub));
+  // Editor on a meal of Default: Save to My plan with its note, Delete meal
+  core.startDraft('L-A');
+  const ed = views.renderMealEditor();
+  assert.match(ed, /<h2 id="sheet-title">Egg and cheese plate<\/h2>/);
+  assert.match(ed, /data-act="plan-meal-save">Save to My plan</);
+  assert.ok(ed.includes('Default stays as it is. Saving creates My plan with this change, and the app uses My plan from then on.'));
+  assert.ok(ed.includes('Changes apply from now on. Meals you already logged keep their numbers.'));
+  assert.match(ed, /data-act="plan-meal-delete"/);
+  assert.match(ed, /<b>487<\/b> kcal/);
+  assert.match(ed, /<option value="\+new">New food…<\/option>\s*<\/select>/);
+  assert.equal((ed.match(/class="ing"/g) || []).length, 6);
+  // A new meal: its title names the slot, Save waits for a name and an ingredient, no Delete
+  core.startDraft(null, 'workout', 'U-n1');
+  const nw = views.renderMealEditor();
+  assert.match(nw, /<h2 id="sheet-title">New meal · Workout-day extras<\/h2>/);
+  assert.match(nw, /placeholder="e.g. Chicken wrap"/);
+  assert.match(nw, /data-act="plan-meal-save" disabled>/);
+  assert.doesNotMatch(nw, /data-act="plan-meal-delete"/);
+  // Typed values: a wrong one is marked, and at 12 ingredients the food picker is off
+  Object.assign(S.draft.meal, { name: 'Wrap', ingredients: [['egg', '0'], ['bread', '45']] });
+  const marked = views.renderMealEditor();
+  assert.match(marked, /id="md-g-0"[^>]*aria-invalid="true"/);
+  assert.doesNotMatch(marked, /id="md-g-1"[^>]*aria-invalid/);
+  assert.match(marked, /data-act="plan-meal-save" disabled>/);
+  S.draft.meal.ingredients = Array.from({ length: PLAN_CAPS.ingredients }, () => ['egg', '10']);
+  const full = views.renderMealEditor();
+  assert.match(full, /<select id="md-add" class="ing-add" aria-label="Add ingredient" disabled>/);
+  assert.match(full, /data-act="plan-meal-save">Save to My plan</);
+  // (b) My plan active: plain Save, no note
+  S.plans = { active: MINE.id, list: [seedPlan, MINE] };
+  S.plan = buildPlan(MINE);
+  assert.match(views.renderPlan(), add);
+  assert.ok(views.renderPlan().includes(sub)); // editable (My plan active): the edit hint
+  assert.match(views.renderPlanSheet('U-oats'), edit);
+  core.startDraft('U-oats');
+  const mineEd = views.renderMealEditor();
+  assert.match(mineEd, /data-act="plan-meal-save">Save</);
+  assert.ok(!mineEd.includes('Default stays as it is.'));
+  // + Add meal is gone at the meal cap
+  S.plan = { ...S.plan, meals: Array.from({ length: PLAN_CAPS.meals }, (_, i) => ({ ...S.plan.meals[0], id: `U-${i}` })) };
+  assert.doesNotMatch(views.renderPlan(), /plan-meal-add/);
+  // (c) Default active while My plan exists: no Edit, no + Add
+  S.plans = { active: 'default', list: [seedPlan, MINE] };
+  S.plan = buildPlan(seedPlan);
+  assert.doesNotMatch(views.renderPlan(), /plan-meal-add/);
+  assert.doesNotMatch(views.renderPlanSheet('L-A'), edit);
+  fixture();
+});
+
+test('meal editor in Turkish: its text, names and measures through td(), the stored English kept in data-orig', async () => {
+  fixture();
+  await setLang('tr');
+  core.startDraft('L-A');
+  const ed = views.renderMealEditor();
+  assert.ok(ed.includes('value="Yumurta ve peynir tabağı" data-orig="Egg and cheese plate"'));
+  assert.ok(ed.includes('value="2 yumurta" data-orig="2 eggs"'));
+  assert.ok(ed.includes('>Haşlanmış yumurta</button>'));
+  for (const s of ['Planım’a kaydet', 'Öğünü sil', 'Malzeme ekle', 'Yeni yiyecek…', 'Ölçü (isteğe bağlı)', 'Değişiklikler bundan sonrası için geçerli.', 'Varsayılan olduğu gibi kalır.']) assert.ok(ed.includes(s), s);
+  core.startDraft(null, 'snack2', 'U-n1');
+  assert.match(views.renderMealEditor(), /Yeni öğün · 2\. ara öğün/);
+  S.tab = 'plan';
+  assert.ok(views.renderPlan().includes('Görmek ya da değiştirmek için bir öğüne dokun.'));
+  assert.ok(views.renderPlan().includes('Öğün ekle'));
+  assert.ok(views.renderPlanSheet('L-A').includes('Öğünü düzenle'));
+  fixture();
+});
+
+test('food form: a food of the meal with "Used in", a new food, the AI fill states and the no-key link', () => {
+  fixture();
+  Object.assign(S.settings, { provider: 'anthropic', apiKey: 'k' });
+  core.startDraft('L-A');
+  core.startFood('egg');
+  const ed = views.renderFoodForm();
+  assert.match(ed, /<h2 id="sheet-title">Boiled egg<\/h2>/);
+  assert.ok(ed.includes('value="Boiled egg" data-orig="Boiled egg"'));
+  assert.ok(ed.includes('Used in 4 meals. Changes apply to all of them.'));
+  assert.match(ed, /id="fd-v-1" type="text" inputmode="decimal" autocomplete="off" value="12.6"/);
+  assert.match(ed, /data-act="plan-food-ai">Fill in with AI</);
+  assert.match(ed, /data-act="plan-food-done">Done</);
+  // Used once: the singular; a value out of range is marked and turns Done off
+  S.draft.plan.meals = S.draft.plan.meals.filter((m) => m.id === 'L-A');
+  S.draft.foodForm.v[0] = '1200';
+  const one = views.renderFoodForm();
+  assert.ok(one.includes('Used in 1 meal. Changes apply to it.'));
+  assert.match(one, /id="fd-v-0"[^>]*aria-invalid="true"/);
+  assert.doesNotMatch(one, /id="fd-v-1"[^>]*aria-invalid/);
+  assert.match(one, /data-act="plan-food-done" disabled>/);
+  // While the AI reads: spinner and Reading…, fields and Done off, Back on
+  Object.assign(S.draft.foodForm, { v: [143, 12.6, 0.7, 9.5, 0], busy: true });
+  const busy = views.renderFoodForm();
+  assert.match(busy, /data-act="plan-food-ai" disabled><span class="spin" aria-hidden="true"><\/span>Reading…</);
+  assert.match(busy, /id="fd-name"[^>]*disabled>/);
+  assert.equal((busy.match(/id="fd-v-\d"[^>]*disabled>/g) || []).length, 5);
+  assert.match(busy, /data-act="plan-food-done" disabled>/);
+  assert.match(busy, /data-act="plan-food-back">Back</);
+  // The result and a failure
+  Object.assign(S.draft.foodForm, { busy: false, note: 'Filled in by AI. Check the values.' });
+  assert.match(views.renderFoodForm(), /<p class="note" role="status">Filled in by AI\. Check the values\.<\/p>/);
+  S.draft.foodForm.err = 'Couldn’t read values. Try the nutrition label, or type them.';
+  assert.match(views.renderFoodForm(), /role="alert">Couldn’t read values/);
+  // A new food: no "Used in", the AI button waits for a name or a photo
+  core.startFood('unew1');
+  const nw = views.renderFoodForm();
+  assert.match(nw, /<h2 id="sheet-title">New food<\/h2>/);
+  assert.ok(!nw.includes('Used in'));
+  assert.match(nw, /data-act="plan-food-ai" disabled>/);
+  assert.match(nw, /data-act="plan-food-done" disabled>/);
+  S.draft.foodForm.photos = [{ url: 'blob:x' }];
+  assert.match(views.renderFoodForm(), /data-act="plan-food-ai">/);
+  assert.match(views.renderFoodForm(), /aria-label="Change the photo"><img src="blob:x" alt=""><\/button>/);
+  // No key: the square and the button give way to the link to Settings → Photo and text analysis
+  S.settings.apiKey = '';
+  const nokey = views.renderFoodForm();
+  assert.doesNotMatch(nokey, /plan-food-photo|plan-food-ai/);
+  assert.match(nokey, /<p>Add an API key to fill this in from a photo\.<\/p><button type="button" class="link" data-act="settings" data-sec="analysis">Add key<\/button>/);
+  // The editor's "New food…" option is gone at the foods cap
+  S.draft.meal.ingredients = [];
+  S.draft.plan.foods = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`f${i}`, { name: `F${i}`, v: [1, 1, 1, 1, 1] }]));
+  assert.ok(!views.renderMealEditor().includes('value="+new"'));
+  fixture();
+});
+
+test('food form in Turkish: its text, the name through td() with the stored English kept, decimals with a comma', async () => {
+  fixture();
+  await setLang('tr');
+  Object.assign(S.settings, { provider: 'anthropic', apiKey: 'k' });
+  core.startDraft('L-A');
+  core.startFood('egg');
+  const ed = views.renderFoodForm();
+  assert.ok(ed.includes('value="Haşlanmış yumurta" data-orig="Boiled egg"'));
+  assert.ok(ed.includes('value="12,6"'));
+  for (const s of ['Geri', 'Yapay zekâyla doldur', 'Kullanıldığı öğün sayısı: 4. Değişiklikler her birine uygulanır.', '100 g için değerler', 'Karbonhidrat (g)', 'Yağ (g)', 'Lif (g)', 'Tamam', 'Etiketin ya da yiyeceğin fotoğrafını ekle', 'En iyi sonucu besin değeri tablosunun fotoğrafı verir.']) assert.ok(ed.includes(s), s);
+  S.draft.foodForm.busy = true;
+  assert.ok(views.renderFoodForm().includes('Okunuyor…'));
+  core.startFood('unew1');
+  S.settings.apiKey = '';
+  const nokey = views.renderFoodForm();
+  for (const s of ['Yeni yiyecek<', 'Bunu bir fotoğraftan doldurmak için bir API anahtarı ekle.', 'Anahtar ekle']) assert.ok(nokey.includes(s), s);
+  for (const s of ['Filled in by AI. Check the values.', 'Couldn’t read values. Try the nutrition label, or type them.', 'Filling in the values failed. {detail}']) assert.ok(tr[s], s);
+  fixture();
+});
+
+test('Today: the coach line lowercases the late meal with the locale (Turkish I and İ), the default text unchanged', async () => {
+  const { buildPlan } = await import('../js/plan.js');
+  const { default: seedPlan } = await import('../js/default-plan.js');
+  const line = async (lang, name) => {
+    fixture();
+    S.plan = buildPlan(seedPlan);
+    S.plan.meals = S.plan.meals.filter((m) => m.slot === 'late').slice(0, 1);
+    S.plan.meals[0].name = name;
+    S.entries = [meal(TODAY, 8, 'breakfast', 'Oats', 300, 10)]; // no main slot is open and something is logged: the late meal is the suggestion
+    S.settings.protein = 500;
+    S.settings.startDate = day(-1);
+    S.days[TODAY] = { day: TODAY };
+    await setLang(lang);
+    const html = views.renderToday();
+    const m = html.match(/<p class="coach-line">(?:<b>[^<]*<\/b>)?[^<]*/);
+    return m && m[0];
+  };
+  const en = await line('en', 'Işık yoghurt');
+  assert.match(en, /g of işık yoghurt closes/); // English lowercases I to i
+  const tr1 = await line('tr', 'Işık yoğurt');
+  assert.ok(tr1.includes('ışık yoğurt'), tr1);
+  const tr2 = await line('tr', 'İçli köfte');
+  assert.ok(tr2.includes('içli köfte'), tr2);
+});
+
+test('Plan: the subtitle follows canEditPlan, not hasMyPlan', async () => {
+  const src = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
+  assert.match(src, /!canEditPlan\(\) \? t\('Tap a meal for its ingredients, and to add a photo of your own plate\.'\) : t\('Tap a meal to see or change it\.'\)/);
 });

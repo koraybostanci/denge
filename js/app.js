@@ -5,14 +5,15 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
-import { MEAL_BY_ID, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import seedPlan from './default-plan.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -23,6 +24,30 @@ async function saveSettings() { S.rev++; rememberLang(S.settings.lang); await db
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
   try { await setLang(lang); applyStatic(); return true; } catch { toast(t('Could not load that language. Try again when you are online.')); return false; }
+}
+// The one way plans are written: Default always from the seed, the user plan only as cleanPlan passes it unchanged (else it
+// throws and nothing is written). The record is built from the arguments before anything waits, and stored in one write.
+export async function writePlans(list, active) {
+  const record = plansRecord(seedPlan, list, active);
+  if (!record) throw new Error(t('The plan has a value outside the limits'));
+  await db.kvSet('plans', record);
+  S.plans = record;
+  S.plan = buildPlan(activePlan(record));
+  S.rev++;
+  return record;
+}
+// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo that
+// no picture refers to any more is deleted
+export async function setPlanPhotos(next) {
+  const { planPhotos, gone } = sweepPlanPhotos(S.settings.planPhotos, next, S.plans || plansRecord(seedPlan, [], 'default'));
+  const same = JSON.stringify(planPhotos) === JSON.stringify(S.settings.planPhotos);
+  S.settings.planPhotos = planPhotos;
+  if (!same) await saveSettings();
+  for (const id of gone) {
+    await db.del('photos', id);
+    const u = S.urls.get(id);
+    if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  }
 }
 async function saveDay(day, patch) {
   const d = { ...(S.days[day] || { day }), ...patch };
@@ -83,7 +108,7 @@ async function logMeal(tpl, src, day = S.viewDay) {
   const e = {
     id: db.uid(), ts, day, createdAt: Date.now(), kind: 'meal', status: 'ok', src,
     slot: tpl.slot && tpl.slot !== 'any' ? tpl.slot : slotByTime(new Date(ts)),
-    planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? { tk: { kind: 'plan', params: { id: tpl.id } } } : {}),
+    planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? titleFor('plan', { id: tpl.id }) : {}),
     items: (tpl.items || []).map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
     kcal: tpl.kcal, p: tpl.p, c: tpl.c, f: tpl.f, fib: tpl.fib,
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
@@ -292,8 +317,8 @@ async function addUsage(model, usage) {
 
 // ——— The day's review, written by the model ———
 // `what` names the thing asked for. Each has whole sentences, so a translation never has to fit a fragment into one
-const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.') };
-const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }) };
+const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.'), values: () => t('Add an API key in Settings to fill in the values.') };
+const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }), values: (detail) => t('Filling in the values failed. {detail}', { detail }) };
 function modelFailure(err, what = 'review') {
   const code = err && err.code;
   if (code === 'no_key') return NO_KEY[what]();
@@ -453,12 +478,9 @@ async function logCheckOption(id, i) {
 // ——— Pictures of the plan's meals: the person's own photos, kept apart from the log ———
 let photoTarget = null; // the plan meal waiting for the photo picker, if any
 async function storePlanPhoto(mealId, blob, w, h) {
-  const old = (S.settings.planPhotos || {})[mealId];
   const id = db.uid();
   await db.put('photos', { id, buf: await blob.arrayBuffer(), type: 'image/jpeg', w, h, plan: mealId });
-  S.settings.planPhotos = { ...(S.settings.planPhotos || {}), [mealId]: id };
-  await saveSettings();
-  if (old) { await db.del('photos', old); const u = S.urls.get(old); if (u) { URL.revokeObjectURL(u); S.urls.delete(old); } }
+  await setPlanPhotos({ ...(S.settings.planPhotos || {}), [mealId]: id }); // the picture it replaces goes, unless another meal shares it
 }
 // Framing step: the photo is opened with the house treatment applied, the person centres the plate in the
 // circle, and only that square is stored. The original never touches the database.
@@ -486,7 +508,7 @@ function zoomFrame(z) {
   if (r && Math.abs(Number(r.value) - frame.zoom) > 0.005) r.value = String(frame.zoom);
 }
 async function openFrame(mealId, file) {
-  if (!MEAL_BY_ID[mealId]) return;
+  if (!mealById(mealId)) return;
   let src;
   try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
   frame = { id: mealId, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
@@ -534,14 +556,9 @@ function cancelFrame() {
   hydratePhotos();
 }
 async function removePlanPhoto(mealId) {
-  const id = (S.settings.planPhotos || {})[mealId];
-  if (!id) return;
+  if (!(S.settings.planPhotos || {})[mealId]) return;
   const { [mealId]: gone, ...rest } = S.settings.planPhotos;
-  S.settings.planPhotos = rest;
-  await saveSettings();
-  await db.del('photos', id);
-  const u = S.urls.get(id);
-  if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  await setPlanPhotos(rest);
   render();
 }
 
@@ -581,10 +598,10 @@ async function analyzeEntry(id, opts = {}) {
       Object.assign(e, { kind: 'steps', status: 'ok', steps, ...titleFor('steps', { steps }) });
       await saveDay(e.day, { steps });
     } else if (data.kind === 'meal') {
-      const plan = has(MEAL_BY_ID, data.plan) ? MEAL_BY_ID[data.plan] : null;
+      const plan = mealById(data.plan) || null;
       if (plan) {
         Object.assign(e, {
-          planId: plan.id, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
+          planId: plan.id, title: plan.name, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
           kcal: plan.kcal, p: plan.p, c: plan.c, f: plan.f, fib: plan.fib, tier: 'plan',
         });
         // A plan meal without a picture takes this photo as its own
@@ -674,7 +691,9 @@ async function deliverFile(name, content, type) {
 
 async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges };
+  // The user plan travels with the backup; Default is the app's own and never does
+  const plans = { active: S.plans.active, list: S.plans.list.filter((p) => p.id !== 'default') };
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans };
   // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
   // They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
@@ -719,22 +738,22 @@ async function importBackup(file) {
     restored = entries.length;
     await db.putMany('entries', entries);
     await db.putMany('days', (Array.isArray(data.days) ? data.days : []).map(cleanDay).filter(Boolean));
+    let pictures = S.settings.planPhotos || {};
     if (data.settings && typeof data.settings === 'object') {
-      const before = Object.values(S.settings.planPhotos || {});
-      const incoming = cleanSettings(data.settings);
-      if (incoming.planPhotos) incoming.planPhotos = { ...(S.settings.planPhotos || {}), ...incoming.planPhotos }; // pictures are added to, not replaced
+      const { planPhotos, ...incoming } = cleanSettings(data.settings);
+      if (planPhotos) pictures = { ...pictures, ...planPhotos }; // pictures are added to, not replaced
       S.settings = { ...S.settings, ...incoming };
       if (S.settings.kcalMinDay > S.settings.kcalRest) S.settings.kcalMinDay = DEFAULTS.kcalMinDay; // a restore never leaves a minimum no day can reach
       await applyLang(S.settings.lang);
       await saveSettings();
-      // A plan picture that the backup replaces is no longer referred to by anything
-      const now = new Set(Object.values(S.settings.planPhotos || {}));
-      for (const id of before.filter((x) => !now.has(x))) {
-        await db.del('photos', id);
-        const u = S.urls.get(id);
-        if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
-      }
     }
+    // My plan is replaced by the backup's (a backup with plans but no user plan removes it); an older backup has no plans and leaves them alone
+    if (Array.isArray(data.plans) || (data.plans && typeof data.plans === 'object' && Array.isArray(data.plans.list))) { // anything else (null, a string, an object with no list) is a missing key
+      const plans = cleanPlans(data.plans, data.settings && data.settings.activePlan);
+      await writePlans(plans.list, plans.active);
+    }
+    // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
+    await setPlanPhotos(pictures);
     if (Array.isArray(data.checks)) {
       const have = new Set(S.checks.map((c) => c.id));
       const added = data.checks.map(cleanCheck).filter((c) => c && !have.has(c.id));
@@ -747,6 +766,7 @@ async function importBackup(file) {
     await load();
     return render();
   }
+  dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
   await load();
   badgesMode = 'restore';
   restoredFrom = gotBefore;
@@ -761,8 +781,21 @@ async function importBackup(file) {
 async function load() {
   S.rev++;
   const stored = await db.kvGet('settings', null);
-  S.entries = await db.all('entries');
   if (stored) S.settings = { ...S.settings, ...stored, usage: { ...S.settings.usage, ...(stored.usage || {}) } };
+  // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
+  // and a meal it no longer has loses its picture.
+  const storedPlans = await db.kvGet('plans', null);
+  const plans = loadedPlans(storedPlans, seedPlan, S.settings.activePlan);
+  S.plans = plans.record;
+  S.plan = buildPlan(activePlan(plans.record));
+  if (plans.rewrite) {
+    try {
+      await writePlans(plans.record.list, plans.record.active);
+      if (Array.isArray(storedPlans) && 'activePlan' in S.settings) { delete S.settings.activePlan; await saveSettings(); } // the older build's active id now lives in the record
+      if (Object.keys(S.settings.planPhotos || {}).length) await setPlanPhotos(S.settings.planPhotos);
+    } catch { /* tried again on the next start; the plans in memory are right */ }
+  }
+  S.entries = await db.all('entries');
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
   S.checks = await db.kvGet('checks', []);
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
@@ -1012,6 +1045,7 @@ function closeSheet() {
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
+  dropDraft(); // and so is a meal being edited (with its food form's photos): nothing is written
   $('#app').inert = false;
   document.body.classList.remove('sheet-open');
   // A render may have replaced the button that opened the sheet: find it again by its id
@@ -1023,6 +1057,20 @@ function closeSheet() {
   sheetOpener = null;
   sheetOpenerId = '';
 }
+// Close, Escape or a tap outside: Settings opened from the food form's Add key goes back to that form (the meal draft is
+// kept); the food form goes back to the meal editor like Back, asking first when it holds edits; everything else closes the sheet
+function dismissSheet() {
+  if (S.sheet && S.sheet.type === 'settings' && S.draft && S.draft.foodForm) {
+    S.suppEdit = '';
+    return openFood(hasKey() ? null : '[data-act="settings"]');
+  }
+  if (S.sheet && S.sheet.type === 'food' && S.draft && S.draft.foodForm) {
+    if (foodFormChanged(S.draft.foodForm) && !window.confirm(t('Discard your changes?'))) return; // the form stays open
+    return closeFood(-1);
+  }
+  if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
+  closeSheet();
+}
 async function openSettings(section, focusSel) {
   if (section) S.openSetting = section;
   await refreshStorage();
@@ -1030,15 +1078,148 @@ async function openSettings(section, focusSel) {
   openSheet(renderSettings(), { type: 'settings' }, focusSel || null, wasOpen && !focusSel);
 }
 
+// ——— The meal editor (S.draft) ———
+// A stored name or measure that comes back as td() showed it stays the stored text
+const keptText = (typed, stored) => (typed.trim() === td(stored) ? stored : typed);
+// What the editor's fields hold, into the draft (grams stay as typed until a save reads them)
+function syncDraft() {
+  const d = S.draft;
+  const name = $('#md-name');
+  if (!d || !name) return;
+  d.meal.name = keptText(name.value, name.dataset.orig);
+  d.meal.ingredients = d.meal.ingredients.map((row, i) => {
+    const m = keptText($(`#md-m-${i}`).value, $(`#md-m-${i}`).dataset.orig);
+    return m ? [row[0], $(`#md-g-${i}`).value, m] : [row[0], $(`#md-g-${i}`).value];
+  });
+}
+// Marks a field as wrong (or clears it) for assistive technology
+const mark = (el, bad) => { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); };
+// After typing: the live total, the marks on wrong fields and whether Save can be used, without redrawing the fields
+function checkDraft() {
+  syncDraft();
+  const r = readMeal(S.draft.meal);
+  mark($('#md-name'), r.bad.name);
+  r.bad.rows.forEach((b, i) => { mark($(`#md-g-${i}`), b.g); mark($(`#md-m-${i}`), b.m); });
+  $('#md-total').innerHTML = mealEditorTotal();
+  $('[data-act="plan-meal-save"]').disabled = !r.valid;
+}
+const openEditor = (focusSel) => openSheet(renderMealEditor(), { type: 'plan-edit', id: S.draft.meal.id }, focusSel);
+// Every save of the editor: the stored plan with the draft's meal changed (or removed) and its new or changed foods, in one
+// write. A copy of Default becomes My plan and is made active. Says whether My plan was created; null when the plan changed
+// under the draft (it is dropped and nothing is written).
+async function saveDraft(meal, remove) {
+  const first = S.draft.plan.id === 'default';
+  const plan = savedPlan(S.plans, S.draft, meal, { remove, newId: 'P-' + db.uid() });
+  if (!plan) {
+    dropDraft();
+    toast(t('Your plan changed while you were editing. Open the meal again.'));
+    return null;
+  }
+  await writePlans([plan], plan.id);
+  dropDraft();
+  return first;
+}
+
+// ——— The food form (S.draft.food, S.draft.foodForm), over the meal editor; Done and Back both return to it ———
+const FOOD_PHOTOS = '__food'; // marks the photo picker as opened from the food form
+const openFood = (focusSel, keepFocus) => openSheet(renderFoodForm(), { type: 'food', key: S.draft.food }, focusSel, keepFocus);
+// The editor's fields go into the draft first: the form replaces them
+function editFood(key) {
+  syncDraft();
+  startFood(key);
+  openFood(S.draft.foodForm.isNew ? '#fd-name' : null);
+}
+// What the form's fields hold, into S.draft.foodForm (values stay as typed until Done reads them)
+function syncFood() {
+  const form = S.draft && S.draft.foodForm;
+  const name = $('#fd-name');
+  if (!form || !name) return;
+  form.name = keptText(name.value, name.dataset.orig);
+  form.v = form.v.map((x, i) => $(`#fd-v-${i}`).value);
+}
+// After typing: the marks on wrong fields, Done and the AI button, without redrawing the fields
+function checkFood() {
+  syncFood();
+  const form = S.draft.foodForm;
+  const r = readFood(form);
+  mark($('#fd-name'), r.bad.name);
+  r.bad.v.forEach((b, i) => mark($(`#fd-v-${i}`), b));
+  $('[data-act="plan-food-done"]').disabled = !r.valid || form.busy;
+  const ai = $('#fd-ai');
+  if (ai) ai.disabled = form.busy || !(r.food.name || form.photos.length);
+}
+// Back to the meal editor (dropFood lets the photos go); a new food that is Done is an ingredient there, with its grams
+// field focused, an edited one has its name focused
+function closeFood(row) {
+  const key = S.draft.food;
+  dropFood();
+  const sel = row >= 0 ? `#md-g-${row}` : Object.hasOwn(S.draft.plan.foods, key) ? `[data-act="plan-food"][data-key="${CSS.escape(key)}"]` : '#md-add'; // a new food that is dropped has no row: the Add ingredient select
+  openEditor(sel);
+  const el = $(sel);
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+// The photo for the AI fill: shrunk like a check photo, held in memory only (up to two, a new pick replaces them)
+async function addFoodPhotos(files) {
+  const form = S.draft && S.draft.foodForm;
+  if (!form || form.busy) return;
+  const photos = [];
+  for (const f of files.slice(0, 2)) {
+    try {
+      const { blob } = await shrink(f, CHECK_EDGE);
+      photos.push({ blob, url: URL.createObjectURL(blob) });
+    } catch { toast(t('Could not open that photo')); }
+  }
+  if (!photos.length) return;
+  if (S.draft && S.draft.foodForm === form) {
+    syncFood();
+    releasePhotos(form);
+    form.photos = photos;
+    form.err = '';
+    openFood('#fd-ai');
+  } else photos.forEach((p) => URL.revokeObjectURL(p.url));
+}
+// Fill in with AI: runs while the person waits, like a check. A reply that comes after Back, after the sheet closed or for
+// another form is dropped (its usage is still counted).
+async function runFood() {
+  const d = S.draft;
+  const form = d && d.foodForm;
+  if (!form || form.busy) return;
+  syncFood();
+  const name = readFood(form).food.name;
+  if (!hasKey()) return openFood();
+  if (!name && !form.photos.length) return;
+  if (navigator.onLine === false) { form.err = modelFailure({ code: 'offline' }, 'values'); form.note = ''; return openFood('#fd-ai'); }
+  const key = d.food;
+  const live = () => S.draft === d && d.food === key && d.foodForm === form;
+  form.busy = true; form.err = ''; form.note = ''; form.status = '';
+  openFood();
+  try {
+    const { data, usage, model } = await foodValues({
+      cfg: aiCfg(), name, blobs: form.photos.map((p) => p.blob),
+      onRetry: (...a) => { if (live()) { form.status = retryNote(...a); syncFood(); openFood(null, true); } },
+    });
+    await addUsage(model, usage);
+    if (!live()) { form.busy = false; return; }
+    form.v = [data.kcal, data.p, data.c, data.f, data.fib];
+    if (!name && data.name) form.name = data.name;
+    form.note = t('Filled in by AI. Check the values.');
+  } catch (err) {
+    if (!live()) { form.busy = false; return; }
+    form.err = err.code === 'empty' ? t('Couldn’t read values. Try the nutrition label, or type them.') : modelFailure(err, 'values');
+  }
+  form.busy = false; form.status = '';
+  openFood('#fd-ai');
+}
+
 // ——— Actions ———
 const ACT = {
   'tab': (el) => go(el.dataset.tab),
-  'settings': (el) => openSettings(el && el.dataset.sec),
-  'close-sheet': () => closeSheet(),
+  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); return openSettings(el && el.dataset.sec); }, // the food form's typing is kept for the way back
+  'close-sheet': () => dismissSheet(),
   'week-prev': () => { S.viewDay = addDays(S.viewDay, -7); render(); },
   'week-next': () => { const d = addDays(S.viewDay, 7); S.viewDay = d > today() ? today() : d; render(); },
   'day-today': () => { S.viewDay = today(); render(); },
-  'log-plan': (el) => { if (S.sheet && S.sheet.type === 'slot') closeSheet(); return logMeal(MEAL_BY_ID[el.dataset.id], 'plan'); },
+  'log-plan': (el) => { if (S.sheet && S.sheet.type === 'slot') closeSheet(); return logMeal(mealById(el.dataset.id), 'plan'); },
   'slot': (el) => openSheet(renderSlotSheet(el.dataset.slot, S.viewDay), { type: 'slot', slot: el.dataset.slot }),
   'slot-camera': () => { closeSheet(); photoTarget = null; $('#f-cam').click(); },
   'compose': () => { closeSheet(); const inp = $('#composer-input'); inp.focus(); },
@@ -1077,6 +1258,69 @@ const ACT = {
     return wearPart(el.dataset.part);
   },
   'plan-meal': (el) => openSheet(renderPlanSheet(el.dataset.id), { type: 'plan', id: el.dataset.id }),
+  // The meal editor: Edit meal from the meal sheet, + Add meal from a slot heading
+  'plan-meal-edit': (el) => { startDraft(el.dataset.id); openEditor(); },
+  'plan-meal-add': (el) => { startDraft(null, el.dataset.slot, 'U-' + db.uid()); openEditor('#md-name'); },
+  'plan-meal-cancel': () => {
+    if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
+    const id = S.draft && S.draft.meal.id;
+    dropDraft();
+    if (mealById(id)) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
+  },
+  'plan-ing-remove': (el) => {
+    syncDraft();
+    S.draft.meal.ingredients.splice(Number(el.dataset.i), 1);
+    openEditor('#md-add');
+  },
+  // The food form: a tap on an ingredient's food name edits that food
+  'plan-food': (el) => { if (S.draft && Object.hasOwn(S.draft.plan.foods, el.dataset.key)) editFood(el.dataset.key); },
+  'plan-food-back': () => { if (S.draft && S.draft.foodForm) closeFood(-1); },
+  'plan-food-done': () => {
+    if (!S.draft || !S.draft.foodForm || S.draft.foodForm.busy) return;
+    syncFood();
+    const r = readFood(S.draft.foodForm);
+    if (r.valid) closeFood(doneFood(r.food));
+  },
+  'plan-food-photo': () => { photoTarget = FOOD_PHOTOS; $('#f-lib').click(); },
+  'plan-food-ai': () => runFood(),
+  'plan-meal-save': async (el) => {
+    if (!S.draft) return;
+    syncDraft();
+    const r = readMeal(S.draft.meal);
+    if (!r.valid) return;
+    el.disabled = true; // no second save while this one is written (typing enables it again)
+    const sheet = S.sheet; // saveDraft drops the draft, so the open sheet is what says it is still wanted
+    let first;
+    try { first = await saveDraft(r.meal); } catch (e) { el.disabled = false; throw e; }
+    if (first === null) { closeSheet(); return render(); }
+    if (S.sheet === sheet) openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id }); // not when it was dismissed while the write was pending
+    render();
+    toast(first ? t('Saved to My plan. Default is unchanged.') : t('{title} saved', { title: td(r.meal.name) }));
+  },
+  'plan-meal-delete': async () => {
+    if (!S.draft) return;
+    const meal = S.draft.plan.meals.find((m) => m.id === S.draft.meal.id);
+    const first = S.draft.plan.id === 'default';
+    const name = td(meal.name);
+    if (!window.confirm(first ? t('Delete {meal}? This creates My plan without it. Default stays as it is.', { meal: name }) : t('Delete {meal}? Logged entries stay.', { meal: name }))) return;
+    if ((await saveDraft(meal, true)) === null) { closeSheet(); return render(); }
+    await setPlanPhotos(S.settings.planPhotos);
+    closeSheet();
+    render();
+    if (first) toast(t('Saved to My plan. Default is unchanged.'));
+  },
+  // Plan: which plan is active, and deleting My plan (the log stays; pictures of meals no plan holds go)
+  'plan-use': async (el) => {
+    if (el.dataset.id === S.plans.active) return;
+    await writePlans(S.plans.list, el.dataset.id);
+    render();
+  },
+  'plan-delete': async () => {
+    if (!window.confirm(t('Delete My plan? You’ll be back on Default. Your log stays; pictures of meals you added are deleted.'))) return;
+    await writePlans(S.plans.list.filter((p) => p.id === 'default'), 'default');
+    await setPlanPhotos(S.settings.planPhotos);
+    render();
+  },
   'check-cam': () => { photoTarget = CHECK_PHOTOS; $('#f-cam').click(); },
   'check-lib': () => { photoTarget = CHECK_PHOTOS; $('#f-lib').click(); },
   'check-photo-remove': (el) => removeCheckPhoto(el.dataset.id),
@@ -1089,7 +1333,7 @@ const ACT = {
   'plan-photo-remove': (el) => removePlanPhoto(el.dataset.id),
   'frame-save': () => saveFrame(),
   'frame-cancel': () => cancelFrame(),
-  'log-plan-today': (el) => { closeSheet(); return logMeal(MEAL_BY_ID[el.dataset.id], 'plan', today()); },
+  'log-plan-today': (el) => { closeSheet(); return logMeal(mealById(el.dataset.id), 'plan', today()); },
   'hint': (el) => {
     const inp = $('#composer-input');
     inp.value = el.dataset.fill;
@@ -1379,7 +1623,7 @@ const ACT = {
   },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
     await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []);
     for (const id of await db.keys('photos')) {
@@ -1401,7 +1645,7 @@ const ACT = {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
     const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
+    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
     if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -1415,6 +1659,7 @@ const ACT = {
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept };
     await saveSettings();
+    await writePlans([], 'default'); // the plans start again from the seed
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';
@@ -1443,7 +1688,7 @@ document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act],.tabs [data-tab],[data-close-sheet]');
   if (!el) return;
   if (el.matches('input[type=checkbox]')) return; // handled on change
-  if (el.dataset.closeSheet !== undefined) return closeSheet();
+  if (el.dataset.closeSheet !== undefined) return dismissSheet();
   const act = el.dataset.act || (el.dataset.tab ? 'tab' : '');
   if (ACT[act]) { ev.preventDefault(); guard(() => ACT[act](el)); }
 });
@@ -1451,6 +1696,8 @@ document.addEventListener('click', (ev) => {
 // The zoom slider of the framing step
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
+  if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
+  if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -1468,12 +1715,28 @@ document.addEventListener('change', (ev) => guard(async () => {
     const target = photoTarget;
     photoTarget = null;
     if (target === CHECK_PHOTOS) { if (files.length) await addCheckPhotos(files); return; }
+    if (target === FOOD_PHOTOS) { if (files.length) await addFoodPhotos(files); return; }
     if (target) { if (files.length) await openFrame(target, files[0]); return; }
     const note = $('#composer-input').value.trim();
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
+  // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
+  // food form for a new key; Done adds it as a row.
+  if (el.id === 'md-add') {
+    const key = el.value;
+    el.value = '';
+    if (S.draft && key === '+new' && S.draft.meal.ingredients.length < PLAN_CAPS.ingredients && Object.keys(S.draft.plan.foods).length < PLAN_CAPS.foods) return editFood('u' + db.uid());
+    if (!S.draft || !Object.hasOwn(S.draft.plan.foods, key)) return;
+    syncDraft();
+    if (S.draft.meal.ingredients.length >= PLAN_CAPS.ingredients) return;
+    S.draft.meal.ingredients.push([key, '']);
+    const sel = `#md-g-${S.draft.meal.ingredients.length - 1}`;
+    openEditor(sel);
+    $(sel).scrollIntoView({ block: 'nearest' });
+    return;
+  }
   if (el.dataset.act === 'loc-toggle') return ACT['loc-toggle'](el);
   if (el.dataset.act === 'review-toggle') return ACT['review-toggle'](el);
   if (el.dataset.chg === 'provider') { S.settings.provider = el.value; await saveSettings(); render(); return openSettings(); }
@@ -1532,7 +1795,7 @@ $('#composer').addEventListener('submit', (ev) => {
   guard(() => submitText(t), () => { if (!inp.value) inp.value = t; }); // a failed save gives the text back
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet();
+  if (ev.key === 'Escape' && !$('#sheet').hidden) dismissSheet();
   // Enter in the correction box sends it
   if (ev.key === 'Enter' && (ev.target.id === 'supp-name' || ev.target.id === 'supp-dose')) { ev.preventDefault(); guard(ACT['supp-save']); }
   if (ev.key === 'Enter' && ev.target.id === 'check-note') { ev.preventDefault(); ev.target.blur(); guard(runCheck); }
@@ -1565,7 +1828,7 @@ setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay
 let swReg = null;
 function safeToReload() {
   const c = S.check;
-  const working = S.busy.size || S.reviewing.size || S.coaching.size || preparing || c.busy || c.photos.length || c.note; // nothing in flight or half-written
+  const working = S.busy.size || S.reviewing.size || S.coaching.size || preparing || c.busy || c.photos.length || c.note || S.draft; // nothing in flight or half-written
   return $('#sheet').hidden && !$('#composer-input').value && !working && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName));
 }
 function setupUpdates() {

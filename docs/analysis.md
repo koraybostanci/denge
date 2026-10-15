@@ -25,6 +25,11 @@ On Today, once a meal is logged, "How am I doing so far?" under the coach line a
 supportive note: how the day is going and what is left of the budget, protein and fibre. It is sent
 only when you ask, as one short text request (the same text as the day's review, plus what is left).
 
+Each of these requests also carries the plan's meals, as a short digest of the plan in use (meal
+names, foods with amounts, calories). The requests are longer than they were and cost a little more.
+With a large My plan they grow with its size. The Default plan roughly doubles the review prompt (the
+largest review measured about 1,640 characters before and 3,000 after).
+
 Estimates from a photo are rough. Treat them as a starting point and correct the portion when
 it is off.
 

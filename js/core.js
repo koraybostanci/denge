@@ -1,9 +1,9 @@
 // State, and the calculations on it. No DOM and no storage, so the maths loads on its own (in node, for tests).
 import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
-import { MEALS, MEAL_BY_ID, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
+import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
 
-export const APP_VERSION = '47'; // bump together with VERSION in sw.js
+export const APP_VERSION = '48'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -43,11 +43,82 @@ export const S = {
   storage: null,
   calPick: null,
   chartRange: 'weeks', // the weight chart: 'week' (7 days), 'weeks' (14) or 'whole' (the plan)
-  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-frame', ...}
+  sheet: null, // open bottom sheet: {type:'settings'|'entry'|'num'|'slot'|'plan'|'plan-edit'|'plan-frame', ...}
   suppEdit: '', // id of the supplement being edited in Settings
   openSetting: '', // expanded section in Settings
+  plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
+  plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
+  draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal, food?, foodForm? }; nothing is stored until it is saved
 };
 
+// Plan meals can be changed while Default is the only plan (a save creates My plan) and while My plan is active,
+// not while Default is active and My plan exists
+export const hasMyPlan = () => !!(S.plans && S.plans.list.length > 1);
+export const onDefault = () => !S.plans || S.plans.active === 'default';
+export const canEditPlan = () => !(hasMyPlan() && onDefault());
+// A deep copy of plain data (numbers, strings, arrays, objects); JSON rather than structuredClone, so a value it would reject is not newly refused
+export const clone = (x) => JSON.parse(JSON.stringify(x));
+// Opens the meal editor's draft on a deep copy of the active stored plan: the meal with that id, or a new one (newId) in slot.
+// base keeps the foods as they were, so a save can tell which ones the draft added or changed.
+export function startDraft(id, slot, newId) {
+  const plan = clone(S.plans.list.find((p) => p.id === S.plans.active) || S.plans.list[0]);
+  const meal = plan.meals.find((m) => m.id === id);
+  S.draft = { plan, meal: meal ? clone(meal) : { id: newId, slot, name: '', ingredients: [] }, base: clone(plan.foods) };
+  S.draft.orig = draftKey(S.draft);
+  return S.draft;
+}
+// What an editor name field shows: the stored name through td() while the draft still holds it (a seed name shows translated),
+// else the draft text as typed, so a typed 'Banana' is not turned into 'Muz' by a redraw
+export const shownName = (draft, stored) => (draft === stored ? td(draft) : draft);
+// Closing or cancelling the editor: the draft goes and nothing is written (an open food form's photos are let go too)
+export function dropDraft() { if (S.draft) dropFood(); S.draft = null; }
+// Whether the editor's meal or plan differs from what startDraft cloned (grams count as typed text, as syncDraft leaves them)
+const draftKey = (d) => JSON.stringify({ meal: { ...d.meal, ingredients: d.meal.ingredients.map((r) => [r[0], String(r[1]), ...r.slice(2)]) }, plan: d.plan });
+export function draftChanged() { return !!S.draft && draftKey(S.draft) !== S.draft.orig; }
+
+// ——— The food form, over the meal editor: S.draft.food is the key of the food being edited (a new one is not in the foods
+// yet) and S.draft.foodForm what the form holds: the name, the five values per 100 g (numbers, or text as typed), the photos
+// for the AI fill (in memory only) and its state
+export function startFood(key) {
+  const f = Object.hasOwn(S.draft.plan.foods, key) ? S.draft.plan.foods[key] : null;
+  S.draft.food = key;
+  S.draft.foodForm = { isNew: !f, name: f ? f.name : '', v: f ? [...f.v] : ['', '', '', '', ''], photos: [], busy: false, note: '', err: '' };
+  S.draft.foodForm.orig = foodFormKey(S.draft.foodForm);
+  return S.draft.foodForm;
+}
+// What the form holds that a Back would lose: the name, the values as typed text and how many photos are waiting for the AI fill
+const foodFormKey = (form) => JSON.stringify([form.name, form.v.map((x) => { const s = String(x).trim(); const n = parseNum(s); return s === '' || Number.isNaN(n) ? s : String(n); }), form.photos.length]); // numbers by value: 12.6 and "12,6" are the same
+// Whether the food form differs from what startFood opened it with (an AI fill changes the fields, so it counts)
+export const foodFormChanged = (form) => !!form && foodFormKey(form) !== form.orig;
+// How many meals of the draft use a food: the draft plan's other meals and the meal being edited as it is now
+export const foodUses = (key) => [...S.draft.plan.meals.filter((m) => m.id !== S.draft.meal.id), S.draft.meal]
+  .filter((m) => m.ingredients.some((row) => row[0] === key)).length;
+// Done: the food (read by readFood) goes into the draft plan's foods; a new one also becomes an ingredient of the draft meal,
+// with empty grams. Returns the index of that row, or -1. The form stays open until dropFood, which Back calls alone: it
+// leaves the foods as they were.
+export function doneFood(food) {
+  const d = S.draft;
+  const key = d.food;
+  const isNew = d.foodForm.isNew;
+  d.plan.foods[key] = { name: food.name, v: [...food.v] };
+  if (!isNew) return -1;
+  d.meal.ingredients.push([key, '']);
+  return d.meal.ingredients.length - 1;
+}
+// Lets go of the object URLs of a form's photos (held in memory only); no form is nothing to release
+export function releasePhotos(form) { if (form) form.photos.forEach((p) => URL.revokeObjectURL(p.url)); }
+// The form goes, and the object URLs of its photos (held in memory only) are revoked
+export function dropFood() {
+  releasePhotos(S.draft.foodForm);
+  delete S.draft.food; delete S.draft.foodForm;
+}
+
+// A meal of the active plan by its id, or undefined (a search of the list, so text from outside cannot find "constructor")
+export const mealById = (id) => S.plan.meals.find((m) => m.id === id);
+// The main meal times (not the late snack) that the active plan has a meal for, in order
+export const mainSlots = () => SLOTS.filter((s) => s.id !== 'late' && S.plan.meals.some((m) => m.slot === s.id));
+// "lunch 12:30, dinner 19:00" for the main meals of the plan, or '' when it has none
+export const mealTimesLine = () => mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ');
 
 // Call configuration for the selected provider
 export function aiCfg() {
@@ -313,14 +384,14 @@ export function parseLocal(text) {
     return { type: 'water', ml: Math.round(ml) };
   }
   if (TRAIN_RE.test(t)) return { type: 'train' };
-  const meal = MEALS.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
-  if (meal) return { type: 'plan', meal };
   const flex = FLEX.find((x) => norm(x.name) === t || norm(td(x.name)) === t);
   if (flex) return { type: 'flex', flex };
   const favorite = (S.settings.favorites || []).find((x) => norm(x.name) === t);
   if (favorite) return { type: 'favorite', favorite };
-  const c = parseCount(t);
+  const c = parseCount(t); // after the extras and favourites, but before the plan meals: a plan meal called "Coffee" does not take the typed shortcut
   if (c) return { type: 'count', ...c };
+  const meal = S.plan.meals.find((x) => norm(x.id) === t || norm(x.name) === t || norm(td(x.name)) === t); // the English name or the one on the screen
+  if (meal) return { type: 'plan', meal };
   return null;
 }
 // A day's coffee count and the totals for the Monday-to-Sunday week of `day` and the week before
@@ -345,7 +416,7 @@ export function streak() {
 // The planned meals of the day not logged yet, in order (the late snack is only for when you are hungry)
 export function openSlots(day) {
   const logged = new Set(mealsOf(day).map((e) => e.slot));
-  return SLOTS.filter((s) => s.id !== 'late' && !logged.has(s.id));
+  return mainSlots().filter((s) => !logged.has(s.id));
 }
 
 export function suggest(day) {
@@ -354,13 +425,15 @@ export function suggest(day) {
   const remP = S.settings.protein - tot.p;
   const open = openSlots(day);
   if (!open.length) {
-    if (remP > 12 && rem >= 90) return { rem, remP, meal: MEAL_BY_ID['N-A'], slot: SLOTS.find((s) => s.id === 'late'), extra: true };
-    return { rem, remP, meal: null };
+    const noMain = !mainSlots().length; // a plan without main meals is not "done": no meal was ever planned
+    const late = S.plan.meals.find((m) => m.slot === 'late');
+    if (late && remP > 12 && rem >= late.kcal - 5) return { rem, remP, meal: late, slot: SLOTS.find((s) => s.id === 'late'), extra: true, noMain };
+    return { rem, remP, meal: null, noMain };
   }
   const next = open[0];
-  const minKcal = (id) => Math.min(...MEALS.filter((m) => m.slot === id).map((m) => m.kcal));
+  const minKcal = (id) => { const k = S.plan.meals.filter((m) => m.slot === id).map((m) => m.kcal); return k.length ? Math.min(...k) : 0; };
   const reserve = open.slice(1).reduce((a, s) => a + minKcal(s.id), 0);
-  const options = MEALS.filter((m) => m.slot === next.id);
+  const options = S.plan.meals.filter((m) => m.slot === next.id);
   const fit = options.filter((m) => m.kcal <= rem - reserve + 40);
   const pool = fit.length ? fit : options.slice().sort((a, b) => a.kcal - b.kcal).slice(0, 1);
   const meal = pool.slice().sort((a, b) => b.p - a.p)[0];
@@ -429,8 +502,8 @@ export function verdictText(v) {
 export const PACE = { fast: 1.25, slow: 0.7 }; // eaten / planned-by-now: above fast is ahead of the plan, below slow behind it
 // What the plan has spent at each meal time: each main slot spends the average of its options, scaled so the day ends at its budget
 export function planSteps(target) {
-  const steps = SLOTS.filter((x) => x.id !== 'late').map((x) => {
-    const options = MEALS.filter((m) => m.slot === x.id);
+  const steps = mainSlots().map((x) => {
+    const options = S.plan.meals.filter((m) => m.slot === x.id);
     const [h, m] = x.time.split(':').map(Number);
     return { id: x.id, name: x.name, time: x.time, at: h + m / 60, kcal: options.reduce((a, o) => a + o.kcal, 0) / (options.length || 1) };
   });
@@ -489,13 +562,11 @@ export const fmtInt = (n) => Math.round(n).toLocaleString(LOCALE);
 // ——— Generated entry titles ———
 // An entry made by the app keeps its English `title` (the canonical text: backups, the SQL export, favourites and the model read it) and,
 // next to it, `tk: { kind, params }`, from which the screen builds the title in the interface language. Older entries have no `tk`.
-const planItem = (id) => (has(MEAL_BY_ID, id) ? MEAL_BY_ID[id] : FLEX.find((f) => f.id === id));
-const planName = (id) => { const x = planItem(id); return x ? td(x.name) : null; };
+// A plan or flex meal (`tk` kind 'plan') stores the meal's name as its title and shows that, never the plan's current name.
 const TITLES = {
   weight: (p) => t('Weight {kg} kg', { kg: fmtKg(p.kg) }),
   steps: (p) => t('{steps} steps', { steps: fmtInt(p.steps) }),
   photo: () => t('Photo'),
-  plan: (p) => planName(p.id),
 };
 // What each kind needs in its params to give a sensible title
 const numIn = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
@@ -506,18 +577,23 @@ const TK_VALID = {
   plan: (p) => typeof p.id === 'string',
 };
 export const tkValid = (tk) => !!tk && typeof tk === 'object' && has(TK_VALID, tk.kind) && !!tk.params && typeof tk.params === 'object' && TK_VALID[tk.kind](tk.params);
-export const TK_KINDS = Object.keys(TITLES);
+export const TK_KINDS = Object.keys(TK_VALID);
 // The title of an entry in the interface language; the stored title when there is no known `tk`
 export function titleOf(e) {
   const k = e.tk;
-  const text = tkValid(k) ? TITLES[k.kind](k.params) : null;
-  if (text) return text;
-  // An older plan entry has no tk: when its title is still the plan item's English name, show that name in the interface language
-  const item = typeof e.planId === 'string' ? planItem(e.planId) : null;
-  return item && item.name === e.title ? td(item.name) : e.title;
+  // A plan or flex meal (and an older plan entry without a valid tk) shows the name it was logged with, so editing or switching
+  // the plan never changes a past entry; a default meal's English name still shows in the interface language.
+  // A valid tk comes first: an entry re-estimated as a weigh-in or steps keeps its old planId.
+  if (tkValid(k)) {
+    if (k.kind === 'plan') return typeof e.title === 'string' ? td(e.title) : e.title;
+    return TITLES[k.kind](k.params) || e.title;
+  }
+  if (typeof e.planId === 'string' && e.planId) return typeof e.title === 'string' ? td(e.title) : e.title;
+  return e.title;
 }
 // { title, tk } for a new generated entry: the English title, built with English formats whatever the language is
 export function titleFor(kind, params) {
+  if (kind === 'plan') return { tk: { kind, params } }; // no generated title: the caller sets the meal's name as the title
   const title = inEnglish(() => TITLES[kind](params));
   return title ? { title, tk: { kind, params } } : { title: '' };
 }

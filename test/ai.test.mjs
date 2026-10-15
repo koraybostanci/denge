@@ -1,8 +1,11 @@
 // The model layer (js/ai.js) against a fetch that never leaves the machine. `node --test`
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, review, coach, check, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
 import { setLang, inEnglish } from '../js/i18n.js';
+import { S } from '../js/core.js';
+import { buildPlan, planDigest, planFoods } from '../js/plan.js';
+import seedPlan from '../js/default-plan.js';
 
 const sonnet = { provider: 'anthropic', key: 'sk-ant-secretsecret', model: 'claude-sonnet-5-5' };
 const haiku = { ...sonnet, model: 'claude-haiku-4-5-20251001' };
@@ -146,4 +149,119 @@ test('the line follows the language the person chose, also when the request is m
 test('the vision probe prompt carries no language line', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../js/ai.js', import.meta.url), 'utf8');
   assert.match(src, /system: 'You read numbers from images\.'/);
+});
+
+test('every prompt is built from the active plan at request time, and stays English in Turkish', async () => {
+  const saved = S.plan;
+  // A plan of the person's own: a new food and meal, and no meal at snack 2
+  const mine = buildPlan({ ...seedPlan, id: 'P-abc123', name: 'My plan', foods: { ...seedPlan.foods, u1: { name: 'Oat drink', v: [45, 1, 6.5, 1.5, 0.8] } },
+    meals: [...seedPlan.meals.filter((m) => m.slot !== 'snack2'), { id: 'U-x1', slot: 'lunch', name: 'Oat bowl', ingredients: [['u1', 250]] }] });
+  try {
+    S.plan = buildPlan(seedPlan);
+    for (const [run, body] of Object.values(askers)) { mockFetch(() => reply(200, claudeBody(body))); await run(); }
+    const before = calls.splice(0).map((c) => c.body.system);
+    assert.ok(before.every((x) => !/U-x1|Oat drink/.test(x)));
+    S.plan = mine;
+    for (const [name, [run, body, line]] of Object.entries(askers)) {
+      mockFetch(() => reply(200, claudeBody(body)));
+      await setLang('en');
+      await run();
+      await setLang('tr');
+      await run();
+      const [en, tr] = calls.splice(0).map((c) => c.body.system);
+      assert.equal(tr, en + line, name); // English in Turkish too, with only the language line added
+      assert.ok(en.includes(planDigest(mine)), name);
+      if (name === 'check') assert.ok(en.includes(planFoods(mine)), name);
+      assert.match(en, /Oat drink/, name);
+      if (name === 'review' || name === 'coach') assert.match(en, /meals are lunch 12:00, snack 1 14:30, dinner 18:00\./, name); // only the meal times the plan has
+    }
+  } finally { S.plan = saved; await setLang('en'); }
+});
+
+test('the workout slot line follows the plan: the workout meal names, other extras by name, none just "workout"', async () => {
+  const saved = S.plan;
+  const slotLine = async () => { mockFetch(() => reply(200, claudeBody(meal))); await ask(sonnet); return calls.splice(0)[0].body.system.split('\n').find((l) => l.startsWith('slot:')); };
+  try {
+    S.plan = buildPlan(seedPlan);
+    assert.match(await slotLine(), /, or workout \(pre-workout banana or post-workout skyr\)\. Choose/);
+    S.plan = buildPlan({ ...seedPlan, meals: [...seedPlan.meals.filter((m) => m.slot !== 'workout'), { id: 'U-w1', slot: 'workout', name: 'Rice cake', ingredients: [['salad', 50]] }, { id: 'U-w2', slot: 'workout', name: 'Protein Shake', ingredients: [['salad', 50]] }] });
+    assert.match(await slotLine(), /, or workout \(rice cake or protein shake\)\. Choose/);
+    S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => m.slot !== 'workout') });
+    assert.match(await slotLine(), /, or workout\. Choose/);
+  } finally { S.plan = saved; }
+});
+
+test('a plan with no main meals gives the review and coach prompts a plain line, not "meals are ."', async () => {
+  const saved = S.plan;
+  try {
+    S.plan = buildPlan({ ...seedPlan, meals: [] });
+    for (const [name, [run, body]] of Object.entries(askers)) {
+      mockFetch(() => reply(200, claudeBody(body)));
+      await run();
+      const sys = calls.splice(0)[0].body.system;
+      assert.ok(!/meals are \.|undefined/.test(sys), name);
+      if (name === 'review' || name === 'coach') assert.match(sys, /The plan has no set meal times\./, name);
+    }
+  } finally { S.plan = saved; }
+});
+
+// ——— The food form's AI fill ———
+// Node has no FileReader: a small one that reads a Blob as a data URL, as the browser's does
+globalThis.FileReader ??= class {
+  readAsDataURL(blob) {
+    blob.arrayBuffer().then((buf) => { this.result = `data:${blob.type};base64,${Buffer.from(buf).toString('base64')}`; this.onload(); }, (e) => { this.error = e; this.onerror(); });
+  }
+};
+const FOOD = JSON.stringify({ name: 'Oat drink', known: true, kcal: 45.4, p: 1.04, c: 6.5, f: 1.5, fib: 0.8 });
+
+test('food values: the photos (two at most), the schema and the typed name are sent; the reply is cleaned', async () => {
+  mockFetch(() => reply(200, claudeBody(FOOD)));
+  const blobs = ['a', 'b', 'c'].map((x) => new Blob([x], { type: 'image/jpeg' }));
+  const { data, usage } = await foodValues({ cfg: haiku, name: '  Yulaf  içeceği ', blobs });
+  const body = calls[0].body;
+  const content = body.messages[0].content;
+  assert.deepEqual(content.filter((c) => c.type === 'image').map((c) => c.source.data), [btoa('a'), btoa('b')]);
+  assert.equal(content.at(-1).text, 'Food: Yulaf içeceği');
+  assert.deepEqual(body.output_config.format.schema.required, ['name', 'known', 'kcal', 'p', 'c', 'f', 'fib']);
+  assert.equal(body.max_tokens, 300);
+  assert.match(body.system, /per 100 g/);
+  assert.match(body.system, /per serving/);
+  assert.deepEqual(data, { name: 'Oat drink', kcal: 45, p: 1, c: 6.5, f: 1.5, fib: 0.8 });
+  assert.deepEqual(usage, { in: 10, out: 5 });
+  // A photo alone, on the OpenAI-compatible route: the shape in words, the image as a data URL
+  mockFetch(() => reply(200, { choices: [{ message: { content: FOOD }, finish_reason: 'stop' }], usage: {} }));
+  await foodValues({ cfg: gemini, blobs: blobs.slice(0, 1) });
+  const user = calls[1].body.messages[1].content;
+  assert.equal(user[0].image_url.url, `data:image/jpeg;base64,${btoa('a')}`);
+  assert.equal(user[1].text, 'No name given; use the photo.');
+  assert.match(calls[1].body.messages[0].content, /\{"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0\}/);
+});
+
+test('food values: the prompt stays English, with no language line, when the interface is Turkish', async () => {
+  try {
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await setLang('en');
+    await foodValues({ cfg: haiku, name: 'Oat drink' });
+    await setLang('tr');
+    await foodValues({ cfg: haiku, name: 'Oat drink' });
+    const [en, tr] = calls.map((c) => c.body.system);
+    assert.equal(tr, en);
+    assert.ok(!/Turkish/.test(tr));
+    assert.equal(calls[1].body.messages[0].content.at(-1).text, 'Food: Oat drink');
+  } finally { await setLang('en'); }
+});
+
+test('food values: rounded (kcal to 1, the rest to 0.1) and clamped; no kcal, 0 kcal or more than 1,000 is no reading', async () => {
+  assert.deepEqual(cleanFoodValues({ name: ` ${'x'.repeat(70)} `, known: true, kcal: '120.6', p: 12.345, c: -3, f: 140, fib: 'n/a' }), { name: 'x'.repeat(60), kcal: 121, p: 12.3, c: 0, f: 100, fib: 0 });
+  assert.deepEqual(cleanFoodValues({ known: true, kcal: 1000.4, p: 0.05 }), { name: '', kcal: 1000, p: 0.1, c: 0, f: 0, fib: 0 });
+  for (const kcal of [undefined, null, '', ' ', 'x', -5, 1001, 1e9, Infinity, true]) assert.throws(() => cleanFoodValues({ name: 'x', known: true, kcal }), { code: 'empty' }, String(kcal));
+  assert.throws(() => cleanFoodValues(null), { code: 'empty' });
+  // 0 kcal is a reading when the model knows the food (diet cola); known false or missing is none
+  assert.deepEqual(cleanFoodValues({ name: 'Diet cola', known: true, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }), { name: 'Diet cola', kcal: 0, p: 0, c: 0, f: 0, fib: 0 });
+  for (const known of [false, 'false', ' FALSE ', 1, 'yes']) assert.throws(() => cleanFoodValues({ name: 'x', known, kcal: 50 }), { code: 'empty' }, String(known));
+  for (const known of [true, 'true', 'True', undefined, null]) assert.equal(cleanFoodValues({ name: 'x', known, kcal: 50 }).kcal, 50, String(known)); // a missing known counts when kcal is above 0
+  for (const kcal of [0, undefined]) assert.throws(() => cleanFoodValues({ name: 'x', kcal }), { code: 'empty' }, String(kcal)); // a missing known with no kcal is no reading
+  assert.equal(cleanFoodValues({ name: 'Water', known: 'true', kcal: 0 }).kcal, 0);
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'blur', known: false, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }))));
+  await assert.rejects(foodValues({ cfg: haiku, name: 'x' }), { code: 'empty' });
 });

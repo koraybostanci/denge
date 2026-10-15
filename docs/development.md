@@ -76,11 +76,12 @@ version is shown under Settings → "Version and updates".
   DOM and no storage, so it loads in Node and can be tested there
 - `js/app.js`: storage, event handling, the analysis queue, backup and restore
 - `js/views.js`: the screens
-- `js/plan.js`: food table, meal templates, goals, rules
+- `js/plan.js`: slots, goals, rules, and `buildPlan`, which works out a plan's meals from its food table
+- `js/default-plan.js`: the shipped plan (food table and meal templates); only `js/app.js` imports it, everything else reads `S.plan`
 - `js/ai.js`: model calls (Claude and OpenAI-compatible), prompt and output schema
 - `js/badges.js`: the badge catalog and which badges the log has earned (no DOM, no storage). A weigh-in that is more than a kilo a day away from the last sane one (the first: from the start weight, with 3 kg of slack; never more than 15 kg) counts as a typo and moves no badge. `app.js` stores the result in kv `badges` (`{v:1, got, seen, told, av, base}`: `seen` is the highest step looked at per badge, which drives the New dot; `told` is set once the history on the device has been taken in, with its one "from your history" line; both are optional, so older records stay valid). The unlock toast comes after the first evaluation that follows a change (a save, or the clock or tab changing); the first evaluation after loading, a restore and the first run with a log are quiet. The "from your history" line is dropped if the person leaves Progress, or closes the app, without opening it (`told` is already set). Every write to the record goes through one queue (`serial()`), each from the latest `S.badges`. The screens measure badges through `badgeContext()` in `views.js`, cached on `S.rev`, which every save path moves. `av` is `{stage, face, acc}`, part ids from `PARTS` (`unlocked(part, got)` gates each against what is earned; stage 1, the plain face and no accessory are free). `wornAv` is what is shown (header and picker): an unearned or unknown part is its slot's default, and `cleanBadges` applies the same rule on load and restore. The header avatar button opens the picker sheet (`renderAvatarSheet`); a choice goes through `wear()` and the same badge queue, rolled back if the write fails. `avatarSvg` in `js/badge-art.js` draws the pickle from the `--pickle*` tokens.
 - `js/badge-art.js`: the badge icons (18 line icons in five shapes and four finishes) and the pickle avatar, drawn as inline SVG from the colour tokens
-- `js/backup.js`: checks everything read from a backup file before it is stored
+- `js/backup.js`: checks everything read from a backup file before it is stored. It also holds the plan editing logic: the meal and food readers, the draft-to-plan merge, the plan record with its loading and photo sweep, and `PLAN_CAPS`
 - `js/exif.js`: reads capture time and location from a photo
 - `js/db.js`: IndexedDB
 - `js/picture.js`: the treatment every plan picture gets (framing, white balance, exposure)
@@ -89,7 +90,7 @@ version is shown under Settings → "Version and updates".
 - `js/tr.js`: the Turkish text, keyed by the English; `js/parse-tr.js`: the Turkish words the typed-entry parser accepts
 - `js/briefs.js`: what is sent to the model, always in English
 - `js/standalone.js`: the install screen shown in a browser tab (its two languages are inline)
-- `test/`: `node --test` tests (`badges`, `badge-art`, `unlock` and `avatar` cover the badge system); `extract.mjs` finds the strings, `screens.mjs` renders the screens
+- `test/`: `node --test` tests (`badges`, `badge-art`, `unlock` and `avatar` cover the badge system; `plans` covers stored plans, the meal editor and the food form); `extract.mjs` finds the strings, `screens.mjs` renders the screens
 - `sw.js`: offline cache and updates
 - `icons/`: `icon.svg` is the source; the PNG files are rendered from it for the Home Screen and
   the web app manifest
