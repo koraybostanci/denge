@@ -87,7 +87,7 @@ export function startFood(key) {
   return S.draft.foodForm;
 }
 // What the form holds that a Back would lose: the name, the values as typed text and how many photos are waiting for the AI fill
-const foodFormKey = (form) => JSON.stringify([form.name, form.v.map(String), form.photos.length]);
+const foodFormKey = (form) => JSON.stringify([form.name, form.v.map((x) => { const s = String(x).trim(); const n = parseNum(s); return s === '' || Number.isNaN(n) ? s : String(n); }), form.photos.length]); // numbers by value: 12.6 and "12,6" are the same
 // Whether the food form differs from what startFood opened it with (an AI fill changes the fields, so it counts)
 export const foodFormChanged = (form) => !!form && foodFormKey(form) !== form.orig;
 // How many meals of the draft use a food: the draft plan's other meals and the meal being edited as it is now

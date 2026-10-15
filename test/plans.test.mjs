@@ -126,7 +126,7 @@ test('editor: a typed name is shown as typed; only the stored name shows transla
 test('restore: an older backup without plans leaves the device alone (its app.js path only runs when the file has plans)', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(data\.plans !== undefined\) \{\s*const plans = cleanPlans\(data\.plans, data\.settings && data\.settings\.activePlan\);\s*await writePlans\(plans\.list, plans\.active\);/);
+  assert.match(src, /if \(Array\.isArray\(data\.plans\) \|\| [^\n]*\{[^\n]*\n\s*const plans = cleanPlans\(data\.plans, data\.settings && data\.settings\.activePlan\);\s*await writePlans\(plans\.list, plans\.active\);/);
 });
 
 test('load: a stored Default that differs from the seed is rewritten; My plan is kept as it is', () => {
@@ -493,7 +493,7 @@ test('setPlanPhotos writes settings only when the pictures map changes', () => {
 
 test('plan-meal-save re-enables the Save button when the write throws, and rethrows for guard()', () => {
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(src, /el\.disabled = true;[^\n]*\n\s*let first;\s*try \{ first = await saveDraft\(r\.meal\); \} catch \(e\) \{ el\.disabled = false; throw e; \}/);
+  assert.match(src, /el\.disabled = true;[^\n]*\n\s*const sheet = S\.sheet;[^\n]*\n\s*let first;\s*try \{ first = await saveDraft\(r\.meal\); \} catch \(e\) \{ el\.disabled = false; throw e; \}/);
 });
 
 test('draftChanged: false until the meal or the plan differs from what startDraft cloned', () => {
@@ -545,4 +545,77 @@ test('app.js: Cancel, and Escape, Close or a backdrop tap on the food form, ask 
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(src, /'plan-meal-cancel': \(\) => \{\n\s*if \(draftChanged\(\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;/);
   assert.match(src, /S\.sheet\.type === 'food' && S\.draft && S\.draft\.foodForm\) \{\n\s*if \(foodFormChanged\(S\.draft\.foodForm\) && !window\.confirm\(t\('Discard your changes\?'\)\)\) return;[^\n]*\n\s*return closeFood\(-1\);/);
+});
+
+// ——— Review fixes ———
+test('restore confirm says pictures of meals only in the current My plan are deleted (English and Turkish)', async () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /set-import[^\n]*Pictures of meals that exist only in your current My plan are deleted when it is replaced\./);
+  const tr = readFileSync(new URL('../js/tr.js', import.meta.url), 'utf8');
+  assert.match(tr, /Pictures of meals that exist only in your current My plan are deleted when it is replaced\.': '[^\n]*resimleri, plan değiştirilirken silinir\./);
+});
+
+test('deleting a meal merges only the removal, not food edits or added foods of the draft', () => {
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  startDraft('U-x1');
+  startFood('chicken'); doneFood({ name: 'Firm tofu', v: [120, 13, 2, 7, 1] }); dropFood();
+  startFood('unew01'); S.draft.plan.foods.unew01 = { name: 'Added', v: [1, 1, 1, 1, 1] }; dropFood();
+  const plan = savedPlan(S.plans, S.draft, S.draft.meal, { remove: true });
+  assert.deepEqual(plan.foods, mine().foods);
+  assert.equal(plan.meals.some((m) => m.id === 'U-x1'), false);
+  // a normal save still carries the food edit
+  assert.equal(savedPlan(S.plans, S.draft, S.draft.meal).foods.chicken.name, 'Firm tofu');
+  dropDraft();
+});
+
+test('food form: a synced number is not a change, in comma and point form', async () => {
+  const { setLang } = await import('../js/i18n.js');
+  S.plans = { active: 'P-abc123', list: [seedPlan, mine()] };
+  startDraft('U-x1');
+  for (const lang of ['en', 'tr']) {
+    await setLang(lang);
+    const form = startFood('u1');
+    assert.equal(foodFormChanged(form), false);
+    form.v = form.v.map((x) => String(x).replace('.', ',')); // what the fields hold in Turkish
+    assert.equal(foodFormChanged(form), false);
+    form.v = form.v.map((x) => String(x).replace(',', '.'));
+    assert.equal(foodFormChanged(form), false);
+    form.v[0] = '46';
+    assert.equal(foodFormChanged(form), true);
+    form.v[0] = '45'; form.name = 'Oat';
+    assert.equal(foodFormChanged(form), true);
+    dropFood();
+  }
+  await setLang('en');
+  dropDraft();
+});
+
+test('app.js: no_key works for every kind modelFailure gets, and runFood clears busy on every path', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const kinds = (name) => [...src.match(new RegExp(`const ${name} = \\{([^\\n]*)\\};`))[1].matchAll(/(?:^|, )'?([a-z ]+)'?: /g)].map((m) => m[1]);
+  assert.deepEqual(kinds('NO_KEY').sort(), kinds('FAILED').sort());
+  assert.ok(kinds('NO_KEY').includes('values'));
+  const run = src.slice(src.indexOf('async function runFood'), src.indexOf('// ——— Actions'));
+  assert.match(run, /if \(!live\(\)\) \{ form\.busy = false; return; \}\n\s*form\.v =/);
+  assert.match(run, /catch \(err\) \{\n\s*if \(!live\(\)\) \{ form\.busy = false; return; \}/);
+});
+
+test('app.js: only a plans object with a list, or the old bare list, replaces My plan on restore', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const m = src.match(/if \((Array\.isArray\(data\.plans\)[^\n]*?)\) \{ \/\/ anything else/);
+  assert.ok(m);
+  const present = (plans) => new Function('data', 'return ' + m[1])({ plans });
+  assert.equal(present({ active: 'default', list: [] }), true); // a deliberate "no My plan" backup
+  assert.equal(present([]), true);
+  assert.equal(present([{}]), true);
+  for (const bad of [undefined, null, 'x', 5, true, {}, { active: 'default' }, { list: 'x' }, { list: null }]) assert.equal(!!present(bad), false);
+  assert.match(src, /const plans = \{ active: S\.plans\.active, list: S\.plans\.list\.filter\(\(p\) => p\.id !== 'default'\) \};/); // the export writes list: [] for no My plan
+});
+
+test('app.js: Save reopens the plan sheet only when it is still the open one', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const save = src.slice(src.indexOf("'plan-meal-save'"), src.indexOf("'plan-meal-delete'"));
+  assert.match(save, /const sheet = S\.sheet;[^\n]*\n\s*let first;/);
+  assert.match(save, /if \(S\.sheet === sheet\) openSheet\(renderPlanSheet\(r\.meal\.id\)/);
+  assert.doesNotMatch(save, /\n\s*openSheet\(renderPlanSheet/);
 });

@@ -830,6 +830,7 @@ export default {
   'Add an API key in Settings to get a note.': 'Not almak için Ayarlar’dan bir API anahtarı ekle.',
   'Add an API key in Settings to get a check.': 'Kontrol yaptırmak için Ayarlar’dan bir API anahtarı ekle.',
   'Add an API key in Settings to get a new estimate.': 'Yeni tahmin almak için Ayarlar’dan bir API anahtarı ekle.',
+  'Add an API key in Settings to fill in the values.': 'Değerleri doldurmak için Ayarlar’dan bir API anahtarı ekle.',
   'The review failed. {detail}': 'Değerlendirme başarısız oldu. {detail}',
   'The note failed. {detail}': 'Not alınamadı. {detail}',
   'The check failed. {detail}': 'Kontrol başarısız oldu. {detail}',
@@ -922,7 +923,7 @@ export default {
   'Your plan changed while you were editing. Open the meal again.': 'Sen düzenlerken planın değişti. Öğünü yeniden aç.',
   'Delete {meal}? Logged entries stay.': 'Silinsin mi: {meal}? Kayıtlı girişler kalır.',
   'Delete {meal}? This creates My plan without it. Default stays as it is.': 'Silinsin mi: {meal}? Bu, onsuz bir Planım oluşturur. Varsayılan olduğu gibi kalır.',
-  'Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device.': 'Bu yedek geri yüklensin mi? Planım, yedekte kayıtlı planla değiştirilir. Planlardan önce alınmış bir yedek planını olduğu gibi bırakır. Hedeflerin, favorilerin ve kayıtlı yerlerin de değiştirilir; öğünler, günler, kontroller, rozetler ve plan resimleri bu cihazdakilere eklenir.',
+  'Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Pictures of meals that exist only in your current My plan are deleted when it is replaced.': 'Bu yedek geri yüklensin mi? Planım, yedekte kayıtlı planla değiştirilir. Planlardan önce alınmış bir yedek planını olduğu gibi bırakır. Hedeflerin, favorilerin ve kayıtlı yerlerin de değiştirilir; öğünler, günler, kontroller, rozetler ve plan resimleri bu cihazdakilere eklenir. Yalnızca şu anki Planım’da bulunan öğünlerin resimleri, plan değiştirilirken silinir.',
   'reset.word': 'SİL', // the word to type for a factory reset; js/app.js accepts DELETE as well
   'Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.': 'Fabrika ayarlarına sıfırlama: bu cihazdaki her şey silinir: günlüğün ve fotoğrafların, hedeflerin, favorilerin, kayıtlı yerlerin, Planım (Varsayılan geri gelir), planın resimleri ve kullanım toplamları. {keyNote} Geri alınamaz. Yedeğin var mı?\n\nDevam etmek için {word} yaz.',
   'Your API key and provider stay.': 'API anahtarın ve sağlayıcın kalır.',

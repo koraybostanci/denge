@@ -270,7 +270,8 @@ export function savedPlan(record, draft, meal, { remove = false, newId } = {}) {
   const current = draft.plan.id === 'default' ? (user ? null : record.list[0]) : record.list.find((p) => p.id === draft.plan.id);
   if (!current) return null;
   const base = plain(draft.base) ? draft.base : {};
-  const changed = Object.entries(draft.plan.foods).filter(([k, f]) => !Object.hasOwn(base, k) || JSON.stringify(base[k]) !== JSON.stringify(f));
+  // removing a meal merges nothing but the removal: food edits in the draft are not applied
+  const changed = remove ? [] : Object.entries(draft.plan.foods).filter(([k, f]) => !Object.hasOwn(base, k) || JSON.stringify(base[k]) !== JSON.stringify(f));
   const plan = clone(current);
   const saved = planFromDraft({ ...plan, foods: Object.fromEntries([...Object.entries(plan.foods), ...clone(changed)]) }, meal, { remove, newId });
   // a food the draft added (in neither draft.base nor the stored plan) that no meal uses is not kept; earlier foods always are

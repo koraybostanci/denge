@@ -317,7 +317,7 @@ async function addUsage(model, usage) {
 
 // ——— The day's review, written by the model ———
 // `what` names the thing asked for. Each has whole sentences, so a translation never has to fit a fragment into one
-const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.') };
+const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.'), values: () => t('Add an API key in Settings to fill in the values.') };
 const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }), values: (detail) => t('Filling in the values failed. {detail}', { detail }) };
 function modelFailure(err, what = 'review') {
   const code = err && err.code;
@@ -748,7 +748,7 @@ async function importBackup(file) {
       await saveSettings();
     }
     // My plan is replaced by the backup's (a backup with plans but no user plan removes it); an older backup has no plans and leaves them alone
-    if (data.plans !== undefined) {
+    if (Array.isArray(data.plans) || (data.plans && typeof data.plans === 'object' && Array.isArray(data.plans.list))) { // anything else (null, a string, an object with no list) is a missing key
       const plans = cleanPlans(data.plans, data.settings && data.settings.activePlan);
       await writePlans(plans.list, plans.active);
     }
@@ -1199,12 +1199,12 @@ async function runFood() {
       onRetry: (...a) => { if (live()) { form.status = retryNote(...a); syncFood(); openFood(null, true); } },
     });
     await addUsage(model, usage);
-    if (!live()) return;
+    if (!live()) { form.busy = false; return; }
     form.v = [data.kcal, data.p, data.c, data.f, data.fib];
     if (!name && data.name) form.name = data.name;
     form.note = t('Filled in by AI. Check the values.');
   } catch (err) {
-    if (!live()) return;
+    if (!live()) { form.busy = false; return; }
     form.err = err.code === 'empty' ? t('Couldn’t read values. Try the nutrition label, or type them.') : modelFailure(err, 'values');
   }
   form.busy = false; form.status = '';
@@ -1289,10 +1289,11 @@ const ACT = {
     const r = readMeal(S.draft.meal);
     if (!r.valid) return;
     el.disabled = true; // no second save while this one is written (typing enables it again)
+    const sheet = S.sheet; // saveDraft drops the draft, so the open sheet is what says it is still wanted
     let first;
     try { first = await saveDraft(r.meal); } catch (e) { el.disabled = false; throw e; }
     if (first === null) { closeSheet(); return render(); }
-    openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id });
+    if (S.sheet === sheet) openSheet(renderPlanSheet(r.meal.id), { type: 'plan', id: r.meal.id }); // not when it was dismissed while the write was pending
     render();
     toast(first ? t('Saved to My plan. Default is unchanged.') : t('{title} saved', { title: td(r.meal.name) }));
   },
@@ -1720,7 +1721,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device.'))) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {
