@@ -24,6 +24,14 @@ test('an entry with a hostile id, a bad day or the wrong shape is dropped', () =
   for (const x of [null, 5, 'x', []]) assert.equal(cleanEntry(x), null);
 });
 
+test('a meal id up to the plan limit keeps its link through cleanEntry and an export/import round trip', () => {
+  const planId = 'W'.repeat(24);
+  assert.equal(cleanEntry({ ...good, planId }).planId, planId);
+  assert.equal(cleanEntry(JSON.parse(JSON.stringify(cleanEntry({ ...good, planId })))).planId, planId);
+  assert.equal(cleanEntry({ ...good, planId: 'A'.repeat(40) }).planId.length, 40);
+  assert.equal(cleanEntry({ ...good, planId: 'A'.repeat(50) }).planId.length, 40);
+});
+
 test('a good entry comes through unchanged', () => {
   const c = cleanEntry(good);
   for (const k of Object.keys(good)) assert.deepEqual(c[k], good[k], k);

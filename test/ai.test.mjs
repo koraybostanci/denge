@@ -184,7 +184,7 @@ globalThis.FileReader ??= class {
     blob.arrayBuffer().then((buf) => { this.result = `data:${blob.type};base64,${Buffer.from(buf).toString('base64')}`; this.onload(); }, (e) => { this.error = e; this.onerror(); });
   }
 };
-const FOOD = JSON.stringify({ name: 'Oat drink', kcal: 45.4, p: 1.04, c: 6.5, f: 1.5, fib: 0.8 });
+const FOOD = JSON.stringify({ name: 'Oat drink', known: true, kcal: 45.4, p: 1.04, c: 6.5, f: 1.5, fib: 0.8 });
 
 test('food values: the photos (two at most), the schema and the typed name are sent; the reply is cleaned', async () => {
   mockFetch(() => reply(200, claudeBody(FOOD)));
@@ -194,7 +194,7 @@ test('food values: the photos (two at most), the schema and the typed name are s
   const content = body.messages[0].content;
   assert.deepEqual(content.filter((c) => c.type === 'image').map((c) => c.source.data), [btoa('a'), btoa('b')]);
   assert.equal(content.at(-1).text, 'Food: Yulaf içeceği');
-  assert.deepEqual(body.output_config.format.schema.required, ['name', 'kcal', 'p', 'c', 'f', 'fib']);
+  assert.deepEqual(body.output_config.format.schema.required, ['name', 'known', 'kcal', 'p', 'c', 'f', 'fib']);
   assert.equal(body.max_tokens, 300);
   assert.match(body.system, /per 100 g/);
   assert.match(body.system, /per serving/);
@@ -206,7 +206,7 @@ test('food values: the photos (two at most), the schema and the typed name are s
   const user = calls[1].body.messages[1].content;
   assert.equal(user[0].image_url.url, `data:image/jpeg;base64,${btoa('a')}`);
   assert.equal(user[1].text, 'No name given; use the photo.');
-  assert.match(calls[1].body.messages[0].content, /\{"name":"","kcal":0,"p":0,"c":0,"f":0,"fib":0\}/);
+  assert.match(calls[1].body.messages[0].content, /\{"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0\}/);
 });
 
 test('food values: the prompt stays English, with no language line, when the interface is Turkish', async () => {
@@ -224,10 +224,13 @@ test('food values: the prompt stays English, with no language line, when the int
 });
 
 test('food values: rounded (kcal to 1, the rest to 0.1) and clamped; no kcal, 0 kcal or more than 1,000 is no reading', async () => {
-  assert.deepEqual(cleanFoodValues({ name: ` ${'x'.repeat(70)} `, kcal: '120.6', p: 12.345, c: -3, f: 140, fib: 'n/a' }), { name: 'x'.repeat(60), kcal: 121, p: 12.3, c: 0, f: 100, fib: 0 });
-  assert.deepEqual(cleanFoodValues({ kcal: 1000.4, p: 0.05 }), { name: '', kcal: 1000, p: 0.1, c: 0, f: 0, fib: 0 });
-  for (const kcal of [undefined, null, '', 'x', 0, 0.4, -5, 1001, 1e9, Infinity, true]) assert.throws(() => cleanFoodValues({ name: 'x', kcal }), { code: 'empty' }, String(kcal));
+  assert.deepEqual(cleanFoodValues({ name: ` ${'x'.repeat(70)} `, known: true, kcal: '120.6', p: 12.345, c: -3, f: 140, fib: 'n/a' }), { name: 'x'.repeat(60), kcal: 121, p: 12.3, c: 0, f: 100, fib: 0 });
+  assert.deepEqual(cleanFoodValues({ known: true, kcal: 1000.4, p: 0.05 }), { name: '', kcal: 1000, p: 0.1, c: 0, f: 0, fib: 0 });
+  for (const kcal of [undefined, null, '', ' ', 'x', -5, 1001, 1e9, Infinity, true]) assert.throws(() => cleanFoodValues({ name: 'x', known: true, kcal }), { code: 'empty' }, String(kcal));
   assert.throws(() => cleanFoodValues(null), { code: 'empty' });
-  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'blur', kcal: 0, p: 0, c: 0, f: 0, fib: 0 }))));
+  // 0 kcal is a reading when the model knows the food (diet cola); known false or missing is none
+  assert.deepEqual(cleanFoodValues({ name: 'Diet cola', known: true, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }), { name: 'Diet cola', kcal: 0, p: 0, c: 0, f: 0, fib: 0 });
+  for (const known of [false, undefined, 'true', 1]) assert.throws(() => cleanFoodValues({ name: 'x', known, kcal: 50 }), { code: 'empty' }, String(known));
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'blur', known: false, kcal: 0, p: 0, c: 0, f: 0, fib: 0 }))));
   await assert.rejects(foodValues({ cfg: haiku, name: 'x' }), { code: 'empty' });
 });

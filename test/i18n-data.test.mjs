@@ -108,6 +108,9 @@ test('generated titles: the English title stays, titleOf translates from tk', as
   assert.equal(titleOf({ title: 'Egg and cheese plate', tk: { kind: 'plan', params: { id: 'L-A' } } }), 'Yumurta ve peynir tabağı');
   assert.equal(titleOf({ title: 'Egg and cheese plate', planId: 'L-A' }), 'Yumurta ve peynir tabağı'); // older entry without tk
   assert.equal(titleOf({ title: 'My own name', planId: 'L-A' }), 'My own name');
+  // Re-estimated as a weigh-in or steps entry, an entry keeps its old planId; the valid tk wins
+  assert.equal(titleOf({ ...w, planId: 'L-A' }), 'Kilo 82,5 kg');
+  assert.equal(titleOf({ ...steps, planId: 'L-A' }), `${(8200).toLocaleString('tr-TR')} adım`);
   assert.equal(titleFor('steps', { steps: 8200 }).title, '8,200 steps'); // the stored title is English in any language
 });
 

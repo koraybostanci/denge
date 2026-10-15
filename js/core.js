@@ -562,11 +562,15 @@ export const TK_KINDS = Object.keys(TK_VALID);
 // The title of an entry in the interface language; the stored title when there is no known `tk`
 export function titleOf(e) {
   const k = e.tk;
-  // A plan or flex meal (and an older plan entry without tk) shows the name it was logged with, so editing or switching
-  // the plan never changes a past entry; a default meal's English name still shows in the interface language
-  if ((tkValid(k) && k.kind === 'plan') || (typeof e.planId === 'string' && e.planId)) return typeof e.title === 'string' ? td(e.title) : e.title;
-  const text = tkValid(k) ? TITLES[k.kind](k.params) : null;
-  return text || e.title;
+  // A plan or flex meal (and an older plan entry without a valid tk) shows the name it was logged with, so editing or switching
+  // the plan never changes a past entry; a default meal's English name still shows in the interface language.
+  // A valid tk comes first: an entry re-estimated as a weigh-in or steps keeps its old planId.
+  if (tkValid(k)) {
+    if (k.kind === 'plan') return typeof e.title === 'string' ? td(e.title) : e.title;
+    return TITLES[k.kind](k.params) || e.title;
+  }
+  if (typeof e.planId === 'string' && e.planId) return typeof e.title === 'string' ? td(e.title) : e.title;
+  return e.title;
 }
 // { title, tk } for a new generated entry: the English title, built with English formats whatever the language is
 export function titleFor(kind, params) {

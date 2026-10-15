@@ -20,7 +20,8 @@ const isId = (v) => typeof v === 'string' && ID_RE.test(v);
 const plain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 // A key that is looked up in a plain object: never one of Object.prototype's own names ("constructor", "toString")
 const ownSafe = (k) => typeof k === 'string' && !(k in Object.prototype);
-const MEAL_ID = /^[A-Za-z][\w-]{0,39}$/;
+const MEAL_ID_MAX = 40;
+const MEAL_ID = new RegExp(`^[A-Za-z][\\w-]{0,${MEAL_ID_MAX - 1}}$`);
 const isMealId = (k) => ownSafe(k) && MEAL_ID.test(k);
 const PLAN_PHOTOS_MAX = 200;
 const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 20)).slice(0, 4) : []);
@@ -71,7 +72,7 @@ export function cleanEntry(e) {
     kind: oneOf(e.kind, ['meal', 'weight', 'steps'], 'meal'),
     status: oneOf(e.status, ['ok', 'pending', 'error'], 'error'),
     src: txt(e.src, 20), text: txt(e.text), title: txt(e.title, 80), err: txt(e.err, 300),
-    slot: oneOf(e.slot, Object.keys(SLOT_NAME), 'dinner'), planId: txt(e.planId, 20), items: itemList(e.items),
+    slot: oneOf(e.slot, Object.keys(SLOT_NAME), 'dinner'), planId: txt(e.planId, MEAL_ID_MAX), items: itemList(e.items),
     kcal: pos(e.kcal, 6000), p: pos(e.p, 500), c: pos(e.c, 800), f: pos(e.f, 500), fib: pos(e.fib, 150),
     tier: oneOf(e.tier, TIERS, 'plan'), flags: flagList(e.flags), conf: pos(e.conf, 1), q: txt(e.q, 160),
     mult: isNum(e.mult) && e.mult > 0 ? Math.min(10, e.mult) : 1,
