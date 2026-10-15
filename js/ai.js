@@ -296,10 +296,16 @@ async function callWithFallback(cfg, req, onRetry) {
 }
 const FALLBACK_ON = ['server', 'rate', 'no_quota'];
 
+// The meal times of the plan, or a plain line when it has no main meals
+const mealTimes = () => {
+  const m = mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ');
+  return m ? `; meals are ${m}.` : '. The plan has no set meal times.';
+};
+
 // ——— The day's review: text only, a few hundred tokens ———
 // The prompts are always English, whatever the interface language is
 const REVIEW_SYSTEM = () => inEnglish(() => `You review one day of a food log for one person on a weight-loss plan, against the plan and the goal. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+The plan: the calorie budget and protein goal given with the day${mealTimes()}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 The calories against the budget are the main goal; protein, fibre and the rest are secondary, so never call a day a miss for those alone. Use only the foods and numbers given; never invent an amount. Name the actual foods. Be supportive and encouraging, like a kind coach reading the numbers: name what went well first, stay concrete, never scold or moralise, and treat a bigger day as one day, not a failure. No medical advice.
@@ -346,7 +352,7 @@ export function cleanReview(d) {
 // ——— The quick note on the day so far: text only, a few sentences ———
 // The prompts are always English, whatever the interface language is
 const COACH_SYSTEM = () => inEnglish(() => `You give one person on a weight-loss plan a quick, supportive check-in on their day so far. Reply with JSON only, in English.
-The plan: the calorie budget and protein goal given with the day; meals are ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.
+The plan: the calorie budget and protein goal given with the day${mealTimes()}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 note: two or three short sentences, at most 45 words in all. Say how the day is going so far, then what is left of the budget and which macros (protein first, then fibre) are still worth adding, with a concrete food or meal from the plan for the rest of the day. Warm and encouraging, never scolding; if the day is already above budget, be kind and say what to do next without skipping meals.
@@ -373,6 +379,8 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 // The prompts are always English, whatever the interface language is
 const CHECK_SYSTEM = () => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
 The plan is built from: ${planFoods(S.plan)}.
+Plan meals:
+${planDigest(S.plan)}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 kind: "menu", "product" (one or several packaged products), "dish" (prepared food in front of them), or "none" when there is nothing to judge or the text is too small or blurred to read.

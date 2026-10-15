@@ -72,7 +72,7 @@ function checkBriefText(note) {
     `Time ${hhmm(now)} on ${new Intl.DateTimeFormat('en-GB', { weekday: 'long' }).format(now)}, a ${S.days[t] && S.days[t].train ? 'workout' : 'rest'} day.`,
     tot.n
       ? `Today so far: ${r(tot.kcal)} of ${target} kcal eaten, ${r(target - tot.kcal) >= 0 ? `${r(target - tot.kcal)} kcal left` : `${r(tot.kcal - target)} kcal above`}; protein ${r(tot.p)} of ${s.protein} g.${open.length ? ` Not eaten yet: ${open.join(', ')}.` : ' All meals of the day are logged.'}`
-      : `Nothing eaten yet today: the whole ${target} kcal and ${s.protein} g of protein are open. The plan's meals: ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.`,
+      : `Nothing eaten yet today: the whole ${target} kcal and ${s.protein} g of protein are open.${mainSlots().length ? ` The plan's meals: ${mainSlots().map((x) => `${x.name.toLowerCase()} ${x.time}`).join(', ')}.` : ''}`,
     `Daily budget and goals: ${s.kcalRest} kcal on rest days, ${s.kcalTrain} on workout days, protein ${s.protein} g, fibre ${s.fiber} g.`,
   ];
   const f = weekFlex(t);

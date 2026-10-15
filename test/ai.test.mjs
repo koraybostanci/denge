@@ -170,11 +170,26 @@ test('every prompt is built from the active plan at request time, and stays Engl
       await run();
       const [en, tr] = calls.splice(0).map((c) => c.body.system);
       assert.equal(tr, en + line, name); // English in Turkish too, with only the language line added
-      assert.ok(en.includes(name === 'check' ? planFoods(mine) : planDigest(mine)), name);
+      assert.ok(en.includes(planDigest(mine)), name);
+      if (name === 'check') assert.ok(en.includes(planFoods(mine)), name);
       assert.match(en, /Oat drink/, name);
       if (name === 'review' || name === 'coach') assert.match(en, /meals are lunch 12:00, snack 1 14:30, dinner 18:00\./, name); // only the meal times the plan has
     }
   } finally { S.plan = saved; await setLang('en'); }
+});
+
+test('a plan with no main meals gives the review and coach prompts a plain line, not "meals are ."', async () => {
+  const saved = S.plan;
+  try {
+    S.plan = buildPlan({ ...seedPlan, meals: [] });
+    for (const [name, [run, body]] of Object.entries(askers)) {
+      mockFetch(() => reply(200, claudeBody(body)));
+      await run();
+      const sys = calls.splice(0)[0].body.system;
+      assert.ok(!/meals are \.|undefined/.test(sys), name);
+      if (name === 'review' || name === 'coach') assert.match(sys, /The plan has no set meal times\./, name);
+    }
+  } finally { S.plan = saved; }
 });
 
 // ——— The food form's AI fill ———
