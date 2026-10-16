@@ -13,6 +13,11 @@
   your goals, the weight schedule and where you stand against it. No photos. These requests, and the
   check, also carry the meals and foods of the plan in use (names, amounts, calories), so anything you
   typed into My plan is sent too.
+- The progress review on Progress, sent only when you tap it, is text only too: a summary of the whole
+  log since the start (meals as numbers, weigh-ins, steps, water, coffee, workout days, day verdicts,
+  flex used), your goals and where you stand against the schedule. Supplements go as counts taken, never
+  their names. No photos, and none of the model's earlier reviews. It is larger than a day's review but
+  limited to 3,500 characters.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
 - A photo taken to fill in a food's values is sent with no other data and is not stored.
@@ -26,13 +31,13 @@
   change of goals does not move them). Nothing about badges is sent anywhere, and the model never sees them.
 - There is no sync. Back up from Settings → "Backup and export"; the backup is a JSON file you can
   restore on the same or another device. It holds your entries, goals, favourites, My plan (the
-  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
+  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
   entries, days, checks, badges and plan pictures to what is on the device (an entry or day that is in
   both takes the backup's version); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
-  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, checks) and keeps every setting, your plans, the plan's
+  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review, checks) and keeps every setting, your plans, the plan's
   pictures, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
   goals, favourites, saved places, My plan, the plan's pictures, the badges and the usage totals; the API key and provider
   stay unless you untick the box. It asks you to type DELETE. Both refuse while something is being
