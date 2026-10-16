@@ -3,7 +3,7 @@
 // instruction, short JSON output.
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
-import { S, mealTimesLine } from './core.js';
+import { S, mealTimesLine, kcalMinDay } from './core.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -353,6 +353,66 @@ export function cleanReview(d) {
   d = d && typeof d === 'object' ? d : {};
   const list = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => clean(x, 240)).filter(Boolean).slice(0, 2);
   return { head: clean(d.head, 240), good: list(d.good), cut: list(d.cut), next: clean(d.next, 240) };
+}
+
+// ——— The whole-plan progress review: text only, weeks of totals worked out by the app ———
+// The prompts are always English, whatever the interface language is
+const PROGRESS_RATINGS = ['great', 'on-track', 'a-bit-behind', 'stuck', 'too-early'];
+const PROGRESS_SYSTEM = () => inEnglish(() => `You review how a whole weight-loss plan has gone so far for one person, against the plan and the goal. You see weekly totals, weigh-ins and the schedule, all worked out for you. Reply with JSON only, in English.
+The plan: the calorie budget and protein goal given with the brief${mealTimes()}
+Weekly allowance: ${RULES.weekly.join(' ')}
+Off plan: ${RULES.off.join(' ')}
+Never go below ${kcalMinDay()} kcal a day.
+An incomplete log is data, not a failure: a missing weigh-in is missing data. If too little is recorded to judge something, say so plainly. The calories against the budget are the main goal; protein, fibre, steps and water are secondary, so never call a week a miss for those alone. The weekly allowance is part of the plan; using it is not cheating.
+Be supportive, like a kind coach reading the numbers: never scold or moralise, name patterns over single days, and a rough patch that ended is still progress. Progress is graded against the plan and its schedule, never against appearance or worth; use no body-descriptor language.
+If weight is coming off faster than the goal asks, say so factually in head and rate no higher than on-track; never celebrate faster loss. Never suggest eating below the stated minimum, skipping meals, or losing faster than the plan already asks.
+Use only the numbers given; never invent or recompute any. No medical advice.
+rating: exactly one of great, on-track, a-bit-behind, stuck, too-early. Follow the app's rating estimate unless the facts clearly disagree.
+head: one sentence on how it has gone so far against the plan.
+good: up to 2 things that have worked, each naming the food or habit.
+change: up to 2 small changes that would help most. Empty if none are needed.
+adjust: "" unless a plan-level change (a different budget or rate) may be worth considering, then ONE sentence. You may agree with the adjustment the app shows, but never change or re-derive its numbers.
+Every string at most 30 words.
+Plan meals:
+${planDigest(S.plan)}`);
+const PROGRESS_SHAPE = '\nReturn exactly one JSON object with these keys: {"rating":"great|on-track|a-bit-behind|stuck|too-early","head":"","good":[""],"change":[""],"adjust":""}';
+const PROGRESS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rating', 'head', 'good', 'change', 'adjust'],
+  properties: {
+    rating: { type: 'string', enum: PROGRESS_RATINGS },
+    head: { type: 'string' },
+    good: { type: 'array', items: { type: 'string' } },
+    change: { type: 'array', items: { type: 'string' } },
+    adjust: { type: 'string' },
+  },
+};
+
+/**
+ * @param {{cfg:object, brief:string, appRating?:string, onRetry?:Function}} o brief: the whole log in plain lines, built by the app; appRating: its on-device estimate
+ * @returns {Promise<{data:{rating:string,head:string,good:string[],change:string[],adjust:string}, usage:{in:number,out:number}, model:string}>}
+ */
+export async function progressReview(o) {
+  const req = { system: PROGRESS_SYSTEM() + langLine(), shape: PROGRESS_SHAPE, text: o.brief, schema: PROGRESS_SCHEMA, json: true, maxTokens: 500 };
+  const r = await callWithFallback(o.cfg, req, o.onRetry);
+  const data = cleanProgressReview(r.data, o.appRating);
+  if (!data.head) throw new AiError('empty', 'The model returned no review');
+  return { ...r, data };
+}
+
+// Never throws on a bad rating: an unusable one falls back to the app's own estimate, or '' when that is not one of the five either
+export function cleanProgressReview(d, appRating = '') {
+  d = d && typeof d === 'object' ? d : {};
+  const list = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => clean(x, 240)).filter(Boolean).slice(0, 2);
+  const rating = clean(d.rating, 40).toLowerCase().replace(/ /g, '-');
+  const adjust = clean(d.adjust, 240);
+  const out = {
+    rating: PROGRESS_RATINGS.includes(rating) ? rating : PROGRESS_RATINGS.includes(appRating) ? appRating : '',
+    head: clean(d.head, 240), good: list(d.good), change: list(d.change), adjust: /^(none|no)$/i.test(adjust) ? '' : adjust,
+  };
+  if (!out.head && !out.adjust && !out.good.length && !out.change.length) throw new AiError('empty', 'The model returned no review');
+  return out;
 }
 
 // ——— The quick note on the day so far: text only, a few sentences ———

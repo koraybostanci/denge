@@ -1,7 +1,7 @@
 // The model layer (js/ai.js) against a fetch that never leaves the machine. `node --test`
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, review, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -110,6 +110,50 @@ test('a quick note: text is cleaned, an empty one is an error', async () => {
   assert.equal(data.note, 'Good start. Add protein.');
   mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: '' }))));
   await assert.rejects(() => coach({ cfg: haiku, brief: 'b' }), { code: 'empty' });
+});
+
+const PROG = { rating: 'on-track', head: 'h', good: ['g'], change: ['c'], adjust: '' };
+test('a progress review: text only, the schema and 500 tokens on Claude, the words shape elsewhere', async () => {
+  mockFetch(() => reply(200, claudeBody(JSON.stringify(PROG))));
+  const { data } = await progressReview({ cfg: haiku, brief: 'b', appRating: 'stuck' });
+  assert.equal(data.rating, 'on-track');
+  assert.equal(calls[0].body.max_tokens, 500);
+  assert.deepEqual(calls[0].body.output_config.format.schema.required, ['rating', 'head', 'good', 'change', 'adjust']);
+  assert.deepEqual(calls[0].body.messages[0].content, [{ type: 'text', text: 'b' }]);
+  assert.ok(!JSON.stringify(calls[0].body).includes('"image"'));
+  mockFetch(() => reply(200, { choices: [{ message: { content: JSON.stringify(PROG) }, finish_reason: 'stop' }] }));
+  await progressReview({ cfg: gemini, brief: 'b' });
+  assert.match(calls[1].body.messages[0].content, /"rating":"great\|on-track\|a-bit-behind\|stuck\|too-early"/);
+});
+test('a progress review in Turkish adds the language line only', async () => {
+  try {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify(PROG))));
+    await setLang('en');
+    await progressReview({ cfg: haiku, brief: 'b' });
+    await setLang('tr');
+    await progressReview({ cfg: haiku, brief: 'b' });
+    const [en, tr] = calls.splice(0).map((c) => c.body.system);
+    assert.equal(tr, en + LINE);
+  } finally { await setLang('en'); }
+});
+test('the progress cleaner clamps: singletons, 240 chars, at most 2, a rating that falls back to the app estimate', () => {
+  const c = cleanProgressReview({ rating: ' On Track ', head: 'x'.repeat(300), good: 'one', change: ['a', '', 'b', 'c'], adjust: 'None' }, 'stuck');
+  assert.equal(c.rating, 'on-track');
+  assert.equal(c.head.length, 240);
+  assert.deepEqual(c.good, ['one']);
+  assert.deepEqual(c.change, ['a', 'b']);
+  assert.equal(c.adjust, '');
+  assert.equal(cleanProgressReview({ rating: 'A bit behind', head: 'h' }).rating, 'a-bit-behind');
+  assert.equal(cleanProgressReview({ rating: 'ahead', head: 'h' }, 'stuck').rating, 'stuck');
+  assert.equal(cleanProgressReview({ head: 'h' }, 'too-early').rating, 'too-early');
+  assert.equal(cleanProgressReview({ rating: 'ahead', head: 'h' }, 'bogus').rating, '');
+});
+test('a progress review with everything blank is an empty error, and a cut-off one says truncated', async () => {
+  assert.throws(() => cleanProgressReview({ rating: 'stuck', head: ' ', good: [], change: [''], adjust: 'no' }), { code: 'empty' });
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ rating: 'stuck', head: '', good: [], change: [], adjust: '' }))));
+  await assert.rejects(() => progressReview({ cfg: haiku, brief: 'b' }), { code: 'empty' });
+  mockFetch(() => reply(200, claudeBody('{"rating":"st', 'max_tokens')));
+  await assert.rejects(() => progressReview({ cfg: haiku, brief: 'b' }), { code: 'truncated' });
 });
 
 // ——— The language line in the prompts ———
