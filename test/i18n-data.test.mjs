@@ -6,9 +6,9 @@ import { setLang, getLang, inEnglish } from '../js/i18n.js';
 import {
   S, today, dayVerdict, verdictText, dayNotes, dayReasons, dayGoals, budgetVerdict, VERDICT, WEEK_TIERS, titleOf, titleFor, TK_KINDS, parseLocal, parseCount, fmtInt,
 } from '../js/core.js';
-import { addDays, planDigest, planFoods, RULES, buildPlan } from '../js/plan.js';
+import { addDays, parseDay, planDigest, planFoods, RULES, buildPlan } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
-import { reviewBrief, coachBrief, checkBrief } from '../js/briefs.js';
+import { reviewBrief, coachBrief, checkBrief, progressBrief } from '../js/briefs.js';
 import { AI_ERRORS, AI_ERROR_LABEL } from '../js/ai.js';
 import { cleanEntry } from '../js/backup.js';
 import { buildSql } from '../js/export.js';
@@ -45,7 +45,7 @@ const leakTr = () => {
 
 test('the briefs and the plan digest are byte-identical in Turkish and English', async () => {
   setup();
-  const before = { review: reviewBrief(day(-1)), coach: coachBrief(day(-1)), check: checkBrief('a note'), digest: planDigest(S.plan), foods: planFoods(S.plan), weekly: RULES.weekly.join(' ') };
+  const before = { review: reviewBrief(day(-1)), coach: coachBrief(day(-1)), check: checkBrief('a note'), progress: progressBrief(), digest: planDigest(S.plan), foods: planFoods(S.plan), weekly: RULES.weekly.join(' ') };
   assert.match(before.review, /App verdict: /);
   assert.match(before.review, /kcal above budget/);
   leakTr();
@@ -57,11 +57,13 @@ test('the briefs and the plan digest are byte-identical in Turkish and English',
   assert.equal(reviewBrief(day(-1)), before.review);
   assert.equal(coachBrief(day(-1)), before.coach);
   assert.equal(checkBrief('a note'), before.check);
+  assert.equal(progressBrief(), before.progress);
   assert.equal(planDigest(S.plan), before.digest);
   assert.equal(planFoods(S.plan), before.foods);
   assert.equal(getLang(), 'tr'); // and the language is back after the English call
   assert.equal(fmtInt(8200), (8200).toLocaleString('tr-TR'));
   assert.doesNotMatch(reviewBrief(day(-1)), /TR\[/);
+  assert.doesNotMatch(progressBrief(), /TR\[/);
 });
 
 test('verdict and note text are whole sentences that a Turkish entry can replace', async () => {
@@ -259,4 +261,75 @@ test('plan tables keep stable English ids and names', () => {
   assert.equal(S.plan.meals[0].items[0].measure, '2 eggs');
   assert.equal(RULES.daily[1], '8,000 steps a day. With a desk job this is the cheapest part of the deficit.');
   assert.equal(RULES.rotation[0][0], 'Monday');
+});
+
+test('the progress brief: sections, both adjust forms, no junk values, the cap and the empty log', () => {
+  const saved = { entries: S.entries, days: S.days, settings: { ...S.settings } };
+  try {
+    S.entries = [];
+    S.days = {};
+    assert.equal(progressBrief(), ''); // empty log
+    setup();
+    S.settings.supplements = [{ id: 's1', name: 'Secret pill' }];
+    S.days[day(-1)].taken = ['s1'];
+    const b = progressBrief();
+    assert.match(b, /^Progress review, written on /);
+    assert.match(b, /\nGoal: 86.4 kg on /);
+    assert.match(b, /\nAPP RATING ESTIMATE: (great|on-track|a-bit-behind|stuck|too-early)\n/);
+    assert.match(b, /The budgets shown are the ones in force today; the app does not store earlier budgets\./);
+    assert.match(b, /Plan numbers may have changed during the period; a change in the calories marks a change in the plan, not the person/);
+    assert.match(b, /No automatic adjustment is suggested at this time\./);
+    assert.match(b, /Supplements: taken 1 over the whole plan, 1 of 7 in the last week\./);
+    assert.doesNotMatch(b, /Secret pill|s1|undefined|NaN|-0\b|8,200 steps/);
+    assert.ok(b.split('\n').filter((l) => l.startsWith('- ')).length <= 8);
+    // The rule holds: two weeks of the average more than 0.7 kg above the schedule
+    for (let i = 0; i < 16; i++) S.days[day(-i)] = { ...(S.days[day(-i)] || {}), day: day(-i), kg: 88 };
+    assert.match(progressBrief(), /Adjustment rule: .*cut 100 kcal a day or add 2,000 steps, never below the minimum of \d+ kcal/);
+    assert.doesNotMatch(progressBrief(), /No automatic adjustment/);
+    // No weigh-ins, no main meals, and a log that ended long ago
+    S.days = { [day(-1)]: { day: day(-1), steps: 5000 } };
+    assert.doesNotMatch(progressBrief(), /undefined|NaN|-0\b/);
+    const plan = S.plan;
+    S.plan = buildPlan({ ...seedPlan, meals: seedPlan.meals.filter((m) => !['breakfast', 'lunch', 'dinner'].includes(m.slot)) });
+    assert.doesNotMatch(progressBrief(), /undefined|NaN|-0\b/);
+    S.plan = plan;
+    setup();
+    S.entries = [];
+    S.days = { [day(-100)]: { day: day(-100), kg: 85, steps: 4000 } };
+    Object.assign(S.settings, { startDate: day(-120), targetDate: day(-10) });
+    assert.doesNotMatch(progressBrief(), /undefined|NaN|-0\b/);
+    // 300 days of meals, weekly weigh-ins: within the cap
+    S.entries = [];
+    S.days = {};
+    Object.assign(S.settings, { startDate: day(-300), targetDate: day(60) });
+    for (let i = 300; i >= 0; i--) {
+      meal(day(-i), 1500, 100);
+      S.days[day(-i)] = { day: day(-i), steps: 7000, water: 2000, coffee: 2, ...(i % 7 === 0 ? { kg: 90 - (300 - i) / 40 } : {}) };
+    }
+    const big = progressBrief();
+    assert.ok(big.length <= 3500, String(big.length));
+    assert.match(big, /Goal: /);
+    assert.match(big, /Weigh-ins since the start/);
+    assert.match(big, /best run \d+ days on plan/);
+    // A daily weigher over 300 days: still within the cap, the latest weigh-in raw
+    for (let i = 300; i >= 0; i--) S.days[day(-i)] = { ...S.days[day(-i)], kg: 90 - (300 - i) / 40 };
+    const daily = progressBrief();
+    assert.ok(daily.length <= 3500, String(daily.length));
+    assert.match(daily, /Goal: /);
+    assert.ok(daily.includes(`${day(0)} ${(Math.round((90 - 300 / 40) * 10) / 10).toFixed(1)} avg `));
+    assert.match(daily, /week of .*: avg \d+\.\d kg, \d+ weigh-ins/);
+    assert.doesNotMatch(daily, /undefined|NaN/);
+    // The first week starts mid-week: only the days from the start count, and the rows say so
+    S.entries = [];
+    S.days = {};
+    const mon = (() => { let d = day(-14); while (parseDay(d).getDay() !== 1) d = addDays(d, -1); return d; })();
+    Object.assign(S.settings, { startDate: addDays(mon, 3), targetDate: day(60) });
+    for (let i = 0; i < 7; i++) S.days[addDays(mon, i)] = { day: addDays(mon, i), water: 9999 };
+    const first = progressBrief().split('\n').find((l) => l.startsWith('- ') && l.includes(`${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(parseDay(mon))} to`));
+    assert.ok(first, 'the first week has a row');
+    assert.match(first, /on plan \d\/4;/);
+    assert.match(first, /protein minimum \d\/4/);
+    assert.match(first, /water ok 4\/4/);
+    assert.doesNotMatch(first, /\/7/);
+  } finally { Object.assign(S, { entries: saved.entries, days: saved.days, settings: saved.settings }); }
 });
