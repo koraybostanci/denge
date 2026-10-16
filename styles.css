@@ -517,7 +517,7 @@ input[aria-invalid="true"] { border-color: var(--over); }
 .empty p:first-child, .empty h1 { color: var(--ink); font: 600 21px var(--display); }
 
 /* Chart */
-.chart { position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-card); padding: 12px 8px; }
+.chart { position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-card); padding: 12px 8px; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } /* no text selection: a long press on the chart must not select the axis labels (it draws handles over the plot and fights the scroll) */
 .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding-left: 8px; }
 .chart-head .seg { flex: 1; max-width: 260px; }
 .chart-head .seg button { padding: 0 2px; font-size: 13px; white-space: nowrap; }
