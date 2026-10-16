@@ -32,11 +32,13 @@ up to date there is no button. It is one text request: a summary of the whole lo
 as plain lines. It holds the goals and where you stand against the weight schedule, meals as numbers
 (calories against budget, protein, flex used, off-plan entries), weigh-ins, steps, water, coffee,
 workout days, how many supplements were taken (counts, never their names) and the day verdicts. It
-carries no photos and none of the model's earlier reviews. The summary stays under 3,500 characters; when
+carries no photos and none of the model's earlier reviews. The summary is kept to about 3,500 characters
+(the goal and closing lines stay whole even past that); when
 there are more weigh-ins than fit, the oldest are thinned into weekly averages. If nothing is logged
 yet, a toast says so and nothing is sent. The reply is a rating in words (great, on track, a bit
 behind, stuck, or too early), what helped, what to change, and sometimes an adjustment the app itself
-worked out. It never changes your settings. It costs about 1,900 tokens in and at most 500 out. The
+worked out. It never changes your settings. It costs about 1,900 tokens in and at most 500 out (up to
+1,500 on providers that are billed with room for thinking). The
 card stays collapsed, showing only the title and rating, until tapped. The review is stored on the device (kv
 `progressReview`) and is included in the backup, but not in the SQL export.
 

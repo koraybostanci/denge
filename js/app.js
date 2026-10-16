@@ -6,7 +6,7 @@ import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
-import { reviewBrief, coachBrief, checkBrief, progressBrief } from './briefs.js';
+import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
@@ -385,12 +385,16 @@ async function runProgressReview() {
     const appRating = progressRatingHint();
     const { data, usage, model } = await progressReview({ cfg: aiCfg(), brief: progressBrief(), appRating });
     await addUsage(model, usage);
-    if (myGen !== getProgressGen()) return; // wiped while the request was out
-    const rec = { v: 1, sig, ts: Date.now(), model, ...data };
-    await db.kvSet('progressReview', rec);
-    if (myGen !== getProgressGen()) return;
-    S.progressReview = rec;
-    S.progressErr.clear();
+    // The log may have been wiped while the request was out; around the awaited write the generation is checked twice, so a record
+    // wiped over it does not come back. No early returns: the busy flag and the render are cleared whatever happened.
+    if (myGen === getProgressGen()) {
+      const rec = { v: 1, sig, ts: Date.now(), model, ...data };
+      await db.kvSet('progressReview', rec);
+      if (myGen === getProgressGen()) {
+        S.progressReview = rec;
+        S.progressErr.clear();
+      }
+    }
   } catch (err) {
     S.progressErr.set('progress', modelFailure(err, 'progress'));
   }
@@ -399,7 +403,7 @@ async function runProgressReview() {
 }
 function queueProgressReview() {
   if (progressGate() !== 'ready' || progressState() === 'fresh' || S.progressReviewing.has('progress')) return;
-  if (progressBrief() === '') return;
+  if (!hasProgressData()) return;
   S.progressReviewing.add('progress');
   S.progressErr.delete('progress');
   render();
@@ -1614,7 +1618,7 @@ const ACT = {
   'progress-review': () => {
     if (!hasKey()) return toast(t('Add an API key in Settings to get a review of your progress'));
     if (!navigator.onLine) return toast(td(AI_ERRORS.offline));
-    if (progressBrief() === '') return toast(t('Log something first and the review has more to go on'));
+    if (!hasProgressData()) return toast(t('Log something first and the review has more to go on'));
     queueProgressReview();
   },
   'loc-save': async (el) => {
@@ -1818,7 +1822,8 @@ document.addEventListener('toggle', (ev) => {
       document.querySelectorAll('details.setting[open]').forEach((o) => { if (o !== d) o.open = false; });
     } else if (S.openSetting === d.dataset.sec) S.openSetting = '';
   }
-  if (d.matches('details.review-ai')) S.reviewOpen.set(d.dataset.day, d.open);
+  // The progress card matches review-ai too and has no day of its own, so the day branch is guarded: it writes no junk key for it
+  if (d.matches('details.review-ai') && d.dataset.day) S.reviewOpen.set(d.dataset.day, d.open);
   if (d.matches('details.coach-ai')) S.reviewOpen.set(`coach:${d.dataset.day}`, d.open);
   if (d.matches('details.progress-ai')) S.reviewOpen.set('progress', d.open);
 }, true);

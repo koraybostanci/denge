@@ -8,7 +8,7 @@ import {
 } from '../js/core.js';
 import { addDays, parseDay, planDigest, planFoods, RULES, buildPlan } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
-import { reviewBrief, coachBrief, checkBrief, progressBrief } from '../js/briefs.js';
+import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from '../js/briefs.js';
 import { AI_ERRORS, AI_ERROR_LABEL } from '../js/ai.js';
 import { cleanEntry } from '../js/backup.js';
 import { buildSql } from '../js/export.js';
@@ -263,6 +263,46 @@ test('plan tables keep stable English ids and names', () => {
   assert.equal(RULES.rotation[0][0], 'Monday');
 });
 
+test('hasProgressData: every one kind of logged progress counts, a pending meal alone does not and an empty log does not', () => {
+  const saved = { entries: S.entries, days: S.days };
+  try {
+    S.entries = [];
+    S.days = {};
+    assert.equal(hasProgressData(), false); // empty
+    S.days[day(-1)] = { day: day(-1) };
+    const only = (d) => { S.days[day(-1)] = { day: day(-1), ...d }; const v = hasProgressData(); S.days[day(-1)] = { day: day(-1) }; return v; };
+    assert.equal(only({ kg: 82.5 }), true);
+    assert.equal(only({ steps: 6000 }), true);
+    assert.equal(only({ water: 1500 }), true);
+    assert.equal(only({ coffee: 1 }), true);
+    assert.equal(only({ taken: ['x'] }), true);
+    assert.equal(only({ train: true }), true);
+    assert.equal(only({ coffee: 0 }), false); // a logged zero is no data
+    S.days = {};
+    meal(day(-1), 1500, 100); // an analysed meal entry
+    assert.equal(hasProgressData(), true);
+    S.entries[0].status = 'pending';
+    assert.equal(hasProgressData(), false); // nothing analysed yet
+  } finally { S.entries = saved.entries; S.days = saved.days; }
+});
+
+test('the progress brief pace line: faster than the plan, gaining, and within the rate', () => {
+  const saved = { entries: S.entries, days: S.days };
+  try {
+    S.entries = [];
+    S.days = {};
+    Object.assign(S.settings, { startDate: day(-40), startKg: 86.4, targetDate: day(60), targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 });
+    for (const [o, kg] of [[0, 77], [-2, 77.5], [-4, 78], [-6, 78.5], [-8, 79.5], [-10, 80.5], [-12, 81.5], [-13, 82]]) S.days[day(o)] = { day: day(o), kg }; // 5 kg in 13 days
+    assert.match(progressBrief(), /Pace: ahead of the schedule — losing faster than the plan's rate; hard to hold\./);
+    S.days = {};
+    for (const [o, kg] of [[0, 85], [-3, 84.5], [-6, 84], [-9, 83.5], [-12, 83]]) S.days[day(o)] = { day: day(o), kg }; // the slope points up
+    assert.match(progressBrief(), /Pace: the weight has been going up over the last two weeks\./);
+    S.days = {};
+    for (const [o, kg] of [[0, 84], [-3, 84.1], [-6, 84.2], [-9, 84.3], [-12, 84.4]]) S.days[day(o)] = { day: day(o), kg }; // a gentle drift
+    assert.match(progressBrief(), /Pace: the pace is within the plan's rate\./);
+  } finally { S.entries = saved.entries; S.days = saved.days; }
+});
+
 test('the progress brief: sections, both adjust forms, no junk values, the cap and the empty log', () => {
   const saved = { entries: S.entries, days: S.days, settings: { ...S.settings } };
   try {
@@ -306,6 +346,10 @@ test('the progress brief: sections, both adjust forms, no junk values, the cap a
       meal(day(-i), 1500, 100);
       S.days[day(-i)] = { day: day(-i), steps: 7000, water: 2000, coffee: 2, ...(i % 7 === 0 ? { kg: 90 - (300 - i) / 40 } : {}) };
     }
+    // A steep enough last fortnight, so the trend and with it the Pace line exist in the capped brief
+    for (const [o, kg] of [[0, 89.5], [-2, 89.6], [-4, 89.7], [-6, 89.8], [-8, 89.9], [-10, 90], [-12, 90.1], [-13, 90.2]]) {
+      S.days[day(o)] = { ...S.days[day(o)], day: day(o), kg };
+    }
     const big = progressBrief();
     assert.ok(big.length <= 3500, String(big.length));
     assert.match(big, /Goal: /);
@@ -319,6 +363,13 @@ test('the progress brief: sections, both adjust forms, no junk values, the cap a
     assert.ok(daily.includes(`${day(0)} ${(Math.round((90 - 300 / 40) * 10) / 10).toFixed(1)} avg `));
     assert.match(daily, /week of .*: avg \d+\.\d kg, \d+ weigh-ins/);
     assert.doesNotMatch(daily, /undefined|NaN/);
+    // The fixed tail survives the trimming, so the app's rating and the adjust rule always travel with the summary
+    for (const capped of [big, daily]) {
+      assert.match(capped, /APP RATING ESTIMATE: (great|on-track|a-bit-behind|stuck|too-early)\n/);
+      assert.match(capped, /Pace: /);
+      assert.match(capped, /Current week so far:/);
+      assert.match(capped, /Adjustment rule:|No automatic adjustment/);
+    }
     // The first week starts mid-week: only the days from the start count, and the rows say so
     S.entries = [];
     S.days = {};

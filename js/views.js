@@ -1204,14 +1204,15 @@ function progressAi() {
   const err = S.progressErr.get('progress');
   const made = r && Number.isFinite(r.ts) ? new Date(r.ts) : null;
   const when = made ? dTiny.format(made) : '';
-  const label = r ? r.rating || progressRatingHint() : '';
+  // The rating of the stored review only when there is one: next to an old rating-less record no hint of today
+  const label = r && r.rating ? r.rating : '';
   const tail = made && RATING[label] ? ` — ${td(RATING[label])} · ${dShort.format(parseDay(dayKey(made)))}` : '';
   const wait = `<p class="review-wait" role="status"><span class="spin" aria-hidden="true"></span>${t('Writing the review…')}</p>`;
   let body = '';
   if (r) {
     const rows = [[t('Helped'), r.good || []], [t('What to change'), r.change || []]].filter(([, list]) => list.length);
     const age = made ? Math.floor((Date.now() - r.ts) / 86400000) : 0;
-    const why = state !== 'refresh' ? '' : r.sig !== progressSig() ? t('Your goals or weigh-ins changed after this review.') : age >= 14 ? tn('Updated {n} day ago.|Updated {n} days ago.', age) : '';
+    const why = state !== 'refresh' ? '' : r.sig !== progressSig() ? t('Your goals, plan or log changed after this review.') : age >= 14 ? tn('Updated {n} day ago.|Updated {n} days ago.', age) : '';
     const again = gate === 'ready' && state === 'refresh' ? `<button type="button" class="link" data-act="progress-review">${t('Reviewed {when} — update?', { when })}</button>` : '';
     body = `${r.head ? `<p><b>${esc(r.head)}</b></p>` : ''}
       ${rows.length ? `<dl>${rows.map(([k, list]) => `<div><dt>${k}</dt>${list.map((x) => `<dd>${esc(x)}</dd>`).join('')}</div>`).join('')}</dl>` : ''}
@@ -1219,7 +1220,7 @@ function progressAi() {
       ${busy ? wait : `<p class="review-foot">${t('AI review, {when}.', { when })} ${why} ${again}</p>`}`;
   } else if (busy) body = wait;
   else if (gate === 'gated') body = `<p class="note">${t('The review opens once there is enough to compare with the line.')}</p>`;
-  else body = `<p class="note">${t('This sends about {n} thousand characters of your summary, no photos.', { n: n0(Math.round(progressBrief().length / 1000)) })}</p>
+  else body = `<p class="note">${t('This sends about {n} thousand characters of your summary, no photos.', { n: n0(Math.ceil(progressBrief().length / 1000)) })}</p>
       <p class="review-foot"><button type="button" class="btn" data-act="progress-review">${t('Review it')}</button></p>`;
   return `<section>
     <details class="review-ai progress-ai"${S.reviewOpen.get('progress') ? ' open' : ''}>

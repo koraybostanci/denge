@@ -17,7 +17,7 @@
   log since the start (meals as numbers, weigh-ins, steps, water, coffee, workout days, day verdicts,
   flex used), your goals and where you stand against the schedule. Supplements go as counts taken, never
   their names. No photos, and none of the model's earlier reviews. It is larger than a day's review but
-  limited to 3,500 characters.
+  kept to about 3,500 characters; the goal line and a few closing lines stay whole even past that.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
 - A photo taken to fill in a food's values is sent with no other data and is not stored.

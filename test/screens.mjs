@@ -72,12 +72,16 @@ export function screens() {
   add('log-past-day', views.renderLog);
   S.viewDay = T;
   const kept = [S.entries, S.days];
+  // No stored review here either: fixture() seats one, and the empty screens must show it empty
+  const review = S.progressReview;
+  S.progressReview = null;
   S.entries = [];
   S.days = {};
   add('today-empty', views.renderToday);
   add('log-empty', views.renderLog);
   add('progress-empty', views.renderProgress);
   [S.entries, S.days] = kept;
+  S.progressReview = review;
   S.tab = 'progress';
   S.calPick = day(-1);
   add('progress-picked-day', views.renderProgress);
@@ -139,6 +143,10 @@ export function screens() {
   S.tab = 'progress';
   S.reviewOpen.set('progress', true);
   add('progress-review-open', views.renderProgress);
+  // While the request is out: the spinner with role="status" over the seated review
+  S.progressReviewing.add('progress');
+  add('progress-review-busy', views.renderProgress);
+  S.progressReviewing.delete('progress');
   S.reviewOpen.delete('progress');
   const rec = S.progressReview;
   S.progressReview = { ...rec, sig: 'old' };

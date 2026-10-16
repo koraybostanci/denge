@@ -8,6 +8,7 @@ import tr from '../js/tr.js';
 import { MODELS, PRESETS } from '../js/ai.js';
 import { extract, literals } from './extract.mjs';
 import { screens, fixture, core, views, day, at, meal, MINE, T as TODAY } from './screens.mjs';
+import { progressBrief } from '../js/briefs.js';
 
 const { S } = core;
 const VIEWS = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
@@ -587,4 +588,28 @@ test('Progress: the collapsed review line stays within 60 characters in Turkish,
     }
   }
   assert.ok(longest > 30 && longest <= 60, `longest ${longest}`);
+});
+
+test('Progress: model-written words with markup are escaped in the review card', () => {
+  fixture();
+  S.tab = 'progress';
+  S.progressReview = { ...S.progressReview, head: '<b>bold</b>', adjust: '<img src=x onerror=alert(1)>' };
+  S.reviewOpen.set('progress', true);
+  const html = views.renderProgress();
+  assert.doesNotMatch(html, /<b>bold|<img src=x/); // nothing from the model renders as markup
+  assert.match(html, /<p><b>&lt;b&gt;bold&lt;\/b&gt;<\/b><\/p>/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+test('Progress: a rating-less review shows no tag, and the disclosure counts characters up, not down', () => {
+  fixture();
+  S.tab = 'progress';
+  const rec = S.progressReview;
+  S.progressReview = { ...rec, rating: '' };
+  let sum = views.renderProgress().match(/<details class="review-ai progress-ai"[^>]*>\s*<summary>([\s\S]*?)<\/summary>/)[1];
+  assert.match(sum, /^How has it gone so far\?$/); // no hint of today next to a rating-less old review
+  S.progressReview = null;
+  const html = views.renderProgress();
+  const n = Number(html.match(/This sends about (\d+) thousand characters/)[1]);
+  assert.equal(n, Math.ceil(progressBrief().length / 1000)); // ceil never understates the disclosure
 });

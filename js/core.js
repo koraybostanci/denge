@@ -565,7 +565,7 @@ export function coachState(day) {
 // ——— The review of the whole log ———
 const djb2 = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = (Math.imul(h, 33) + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 // What the progress review was written for: the goals, the plan, the weigh-ins and, in steps of five, the days with meals.
-// Water, coffee and supplement ticks, edits to an entry and S.rev leave it as it is.
+// Water, coffee and supplement ticks, edits to an entry (its kcal or tier only move the day's verdict, not that it has one) and S.rev leave it as it is.
 export function progressSig() {
   const s = S.settings;
   const w = weightSeries();
@@ -580,7 +580,8 @@ export function progressSig() {
 }
 
 // The bands of the on-device rating: weigh-ins needed in the last 14 days and the days they span, the average's distance from the
-// schedule (kg) that is a bit behind, and the loss over three weeks (kg) below which the weight counts as flat
+// schedule (kg) that is a bit behind, and the loss over three weeks (kg) below which the weight counts as flat. Two weigh-ins make
+// today's average, three make each arm of the two-weeks-behind check and two the flat one, so a fluke reading never drives a band.
 export const RATING_MIN_WEIGHINS = 3;
 export const RATING_MIN_SPAN = 10;
 export const RATING_BEHIND = 0.2;
@@ -592,12 +593,17 @@ export function progressRatingHint() {
   const t = today();
   const w = weightSeries().filter((d) => diffDays(d.day, t) <= 14);
   const a = avg7(t);
-  if (w.length < RATING_MIN_WEIGHINS || diffDays(w[0].day, w[w.length - 1].day) < RATING_MIN_SPAN || !a) return 'too-early';
-  if (a.kg <= s.targetKg) return 'great';
+  if (w.length < RATING_MIN_WEIGHINS || diffDays(w[0].day, w[w.length - 1].day) < RATING_MIN_SPAN || !a || a.n < 2) return 'too-early'; // one fluke reading is not an average
+  if (a.kg <= s.targetKg) {
+    // At the target already, but losing faster than the plan asks is overshoot, not "great"
+    const pr = projection();
+    return pr && -pr.perWeek > planRate().kg * 7 ? 'on-track' : 'great';
+  }
   const wk = addDays(t, -7);
   const b = avg7(wk);
   const f = avg7(addDays(t, -21));
-  if ((b && a.kg - targetAt(t, s) > RATING_STUCK_GAP && b.kg - targetAt(wk, s) > RATING_STUCK_GAP) || (f && f.kg - a.kg < RATING_FLAT)) return 'stuck';
+  // The n floors are exactly the bar the brief's adjust rule and the Progress tab's notice use, so the hint never disagrees with them
+  if ((b && a.n >= 3 && b.n >= 3 && a.kg - targetAt(t, s) > RATING_STUCK_GAP && b.kg - targetAt(wk, s) > RATING_STUCK_GAP) || (f && f.n >= 2 && f.kg - a.kg < RATING_FLAT)) return 'stuck';
   return a.kg - targetAt(t, s) >= RATING_BEHIND ? 'a-bit-behind' : 'on-track';
 }
 // 'none' before the first week is over, 'gated' until there are 14 days or 7 with a week's weigh-ins, then 'ready'

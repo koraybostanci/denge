@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
   parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
@@ -560,6 +560,8 @@ test('progressSig is the same on every call and moves only with goals, plan, wei
     () => wi(0, 84.5), // weigh-in added
     () => { S.days[day(-3)].kg = 84.9; }, // kg changed
     () => { S.settings.protein += 1; }, // goal field
+    () => { S.settings.kcalRest += 100; }, // the budgets the brief tells
+    () => { S.settings.kcalTrain += 100; },
     () => { S.plan = { ...S.plan, meals: S.plan.meals.slice(1) }; }, // plan digest
     () => { for (let i = 2; i < 6; i++) meal(day(-i - 1), 1500, 130); }, // meal days cross a 5-boundary
   ];
@@ -572,6 +574,8 @@ test('progressSig ignores water, coffee and supplement ticks, an entry edit that
   S.days[day(-1)] = { day: day(-1), water: 3, coffee: 2, taken: ['a'] };
   assert.equal(progressSig(), base);
   S.entries[0].ts += 1000; S.entries[0].title = 'Edited';
+  assert.equal(progressSig(), base);
+  S.entries[0].kcal = 2100; S.entries[0].tier = 'off'; // the day still counts as a verdict and a meal day
   assert.equal(progressSig(), base);
   S.rev++;
   assert.equal(progressSig(), base);
@@ -589,6 +593,38 @@ test('progressRatingHint: too early with fewer than 3 weigh-ins, a short span or
   assert.equal(progressRatingHint(), 'too-early');
   wi(-5, 85.4); // three weigh-ins but a 5-day span
   assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: a 14-day window that passes the count and span gates still needs two weigh-ins in an average', () => {
+  reset(); // three weigh-ins over 12 days, but today's 7-day window holds the single reading of today
+  wi(0, 85); wi(-10, 85.5); wi(-12, 86);
+  assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: single weigh-ins per window never read as stuck, as the old n=1 arms did', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  wi(0, t0 + 4); wi(-7, targetAt(day(-7), S.settings) + 4); wi(-12, t0 + 5); // both arms above the gap on one reading each
+  assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: a single weigh-in three weeks ago is not a flat trend, two per window is enough', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  for (const o of [0, -2, -4, -6]) wi(o, t0 + 0.3);
+  for (const o of [-7, -9, -11, -13]) wi(o, t0 + 0.9);
+  wi(-21, t0 + 0.4); // one reading in the old window: the flat arm stays off
+  assert.equal(progressRatingHint(), 'a-bit-behind');
+});
+test('progressRatingHint: a twice-a-week weigher still gets a band', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  for (const [o, kg] of [[0, t0 + 0.25], [-3, t0 + 0.35], [-7, t0 + 0.75], [-10, t0 + 0.85]]) wi(o, kg);
+  assert.equal(avg7(day(0)).n, 2, 'two readings in the 7-day average');
+  assert.equal(progressRatingHint(), 'a-bit-behind');
+});
+test('progressRatingHint: at the target but losing far faster than the plan reads on-track, not great', () => {
+  reset();
+  for (const [o, kg] of [[0, 77.0], [-2, 77.5], [-4, 78.0], [-6, 78.5], [-8, 79.5], [-10, 80.5], [-12, 81.5], [-13, 82.0]]) wi(o, kg);
+  assert.ok(-projection().perWeek > planRate().kg * 7, 'the overshoot the check looks for');
+  assert.equal(progressRatingHint(), 'on-track');
 });
 test('progressRatingHint: the 0.2 kg band, stuck as in adjustNotice, flat weight and target reached', () => {
   const setup = (a, b) => { reset(); S.settings.startDate = day(-40); for (const o of [0, -2, -4, -6]) wi(o, a); for (const o of [-7, -9, -11, -13]) wi(o, b); };

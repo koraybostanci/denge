@@ -94,13 +94,14 @@ function checkBriefText(note) {
 // The whole log in a fixed-size summary for the progress review: facts the app computed, no meals, no stored prose, no supplement names.
 // Over BRIEF_MAX characters the oldest weekly rows go first, then the older weigh-ins collapse into one average line a week (the latest stay raw), then the oldest of those go; the goal line and the other fixed lines stay.
 export const BRIEF_MAX = 3500;
+// Is there anything at all for the review to go on? The same check the brief opens with, kept apart so the tap path can ask once cheaply instead of building the whole summary.
+export const hasProgressData = () => S.entries.some((e) => e.kind === 'meal' && e.status === 'ok')
+  || Object.values(S.days).some((d) => d && (d.kg || d.steps || d.water || d.coffee || (d.taken && d.taken.length) || d.train));
 export const progressBrief = () => inEnglish(() => progressBriefText());
 function progressBriefText() {
   const s = S.settings;
   const t = today();
-  const hasData = S.entries.some((e) => e.kind === 'meal' && e.status === 'ok')
-    || Object.values(S.days).some((d) => d && (d.kg || d.steps || d.water || d.coffee || (d.taken && d.taken.length) || d.train));
-  if (!hasData) return '';
+  if (!hasProgressData()) return '';
   return withDayIndex(() => {
     const r = (x) => Math.round(x);
     const f1 = (x) => (Math.round(x * 10) / 10 || 0).toFixed(1); // never "-0.0"
@@ -130,7 +131,10 @@ function progressBriefText() {
     }
     const lines = [`Progress review, written on ${date(t)}.`];
     // 1. The goal
-    lines.push(`Goal: ${s.startKg} kg on ${s.startDate} to ${s.targetKg} kg on ${s.targetDate}, which needs about ${f2(rate.kg)} kg a day. Day ${Math.max(0, h.days)} of ${Math.max(0, total)}. Never go below ${kcalMinDay()} kcal a day.`);
+    const goalHead = `Goal: ${s.startKg} kg on ${s.startDate} to ${s.targetKg} kg on ${s.targetDate}`;
+    lines.push(total > 0
+      ? `${goalHead}, which needs about ${f2(rate.kg)} kg a day. Day ${Math.max(0, h.days)} of ${total}. Never go below ${kcalMinDay()} kcal a day.`
+      : `${goalHead}, with no planned days between its start and its end. Never go below ${kcalMinDay()} kcal a day.`);
     // 2. All-time aggregates
     lines.push(`All time: meals logged on ${mealDays} days; ${h.onPlan} days on plan; best run ${h.best} days on plan; ${h.perfect} perfect days; `
       + `flex used: ${small} beer or small dessert, ${dinners} flexible dinner; ${off} off-plan entries; ${workouts} workout days.`);
@@ -203,13 +207,16 @@ function progressBriefText() {
     const tail = [`APP RATING ESTIMATE: ${progressRatingHint()}`];
     if (pr) tail.push(rate.kg > 0 && -pr.perWeek > rate.kg * 7
       ? 'Pace: ahead of the schedule — losing faster than the plan\'s rate; hard to hold.'
-      : 'Pace: the pace is within the plan\'s rate.');
+      : pr.perWeek > 0
+        ? 'Pace: the weight has been going up over the last two weeks.'
+        : 'Pace: the pace is within the plan\'s rate.');
     // 9. Two things the numbers cannot show
     tail.push('The budgets shown are the ones in force today; the app does not store earlier budgets.',
       'Plan numbers may have changed during the period; a change in the calories marks a change in the plan, not the person — judge adherence change over the weeks.');
+    // The weekly rows are built once: the trimming below re-slices and rebuilds the text several times without re-reading the week.
+    const weekLines = weeks.map(weekRow);
     const build = (from, strip) => {
-      const rows = weeks.slice(from).map(weekRow);
-      return [...lines, ...(rows.length ? [`Weeks, oldest first (budgets are today's):`, ...rows] : []),
+      return [...lines, ...(from < weekLines.length ? [`Weeks, oldest first (budgets are today's):`, ...weekLines.slice(from)] : []),
         'Weigh-ins since the start (day, kg, 7-day average, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
     };
     let from = 0;

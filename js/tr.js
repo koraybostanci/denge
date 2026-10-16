@@ -644,7 +644,7 @@ export default {
   'Review it': 'Değerlendir',
   'What to change': 'Neyi değiştirmeli',
   'Worth considering': 'Düşünmeye değer',
-  'Your goals or weigh-ins changed after this review.': 'Hedeflerin ya da tartımların bu değerlendirmeden sonra değişti.',
+  'Your goals, plan or log changed after this review.': 'Hedeflerin, planın ya da günlüğün bu değerlendirmeden sonra değişti.',
   'Updated {n} day ago.|Updated {n} days ago.': '{n} gün önce güncellendi.',
   'Reviewed {when} — update?': '{when} tarihinde değerlendirildi — güncellensin mi?',
   'Every kilo collected.': 'Her kilo toplandı.',
