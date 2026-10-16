@@ -1,7 +1,7 @@
 // State, and the calculations on it. No DOM and no storage, so the maths loads on its own (in node, for tests).
 import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
-import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL } from './plan.js';
+import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
 export const APP_VERSION = '49'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
@@ -34,6 +34,9 @@ export const S = {
   reviewErr: new Map(), // day → why the last review failed
   coaching: new Set(), // days whose quick note is being written
   coachErr: new Map(), // day → why the last quick note failed
+  progressReview: null, // the review of the whole log as stored (kv `progressReview`); null until one is written or restored
+  progressReviewing: new Set(), // holds one constant key while that review is being written
+  progressErr: new Map(), // constant key → why the last progress review failed
   reviewOpen: new Map(), // day → whether its review is expanded, once the person has toggled it
   check: freshCheck(), // the check being put together
   checks: [], // earlier verdicts, newest first, without photos
@@ -50,6 +53,10 @@ export const S = {
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
   draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal, food?, foodForm? }; nothing is stored until it is saved
 };
+let progressGen = 0; // moves when the log is wiped, so a progress review that lands after it is dropped
+export const getProgressGen = () => progressGen;
+export const bumpProgressGen = () => { progressGen++; }; // js/app.js bumps it when the log is wiped
+export const resetProgressGen = () => { progressGen = 0; };
 
 // Plan meals can be changed while Default is the only plan (a save creates My plan) and while My plan is active,
 // not while Default is active and My plan exists
@@ -553,6 +560,58 @@ export function coachState(day) {
   const c = S.days[day] && S.days[day].coach;
   if (!c) return 'none';
   return c.sig === reviewSig(day) && day === today() ? 'fresh' : 'stale';
+}
+
+// ——— The review of the whole log ———
+const djb2 = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = (Math.imul(h, 33) + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+// What the progress review was written for: the goals, the plan, the weigh-ins and, in steps of five, the days with meals.
+// Water, coffee and supplement ticks, edits to an entry and S.rev leave it as it is.
+export function progressSig() {
+  const s = S.settings;
+  const w = weightSeries();
+  const last = w[w.length - 1];
+  const mealDays = new Set(S.entries.filter((e) => e.kind === 'meal' && e.status === 'ok').map((e) => e.day)).size;
+  let verdictDays = 0;
+  for (let d = s.startDate; d <= today(); d = addDays(d, 1)) if (dayVerdict(d)) verdictDays += 1;
+  return djb2(JSON.stringify([
+    ['startDate', 'targetDate', 'startKg', 'targetKg', 'kcalRest', 'kcalTrain', 'kcalMinDay', 'protein', 'fiber', 'steps', 'water'].map((k) => s[k]),
+    planDigest(S.plan), last ? weekStart(last.day) : '', w.length, last ? Math.round(last.kg * 10) / 10 : '', Math.floor(mealDays / 5), verdictDays,
+  ]));
+}
+
+// The bands of the on-device rating: weigh-ins needed in the last 14 days and the days they span, the average's distance from the
+// schedule (kg) that is a bit behind, and the loss over three weeks (kg) below which the weight counts as flat
+export const RATING_MIN_WEIGHINS = 3;
+export const RATING_MIN_SPAN = 10;
+export const RATING_BEHIND = 0.2;
+export const RATING_STUCK_GAP = 0.7; // as in the Progress tab's advice to adjust
+export const RATING_FLAT = 0.15;
+// 'great', 'on-track', 'a-bit-behind', 'stuck' or 'too-early'; the model may agree or disagree, this is the fallback
+export function progressRatingHint() {
+  const s = S.settings;
+  const t = today();
+  const w = weightSeries().filter((d) => diffDays(d.day, t) <= 14);
+  const a = avg7(t);
+  if (w.length < RATING_MIN_WEIGHINS || diffDays(w[0].day, w[w.length - 1].day) < RATING_MIN_SPAN || !a) return 'too-early';
+  if (a.kg <= s.targetKg) return 'great';
+  const wk = addDays(t, -7);
+  const b = avg7(wk);
+  const f = avg7(addDays(t, -21));
+  if ((b && a.kg - targetAt(t, s) > RATING_STUCK_GAP && b.kg - targetAt(wk, s) > RATING_STUCK_GAP) || (f && f.kg - a.kg < RATING_FLAT)) return 'stuck';
+  return a.kg - targetAt(t, s) >= RATING_BEHIND ? 'a-bit-behind' : 'on-track';
+}
+// 'none' before the first week is over, 'gated' until there are 14 days or 7 with a week's weigh-ins, then 'ready'
+export function progressGate() {
+  const days = diffDays(S.settings.startDate, today());
+  if (days < 7) return 'none';
+  return days >= 14 || (avg7(today()) || { n: 0 }).n >= 3 ? 'ready' : 'gated';
+}
+// 'none' = not written yet, 'refresh' = the log changed since or it is over 14 days old or has no valid past time, else 'fresh'
+export function progressState() {
+  const r = S.progressReview;
+  if (!r) return 'none';
+  const age = Date.now() - r.ts;
+  return r.sig !== progressSig() || !Number.isFinite(r.ts) || age < 0 || age >= 14 * 86400000 ? 'refresh' : 'fresh';
 }
 
 // ——— Formatting ———
