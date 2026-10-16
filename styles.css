@@ -442,6 +442,11 @@ button.tile:active, .tile-main:active, .chip:active, .btn:active { transform: sc
 .review-wait { min-height: 44px; gap: 8px; }
 .review-foot .link { font-size: 13px; }
 .review .note { margin-top: 2px; }
+.progress-ai summary { padding-top: 10px; }
+.progress-ai > p, .progress-ai > dl { margin-top: 6px; }
+.progress-ai .note { font-size: 14px; }
+.progress-ai .note b { color: var(--warn-ink); }
+.progress-ai .is-stale { display: inline-block; width: 7px; height: 7px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
 .log-list { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); overflow: hidden; }
 .log-list li + li { border-top: 1px solid var(--line); }
 .log-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px 10px 12px; text-align: left; }

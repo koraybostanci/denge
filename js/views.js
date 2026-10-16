@@ -3,7 +3,9 @@ import {
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
   plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses, shownName,
+  progressGate, progressState, progressRatingHint, progressSig,
 } from './core.js';
+import { progressBrief } from './briefs.js';
 import { readMeal, readFood, PLAN_CAPS } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
@@ -1186,6 +1188,44 @@ export function renderProgress() {
     <details class="table-details">
       <summary>${t('Weigh-in table')}</summary>
       ${rows ? `<table class="table"><thead><tr><th scope="col">${t('Day')}</th><th scope="col">${t('Weigh-in')}</th><th scope="col">${t('Avg')}</th><th scope="col">${t('Line')}</th><th scope="col">kcal</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="note">${t('No weigh-ins yet. Enter one on Today, or type a number into the log.')}</p>`}
+    </details>
+  </section>
+  ${progressAi()}`;
+}
+
+// The review of the whole plan so far: a collapsed card at the foot of Progress, written by the model only on a tap
+const RATING = { great: T('Doing great'), 'on-track': T('On track'), 'a-bit-behind': T('A bit behind'), stuck: T('Stuck'), 'too-early': T('Too early to say') };
+function progressAi() {
+  const gate = progressGate();
+  if (gate === 'none') return '';
+  const r = S.progressReview;
+  const state = progressState();
+  const busy = S.progressReviewing.has('progress');
+  const err = S.progressErr.get('progress');
+  const made = r && Number.isFinite(r.ts) ? new Date(r.ts) : null;
+  const when = made ? dTiny.format(made) : '';
+  const label = r ? r.rating || progressRatingHint() : '';
+  const tail = made && RATING[label] ? ` — ${td(RATING[label])} · ${dShort.format(parseDay(dayKey(made)))}` : '';
+  const wait = `<p class="review-wait" role="status"><span class="spin" aria-hidden="true"></span>${t('Writing the review…')}</p>`;
+  let body = '';
+  if (r) {
+    const rows = [[t('Helped'), r.good || []], [t('What to change'), r.change || []]].filter(([, list]) => list.length);
+    const age = made ? Math.floor((Date.now() - r.ts) / 86400000) : 0;
+    const why = state !== 'refresh' ? '' : r.sig !== progressSig() ? t('Your goals or weigh-ins changed after this review.') : age >= 14 ? tn('Updated {n} day ago.|Updated {n} days ago.', age) : '';
+    const again = gate === 'ready' && state === 'refresh' ? `<button type="button" class="link" data-act="progress-review">${t('Reviewed {when} — update?', { when })}</button>` : '';
+    body = `${r.head ? `<p><b>${esc(r.head)}</b></p>` : ''}
+      ${rows.length ? `<dl>${rows.map(([k, list]) => `<div><dt>${k}</dt>${list.map((x) => `<dd>${esc(x)}</dd>`).join('')}</div>`).join('')}</dl>` : ''}
+      ${r.adjust ? `<p class="note"><b>${t('Worth considering')}</b> ${esc(r.adjust)}</p>` : ''}
+      ${busy ? wait : `<p class="review-foot">${t('AI review, {when}.', { when })} ${why} ${again}</p>`}`;
+  } else if (busy) body = wait;
+  else if (gate === 'gated') body = `<p class="note">${t('The review opens once there is enough to compare with the line.')}</p>`;
+  else body = `<p class="note">${t('This sends about {n} thousand characters of your summary, no photos.', { n: n0(Math.round(progressBrief().length / 1000)) })}</p>
+      <p class="review-foot"><button type="button" class="btn" data-act="progress-review">${t('Review it')}</button></p>`;
+  return `<section>
+    <details class="review-ai progress-ai"${S.reviewOpen.get('progress') ? ' open' : ''}>
+      <summary>${t('How has it gone so far?', { $id: 'progress.review' })}${tail}${r && state === 'refresh' ? '<i class="is-stale" aria-hidden="true"></i>' : ''}</summary>
+      ${body}
+      ${err && !busy ? `<p class="note is-error" role="alert">${esc(err)}</p>` : ''}
     </details>
   </section>`;
 }

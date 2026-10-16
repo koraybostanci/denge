@@ -21,7 +21,8 @@ const ALLOW_WORDS = new Set(['kg', 'kcal', 'mg', 'ml', 'pickle', 'claude', 'engl
 // words (` disabled`). Words that only appear in a comparison (`=== 'week'`) need no entry. Anything else, say `[x, 'weigh-in']` or `ok ? 'kg' : 'steps'`, is flagged.
 const CODE_WORDS = new Set(['numeric', 'long', 'short', 'future', 'before', 'over', 'top', 'more', 'morning', 'late', 'workout', 'true', 'false', 'decimal', 'start', 'middle',
   'hidden', 'visible', 'span', 'pointermove', 'pointerdown', 'pointerleave', 'conjunction', 'going', 'target', 'min', 'near', 'disabled', 'selected', 'checked', 'open',
-  'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned']);
+  'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned',
+  'progress', 'on-track', 'a-bit-behind', 'too-early']);
 // A class name or a piece of one, or an action name: is-done, cal-d, day-${st}, pill-good, log-plan, plan-meal
 const CLASS_NAME = /^(?:is|pill|day|cal|log|way|plan)-[a-z0-9\0-]*$/;
 // An attribute whose value a person reads
@@ -560,4 +561,30 @@ test('Today: the coach line lowercases the late meal with the locale (Turkish I 
 test('Plan: the subtitle follows canEditPlan, not hasMyPlan', async () => {
   const src = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
   assert.match(src, /!canEditPlan\(\) \? t\('Tap a meal for its ingredients, and to add a photo of your own plate\.'\) : t\('Tap a meal to see or change it\.'\)/);
+});
+
+test('Progress: the review card is absent before day 7', () => {
+  fixture();
+  S.tab = 'progress';
+  S.settings.startDate = day(-6);
+  assert.equal(views.renderProgress().includes('progress-ai'), false);
+  S.settings.startDate = day(-7);
+  assert.equal(views.renderProgress().includes('progress-ai'), true);
+});
+
+test('Progress: the collapsed review line stays within 60 characters in Turkish, for the longest label and date', async () => {
+  fixture();
+  S.tab = 'progress';
+  await setLang('tr');
+  let longest = 0;
+  for (const rating of ['great', 'on-track', 'a-bit-behind', 'stuck', 'too-early']) {
+    for (let m = 0; m < 12; m++) {
+      for (const d of [1, 28]) {
+        S.progressReview = { ...S.progressReview, rating, ts: Date.UTC(2026, m, d, 12) };
+        const sum = views.renderProgress().match(/<details class="review-ai progress-ai"[^>]*>\s*<summary>([\s\S]*?)<\/summary>/)[1];
+        longest = Math.max(longest, sum.replace(/<[^>]*>/g, '').length);
+      }
+    }
+  }
+  assert.ok(longest > 30 && longest <= 60, `longest ${longest}`);
 });
