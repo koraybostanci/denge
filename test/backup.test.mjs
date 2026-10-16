@@ -1,7 +1,7 @@
 // Everything read from a backup file is checked before it is stored or shown (js/backup.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, b64FromBuf } from '../js/backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, readProgress, b64FromBuf } from '../js/backup.js';
 import { SCHEMA_VERSION } from '../js/core.js';
 
 const good = {
@@ -176,4 +176,24 @@ test('settings: the minimum kcal is kept when sane, and dropped when it is above
   assert.equal(cleanSettings({ kcalRest: 1550, kcalMinDay: 1200 }).kcalMinDay, 1200);
   assert.equal('kcalMinDay' in cleanSettings({ kcalRest: 1550, kcalMinDay: 2000 }), false);
   assert.equal('kcalMinDay' in cleanSettings({ kcalMinDay: 10 }), false);
+});
+
+test('readProgress: a good record is kept, hostile input is clamped or gives null, and a round trip keeps the clamped form', () => {
+  const rec = { v: 1, sig: 'abc', ts: 1759300000000, model: 'm', rating: 'on-track', head: 'Steady.', good: ['a'], change: ['b'], adjust: '' };
+  assert.deepEqual(readProgress(rec), rec);
+  assert.deepEqual(readProgress(JSON.parse(JSON.stringify(readProgress(rec)))), rec);
+  for (const x of [null, undefined, 5, 'x', [], {}, { ...rec, ts: undefined }, { ...rec, ts: -1 }, { ...rec, ts: 1.5 }, { ...rec, ts: 1e15 }, { ...rec, head: '', good: [], change: [], adjust: '' }]) assert.equal(readProgress(x), null);
+  const hostile = readProgress({ ...rec, sig: 's'.repeat(500), model: 'm'.repeat(500), rating: 'ahead', head: 'h'.repeat(900), good: 'x'.repeat(900), change: [1, null, 'y'] });
+  assert.equal(hostile.sig.length, 120);
+  assert.equal(hostile.model.length, 60);
+  assert.equal(hostile.rating, '');
+  assert.ok(hostile.head.length <= 240 && hostile.good.length === 1 && hostile.good[0].length <= 240);
+  assert.deepEqual(readProgress(hostile), hostile);
+});
+
+test('a backup with or without a progress key is accepted (older backups have none)', () => {
+  const ok = { app: 'weightplan', v: SCHEMA_VERSION, entries: [] };
+  assert.equal(backupProblem(ok), '');
+  assert.equal(backupProblem({ ...ok, progress: null }), '');
+  assert.equal(backupProblem({ ...ok, progress: { junk: 1 } }), '');
 });

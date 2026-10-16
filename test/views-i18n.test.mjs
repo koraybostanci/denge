@@ -8,6 +8,7 @@ import tr from '../js/tr.js';
 import { MODELS, PRESETS } from '../js/ai.js';
 import { extract, literals } from './extract.mjs';
 import { screens, fixture, core, views, day, at, meal, MINE, T as TODAY } from './screens.mjs';
+import { progressBrief } from '../js/briefs.js';
 
 const { S } = core;
 const VIEWS = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
@@ -21,7 +22,8 @@ const ALLOW_WORDS = new Set(['kg', 'kcal', 'mg', 'ml', 'pickle', 'claude', 'engl
 // words (` disabled`). Words that only appear in a comparison (`=== 'week'`) need no entry. Anything else, say `[x, 'weigh-in']` or `ok ? 'kg' : 'steps'`, is flagged.
 const CODE_WORDS = new Set(['numeric', 'long', 'short', 'future', 'before', 'over', 'top', 'more', 'morning', 'late', 'workout', 'true', 'false', 'decimal', 'start', 'middle',
   'hidden', 'visible', 'span', 'pointermove', 'pointerdown', 'pointerleave', 'conjunction', 'going', 'target', 'min', 'near', 'disabled', 'selected', 'checked', 'open',
-  'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned']);
+  'visibility', 'language', 'analysis', 'targets', 'backup', 'location', 'favorites', 'supplements', 'version', 'reset', 'day', 'week:', 'earned',
+  'progress', 'on-track', 'a-bit-behind', 'too-early']);
 // A class name or a piece of one, or an action name: is-done, cal-d, day-${st}, pill-good, log-plan, plan-meal
 const CLASS_NAME = /^(?:is|pill|day|cal|log|way|plan)-[a-z0-9\0-]*$/;
 // An attribute whose value a person reads
@@ -560,4 +562,54 @@ test('Today: the coach line lowercases the late meal with the locale (Turkish I 
 test('Plan: the subtitle follows canEditPlan, not hasMyPlan', async () => {
   const src = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
   assert.match(src, /!canEditPlan\(\) \? t\('Tap a meal for its ingredients, and to add a photo of your own plate\.'\) : t\('Tap a meal to see or change it\.'\)/);
+});
+
+test('Progress: the review card is absent before day 7', () => {
+  fixture();
+  S.tab = 'progress';
+  S.settings.startDate = day(-6);
+  assert.equal(views.renderProgress().includes('progress-ai'), false);
+  S.settings.startDate = day(-7);
+  assert.equal(views.renderProgress().includes('progress-ai'), true);
+});
+
+test('Progress: the collapsed review line stays within 60 characters in Turkish, for the longest label and date', async () => {
+  fixture();
+  S.tab = 'progress';
+  await setLang('tr');
+  let longest = 0;
+  for (const rating of ['great', 'on-track', 'a-bit-behind', 'stuck', 'too-early']) {
+    for (let m = 0; m < 12; m++) {
+      for (const d of [1, 28]) {
+        S.progressReview = { ...S.progressReview, rating, ts: Date.UTC(2026, m, d, 12) };
+        const sum = views.renderProgress().match(/<details class="review-ai progress-ai"[^>]*>\s*<summary>([\s\S]*?)<\/summary>/)[1];
+        longest = Math.max(longest, sum.replace(/<[^>]*>/g, '').length);
+      }
+    }
+  }
+  assert.ok(longest > 30 && longest <= 60, `longest ${longest}`);
+});
+
+test('Progress: model-written words with markup are escaped in the review card', () => {
+  fixture();
+  S.tab = 'progress';
+  S.progressReview = { ...S.progressReview, head: '<b>bold</b>', adjust: '<img src=x onerror=alert(1)>' };
+  S.reviewOpen.set('progress', true);
+  const html = views.renderProgress();
+  assert.doesNotMatch(html, /<b>bold|<img src=x/); // nothing from the model renders as markup
+  assert.match(html, /<p><b>&lt;b&gt;bold&lt;\/b&gt;<\/b><\/p>/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+test('Progress: a rating-less review shows no tag, and the disclosure counts characters up, not down', () => {
+  fixture();
+  S.tab = 'progress';
+  const rec = S.progressReview;
+  S.progressReview = { ...rec, rating: '' };
+  let sum = views.renderProgress().match(/<details class="review-ai progress-ai"[^>]*>\s*<summary>([\s\S]*?)<\/summary>/)[1];
+  assert.match(sum, /^How has it gone so far\?$/); // no hint of today next to a rating-less old review
+  S.progressReview = null;
+  const html = views.renderProgress();
+  const n = Number(html.match(/This sends about (\d+) thousand characters/)[1]);
+  assert.equal(n, Math.ceil(progressBrief().length / 1000)); // ceil never understates the disclosure
 });

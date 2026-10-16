@@ -45,12 +45,18 @@ export function fixture() {
   }
   S.entries.push({ id: 'p1', day: T, ts: at(T, 15), createdAt: at(T, 15), kind: 'meal', status: 'pending', slot: 'snack', title: '', kcal: 0, p: 0, c: 0, f: 0, fib: 0, mult: 1, tier: 'plan', flags: [], items: [] });
   S.checks = [];
+  S.progressReviewing.clear();
+  S.progressErr.clear();
+  S.reviewOpen.delete('progress');
+  S.progressReview = null;
   // Earned badges at different finishes; days_on (30) and best_run (7) are above what was seen, so they are new (stored, so they show whatever the fixture log would earn by itself)
   S.badges = { v: 1, told: true, seen: { first_meal: 1, first_weigh: 1, first_on: 1, days_on: 7, best_run: 3, perfect_day: 1, kilos: 1, protein_days: 150 }, av: { stage: 'stage2', face: 'face_smile', acc: 'acc_leaf' }, base: { startKg: 87, targetKg: 78 }, got: {
     first_meal: { 1: day(-9) }, first_weigh: { 1: day(-9) }, first_on: { 1: day(-8) },
     days_on: { 7: day(-2), 30: day(-1) }, best_run: { 3: day(-6), 7: day(-2) }, perfect_day: { 1: day(-7) }, kilos: { 1: day(-3) },
     protein_days: { 10: day(-5), 50: day(-4), 100: day(-3), 150: day(-1) },
   } };
+  // A review of the whole plan (its words are among the model-written fixture texts the Turkish test lets stand), written against the plan as it stands (so it renders fresh)
+  S.progressReview = { v: 1, sig: core.progressSig(), ts: NOW - 86400000, model: 'm', rating: 'on-track', head: 'Good day', good: ['Fresh and light'], change: ['Cut the sauce'], adjust: 'Fits well' };
 }
 
 export function screens() {
@@ -66,12 +72,16 @@ export function screens() {
   add('log-past-day', views.renderLog);
   S.viewDay = T;
   const kept = [S.entries, S.days];
+  // No stored review here either: fixture() seats one, and the empty screens must show it empty
+  const review = S.progressReview;
+  S.progressReview = null;
   S.entries = [];
   S.days = {};
   add('today-empty', views.renderToday);
   add('log-empty', views.renderLog);
   add('progress-empty', views.renderProgress);
   [S.entries, S.days] = kept;
+  S.progressReview = review;
   S.tab = 'progress';
   S.calPick = day(-1);
   add('progress-picked-day', views.renderProgress);
@@ -129,5 +139,29 @@ export function screens() {
   add('badge-sheet-locked', () => views.renderBadgeSheet('anniversary'));
   add('badge-sheet-kilos', () => views.renderBadgeSheet('kilos'));
   add('avatar-sheet', views.renderAvatarSheet);
+  // The review card in its other states: open, the log changed since, a failed request, too few weigh-ins yet, and nothing written yet
+  S.tab = 'progress';
+  S.reviewOpen.set('progress', true);
+  add('progress-review-open', views.renderProgress);
+  // While the request is out: the spinner with role="status" over the seated review
+  S.progressReviewing.add('progress');
+  add('progress-review-busy', views.renderProgress);
+  S.progressReviewing.delete('progress');
+  S.reviewOpen.delete('progress');
+  const rec = S.progressReview;
+  S.progressReview = { ...rec, sig: 'old' };
+  add('progress-review-refresh', views.renderProgress);
+  S.progressReview = rec;
+  S.progressErr.set('progress', 'Ordered a small one');
+  add('progress-review-failed', views.renderProgress);
+  S.progressErr.clear();
+  S.progressReview = null;
+  add('progress-review-ready', views.renderProgress);
+  const kept2 = [S.entries, S.days];
+  S.entries = S.entries.filter((x) => x.kind !== 'weight');
+  S.days = Object.fromEntries(Object.entries(S.days).map(([d, v]) => [d, { ...v, kg: undefined }]));
+  add('progress-review-gated', views.renderProgress);
+  [S.entries, S.days] = kept2;
+  S.progressReview = rec;
   return out;
 }

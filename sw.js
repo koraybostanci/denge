@@ -5,7 +5,7 @@
 // A new release arrives only once the new service worker is installed.
 // List every file the app loads in SHELL, so the first launch already works offline. A listed file that
 // does not exist makes the install fail.
-const VERSION = 'weightplan-v49'; // weightplan: the app's internal id (APP_ID in js/core.js), not its name
+const VERSION = 'weightplan-v50'; // weightplan: the app's internal id (APP_ID in js/core.js), not its name
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/core.js', 'js/views.js', 'js/plan.js', 'js/default-plan.js', 'js/db.js', 'js/ai.js', 'js/exif.js', 'js/export.js', 'js/picture.js', 'js/backup.js', 'js/standalone.js', 'js/i18n.js', 'js/tr.js', 'js/parse-tr.js', 'js/briefs.js', 'js/badges.js', 'js/badge-art.js',

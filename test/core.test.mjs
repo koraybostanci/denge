@@ -2,13 +2,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
   parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
+  progressSig, progressRatingHint, progressGate, progressState, getProgressGen, bumpProgressGen, resetProgressGen,
 } from '../js/core.js';
 import { checkBrief } from '../js/briefs.js';
-import { addDays, diffDays, hhmm, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
+import { addDays, diffDays, hhmm, targetAt, planDigest, planFoods, buildPlan, DEFAULTS, KCAL_MIN_DAY } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
 import { readFileSync, readdirSync } from 'node:fs';
 
@@ -547,4 +548,121 @@ test('titleFor: a plan kind gives only its tk, the other kinds a title and tk', 
     assert.equal(r.tk.kind, kind);
     assert.ok(r.title);
   }
+});
+
+// ——— The review of the whole log ———
+const wi = (off, kg) => { S.days[day(off)] = { ...(S.days[day(off)] || {}), day: day(off), kg }; };
+test('progressSig is the same on every call and moves only with goals, plan, weigh-ins and meal days in fives', () => {
+  reset(); wi(-3, 85); meal(day(-1), 1500, 130);
+  const base = progressSig();
+  assert.equal(progressSig(), base);
+  const changed = [
+    () => wi(0, 84.5), // weigh-in added
+    () => { S.days[day(-3)].kg = 84.9; }, // kg changed
+    () => { S.settings.protein += 1; }, // goal field
+    () => { S.settings.kcalRest += 100; }, // the budgets the brief tells
+    () => { S.settings.kcalTrain += 100; },
+    () => { S.plan = { ...S.plan, meals: S.plan.meals.slice(1) }; }, // plan digest
+    () => { for (let i = 2; i < 6; i++) meal(day(-i - 1), 1500, 130); }, // meal days cross a 5-boundary
+  ];
+  for (const f of changed) { reset(); wi(-3, 85); meal(day(-1), 1500, 130); S.plan = SEED; f(); assert.notEqual(progressSig(), base); }
+  S.plan = SEED;
+});
+test('progressSig ignores water, coffee and supplement ticks, an entry edit that changes no meal day, and S.rev', () => {
+  reset(); wi(-3, 85); meal(day(-1), 1500, 130);
+  const base = progressSig();
+  S.days[day(-1)] = { day: day(-1), water: 3, coffee: 2, taken: ['a'] };
+  assert.equal(progressSig(), base);
+  S.entries[0].ts += 1000; S.entries[0].title = 'Edited';
+  assert.equal(progressSig(), base);
+  S.entries[0].kcal = 2100; S.entries[0].tier = 'off'; // the day still counts as a verdict and a meal day
+  assert.equal(progressSig(), base);
+  S.rev++;
+  assert.equal(progressSig(), base);
+});
+test('progressSig is equal after a restart with the same log', () => {
+  reset(); wi(-3, 85); meal(day(-1), 1500, 130);
+  const a = progressSig();
+  const saved = JSON.parse(JSON.stringify({ e: S.entries, d: S.days }));
+  S.entries = saved.e; S.days = saved.d;
+  assert.equal(progressSig(), a);
+});
+test('progressRatingHint: too early with fewer than 3 weigh-ins, a short span or no average, even past day 14', () => {
+  reset(); assert.equal(progressRatingHint(), 'too-early');
+  wi(0, 85); wi(-3, 85.2);
+  assert.equal(progressRatingHint(), 'too-early');
+  wi(-5, 85.4); // three weigh-ins but a 5-day span
+  assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: a 14-day window that passes the count and span gates still needs two weigh-ins in an average', () => {
+  reset(); // three weigh-ins over 12 days, but today's 7-day window holds the single reading of today
+  wi(0, 85); wi(-10, 85.5); wi(-12, 86);
+  assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: single weigh-ins per window never read as stuck, as the old n=1 arms did', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  wi(0, t0 + 4); wi(-7, targetAt(day(-7), S.settings) + 4); wi(-12, t0 + 5); // both arms above the gap on one reading each
+  assert.equal(progressRatingHint(), 'too-early');
+});
+test('progressRatingHint: a single weigh-in three weeks ago is not a flat trend, two per window is enough', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  for (const o of [0, -2, -4, -6]) wi(o, t0 + 0.3);
+  for (const o of [-7, -9, -11, -13]) wi(o, t0 + 0.9);
+  wi(-21, t0 + 0.4); // one reading in the old window: the flat arm stays off
+  assert.equal(progressRatingHint(), 'a-bit-behind');
+});
+test('progressRatingHint: a twice-a-week weigher still gets a band', () => {
+  reset();
+  const t0 = targetAt(day(0), S.settings);
+  for (const [o, kg] of [[0, t0 + 0.25], [-3, t0 + 0.35], [-7, t0 + 0.75], [-10, t0 + 0.85]]) wi(o, kg);
+  assert.equal(avg7(day(0)).n, 2, 'two readings in the 7-day average');
+  assert.equal(progressRatingHint(), 'a-bit-behind');
+});
+test('progressRatingHint: at the target but losing far faster than the plan reads on-track, not great', () => {
+  reset();
+  for (const [o, kg] of [[0, 77.0], [-2, 77.5], [-4, 78.0], [-6, 78.5], [-8, 79.5], [-10, 80.5], [-12, 81.5], [-13, 82.0]]) wi(o, kg);
+  assert.ok(-projection().perWeek > planRate().kg * 7, 'the overshoot the check looks for');
+  assert.equal(progressRatingHint(), 'on-track');
+});
+test('progressRatingHint: the 0.2 kg band, stuck as in adjustNotice, flat weight and target reached', () => {
+  const setup = (a, b) => { reset(); S.settings.startDate = day(-40); for (const o of [0, -2, -4, -6]) wi(o, a); for (const o of [-7, -9, -11, -13]) wi(o, b); };
+  const tgt = (o) => targetAt(day(o), S.settings);
+  setup(0, 0); const t0 = tgt(0);
+  setup(t0 + 0.19, t0 + 0.19 + 0.5); assert.equal(progressRatingHint(), 'on-track');
+  setup(t0 + 0.2, t0 + 0.2 + 0.5); assert.equal(progressRatingHint(), 'a-bit-behind');
+  // stuck: both averages more than 0.7 kg above their own schedule (the week before is exactly 4-day samples of b)
+  setup(t0 + 0.8, tgt(-7) + 0.8); assert.equal(progressRatingHint(), 'stuck');
+  setup(t0 + 0.8, tgt(-7) + 0.69); assert.notEqual(progressRatingHint(), 'stuck');
+  // flat: the average three weeks ago is less than 0.15 kg above today's
+  setup(t0 + 0.3, t0 + 0.9); for (const o of [-21, -22, -23]) wi(o, t0 + 0.3 + 0.1);
+  assert.equal(progressRatingHint(), 'stuck');
+  setup(S.settings.targetKg - 0.1, S.settings.targetKg + 0.5); assert.equal(progressRatingHint(), 'great');
+});
+test('progressGate: none before day 7, gated until 14 days or 3 weigh-ins in the average', () => {
+  reset();
+  S.settings.startDate = day(-6); assert.equal(progressGate(), 'none');
+  S.settings.startDate = day(-7); assert.equal(progressGate(), 'gated');
+  S.settings.startDate = day(-14); assert.equal(progressGate(), 'ready');
+  S.settings.startDate = day(-7); wi(0, 85); wi(-2, 85); assert.equal(progressGate(), 'gated');
+  wi(-4, 85); assert.equal(progressGate(), 'ready');
+});
+test('progressState: none, refresh by a changed log or by age, else fresh', () => {
+  reset(); wi(0, 85);
+  S.progressReview = null; assert.equal(progressState(), 'none');
+  S.progressReview = { sig: progressSig(), ts: Date.now() }; assert.equal(progressState(), 'fresh');
+  wi(-2, 84); assert.equal(progressState(), 'refresh');
+  S.progressReview = { sig: progressSig(), ts: Date.now() - 14 * 86400000 }; assert.equal(progressState(), 'refresh');
+  S.progressReview = { sig: progressSig(), ts: Date.now() - 14 * 86400000 + 60000 }; assert.equal(progressState(), 'fresh');
+  S.progressReview = { sig: progressSig() }; assert.equal(progressState(), 'refresh'); // no ts
+  S.progressReview = { sig: progressSig(), ts: NaN }; assert.equal(progressState(), 'refresh');
+  S.progressReview = { sig: progressSig(), ts: Date.now() + 3600000 }; assert.equal(progressState(), 'refresh'); // in the future
+  S.progressReview = null;
+});
+
+test('progressGen accessors: bump increments, reset sets 0', () => {
+  resetProgressGen(); assert.equal(getProgressGen(), 0);
+  bumpProgressGen(); bumpProgressGen(); assert.equal(getProgressGen(), 2);
+  resetProgressGen(); assert.equal(getProgressGen(), 0);
 });

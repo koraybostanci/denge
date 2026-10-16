@@ -3,7 +3,7 @@
 // Pure functions: no DOM and no storage.
 import { T, parseNum } from './i18n.js';
 import { SLOT_NAME, PLAN_SLOTS } from './plan.js';
-import { cleanReview, cleanCoach, cleanVerdict } from './ai.js';
+import { cleanReview, cleanCoach, cleanVerdict, cleanProgressReview } from './ai.js';
 import { CATALOG, BY_ID, PARTS, DEFAULT_AV, merge, unlocked, freshBadges } from './badges.js';
 import { SCHEMA_VERSION, APP_ID, COUNT_MAX, SUPP_MAX, TK_KINDS, tkValid, clone } from './core.js';
 
@@ -104,6 +104,15 @@ export function cleanDay(d) {
     if (c.note) out.coach = { ...c, ts: pos(d.coach.ts, 1e14), sig: txt(d.coach.sig, 4000), model: txt(d.coach.model, 60) };
   }
   return out;
+}
+
+// The review of the whole log as stored or backed up, or null when it is unusable. The reply fields are cleaned again; the rating
+// is the model's own here (the app's estimate was only a fallback at the time it was written).
+export function readProgress(d) {
+  if (!d || typeof d !== 'object' || !Number.isInteger(d.ts) || d.ts <= 0 || d.ts > 1e14) return null;
+  let r;
+  try { r = cleanProgressReview(d, ''); } catch { return null; }
+  return { v: 1, sig: txt(d.sig, 120), ts: d.ts, model: txt(d.model, 60), ...r };
 }
 
 export function cleanCheck(c) {
