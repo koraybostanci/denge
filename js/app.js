@@ -7,10 +7,10 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, bumpProgressGen, resetProgressGen, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
@@ -693,7 +693,7 @@ async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
   // The user plan travels with the backup; Default is the app's own and never does
   const plans = { active: S.plans.active, list: S.plans.list.filter((p) => p.id !== 'default') };
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans };
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans, progress: S.progressReview };
   // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
   // They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
@@ -761,6 +761,9 @@ async function importBackup(file) {
     }
     // Earned badges are added to, never replaced: the earliest day wins. An old backup has none; checkBadges then works them out from the restored log.
     if (data.badges && typeof data.badges === 'object') await badgeQueue(() => db.kvSet('badges', restoreBadges(S.badges, data.badges)));
+    // The review of the whole log is replaced by the backup's; a backup without one (or with a damaged one) leaves this device's alone
+    const progress = readProgress(data.progress);
+    if (progress) await db.kvSet('progressReview', progress);
   } catch (err) {
     toast(t('The backup could not be restored completely'));
     await load();
@@ -798,6 +801,7 @@ async function load() {
   S.entries = await db.all('entries');
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
   S.checks = await db.kvGet('checks', []);
+  S.progressReview = readProgress(await db.kvGet('progressReview', null));
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
   S.badges = badges ? cleanBadges(badges) : null;
 }
@@ -1623,9 +1627,9 @@ const ACT = {
   },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
-    await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []);
+    await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []); await db.kvSet('progressReview', null);
     for (const id of await db.keys('photos')) {
       if (keep.has(id)) continue;
       await db.del('photos', id);
@@ -1635,6 +1639,7 @@ const ACT = {
     delete S.settings.wins; // the next kilo or perfect day is celebrated again
     await saveSettings();
     S.entries = []; S.days = {}; S.checks = []; S.check.openId = null;
+    bumpProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear(); // a progress review still on its way is dropped when it lands
     closeSheet();
     render();
     toast(t('Log cleared'));
@@ -1664,6 +1669,7 @@ const ACT = {
     S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
+    resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
     autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
     closeSheet();
     go('today');
@@ -1671,7 +1677,7 @@ const ACT = {
   },
 };
 // Work that a wipe must not run into: it would write its result into the emptied app
-const busyNow = () => S.busy.size > 0 || S.reviewing.size > 0 || S.coaching.size > 0 || preparing > 0 || S.check.busy;
+const busyNow = () => S.busy.size > 0 || S.reviewing.size > 0 || S.coaching.size > 0 || S.progressReviewing.size > 0 || preparing > 0 || S.check.busy;
 
 // A handler that fails (storage full, a database that will not open) says so, instead of the screen showing
 // something that was never saved. Runs fn straight away: file pickers need the tap's own turn.
@@ -1828,7 +1834,7 @@ setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay
 let swReg = null;
 function safeToReload() {
   const c = S.check;
-  const working = S.busy.size || S.reviewing.size || S.coaching.size || preparing || c.busy || c.photos.length || c.note || S.draft; // nothing in flight or half-written
+  const working = S.busy.size || S.reviewing.size || S.coaching.size || S.progressReviewing.size || preparing || c.busy || c.photos.length || c.note || S.draft; // nothing in flight or half-written
   return $('#sheet').hidden && !$('#composer-input').value && !working && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName));
 }
 function setupUpdates() {
