@@ -5,12 +5,12 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
-import { reviewBrief, coachBrief, checkBrief } from './briefs.js';
+import { analyze, review, coach, check, progressReview, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { reviewBrief, coachBrief, checkBrief, progressBrief } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, bumpProgressGen, resetProgressGen, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
 import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
@@ -317,8 +317,8 @@ async function addUsage(model, usage) {
 
 // ——— The day's review, written by the model ———
 // `what` names the thing asked for. Each has whole sentences, so a translation never has to fit a fragment into one
-const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.'), values: () => t('Add an API key in Settings to fill in the values.') };
-const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }), values: (detail) => t('Filling in the values failed. {detail}', { detail }) };
+const NO_KEY = { review: () => t('Add an API key in Settings to get a review.'), note: () => t('Add an API key in Settings to get a note.'), check: () => t('Add an API key in Settings to get a check.'), 'new estimate': () => t('Add an API key in Settings to get a new estimate.'), values: () => t('Add an API key in Settings to fill in the values.'), progress: () => t('Add an API key in Settings to get a review of your progress.') };
+const FAILED = { review: (detail) => t('The review failed. {detail}', { detail }), note: (detail) => t('The note failed. {detail}', { detail }), check: (detail) => t('The check failed. {detail}', { detail }), 'new estimate': (detail) => t('The new estimate failed. {detail}', { detail }), values: (detail) => t('Filling in the values failed. {detail}', { detail }), progress: (detail) => t('The progress review failed. {detail}', { detail }) };
 function modelFailure(err, what = 'review') {
   const code = err && err.code;
   if (code === 'no_key') return NO_KEY[what]();
@@ -375,6 +375,35 @@ function queueCoach(day) {
   S.reviewOpen.set(`coach:${day}`, true);
   render();
   chain = chain.then(() => runCoach(day)).catch(() => {});
+}
+
+// ——— The review of the whole plan so far, written by the model (only ever on a tap) ———
+async function runProgressReview() {
+  try {
+    const myGen = getProgressGen();
+    const sig = progressSig();
+    const appRating = progressRatingHint();
+    const { data, usage, model } = await progressReview({ cfg: aiCfg(), brief: progressBrief(), appRating });
+    await addUsage(model, usage);
+    if (myGen !== getProgressGen()) return; // wiped while the request was out
+    const rec = { v: 1, sig, ts: Date.now(), model, ...data };
+    await db.kvSet('progressReview', rec);
+    if (myGen !== getProgressGen()) return;
+    S.progressReview = rec;
+    S.progressErr.clear();
+  } catch (err) {
+    S.progressErr.set('progress', modelFailure(err, 'progress'));
+  }
+  S.progressReviewing.delete('progress');
+  render();
+}
+function queueProgressReview() {
+  if (progressGate() !== 'ready' || progressState() === 'fresh' || S.progressReviewing.has('progress')) return;
+  if (progressBrief() === '') return;
+  S.progressReviewing.add('progress');
+  S.progressErr.delete('progress');
+  render();
+  chain = chain.then(() => runProgressReview()).catch(() => {});
 }
 
 // The last finished day is reviewed by itself, once: one small text request a day
@@ -1582,6 +1611,12 @@ const ACT = {
     if (navigator.onLine === false) return toast(t('No connection. Try again when you are online'));
     queueReview(el.dataset.day);
   },
+  'progress-review': () => {
+    if (!hasKey()) return toast(t('Add an API key in Settings to get a review of your progress'));
+    if (!navigator.onLine) return toast(td(AI_ERRORS.offline));
+    if (progressBrief() === '') return toast(t('Log something first and the review has more to go on'));
+    queueProgressReview();
+  },
   'loc-save': async (el) => {
     const out = $('#loc-out');
     out.textContent = t('Getting your location…');
@@ -1785,6 +1820,7 @@ document.addEventListener('toggle', (ev) => {
   }
   if (d.matches('details.review-ai')) S.reviewOpen.set(d.dataset.day, d.open);
   if (d.matches('details.coach-ai')) S.reviewOpen.set(`coach:${d.dataset.day}`, d.open);
+  if (d.matches('details.progress-ai')) S.reviewOpen.set('progress', d.open);
 }, true);
 
 // Tapping an example chip must not take focus away from the composer input
