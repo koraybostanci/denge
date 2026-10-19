@@ -5,7 +5,7 @@
 // internal id, APP_ID in core.js, which stays when the app is renamed, so queries keep working).
 import { targetAt, dayKey } from './plan.js';
 
-export const EXPORT_SCHEMA = 4;
+export const EXPORT_SCHEMA = 5;
 export const exportName = (now = new Date()) => `pickle-export-${dayKey(now)}.sql`;
 
 const text = (v) => (v == null || v === '' ? 'NULL' : `'${String(v).replace(/\u0000/g, '').replace(/'/g, "''")}'`);
@@ -84,6 +84,9 @@ CREATE TABLE weightplan_meal_items (
   grams     REAL,                               -- multiplied by the meal's portion, like kcal and protein_g
   kcal      REAL,
   protein_g REAL,
+  carbs_g   REAL,
+  fat_g     REAL,
+  fibre_g   REAL,
   PRIMARY KEY (meal_id, position)
 );
 
@@ -184,7 +187,7 @@ export function buildSql({ settings: s, entries, days, badges = {}, appVersion, 
     if (!ok) continue;
     (e.items || []).forEach((it, i) => {
       items += 1;
-      out.push(`INSERT INTO weightplan_meal_items (meal_id, position, name, grams, kcal, protein_g) VALUES (${text(e.id)}, ${i + 1}, ${text(it.n)}, ${it.g ? num(it.g * m) : 'NULL'}, ${num((it.kcal || 0) * m)}, ${num((it.p || 0) * m)});`);
+      out.push(`INSERT INTO weightplan_meal_items (meal_id, position, name, grams, kcal, protein_g, carbs_g, fat_g, fibre_g) VALUES (${text(e.id)}, ${i + 1}, ${text(it.n)}, ${it.g ? num(it.g * m) : 'NULL'}, ${num((it.kcal || 0) * m)}, ${num((it.p || 0) * m)}, ${num((it.c || 0) * m)}, ${num((it.f || 0) * m)}, ${num((it.fib || 0) * m)});`);
     });
   }
   out.push('', 'COMMIT;', '');

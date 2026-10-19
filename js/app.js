@@ -5,7 +5,7 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, progressReview, foodValues, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, progressReview, foodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
@@ -109,7 +109,7 @@ async function logMeal(tpl, src, day = S.viewDay) {
     id: db.uid(), ts, day, createdAt: Date.now(), kind: 'meal', status: 'ok', src,
     slot: tpl.slot && tpl.slot !== 'any' ? tpl.slot : slotByTime(new Date(ts)),
     planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? titleFor('plan', { id: tpl.id }) : {}),
-    items: (tpl.items || []).map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
+    items: cleanItems(tpl.items, ITEM_CAPS_WRITE), // old favourites with no macros still log cleanly: missing macros become 0
     kcal: tpl.kcal, p: tpl.p, c: tpl.c, f: tpl.f, fib: tpl.fib,
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
     photoIds: [], timeSrc: day === today() ? 'now' : 'manual', place: null,
@@ -504,7 +504,7 @@ async function logCheckOption(id, i) {
   if (!o) return;
   await logMeal({
     name: o.name, slot: 'any', kcal: o.kcal, p: o.p, c: o.c, f: o.f, fib: o.fib, tier: o.tier, conf: 0.5,
-    items: [{ n: o.portion ? `${o.name} (${o.portion})` : o.name, g: 0, kcal: o.kcal, p: o.p }],
+    items: cleanItems([{ n: o.portion ? `${o.name} (${o.portion})` : o.name, g: 0, kcal: o.kcal, p: o.p, c: o.c, f: o.f, fib: o.fib }], ITEM_CAPS_WRITE),
   }, 'check', today());
 }
 
@@ -634,7 +634,7 @@ async function analyzeEntry(id, opts = {}) {
       const plan = mealById(data.plan) || null;
       if (plan) {
         Object.assign(e, {
-          planId: plan.id, title: plan.name, ...titleFor('plan', { id: plan.id }), items: plan.items.map((i) => ({ n: i.n, g: i.g, kcal: i.kcal, p: i.p })),
+          planId: plan.id, title: plan.name, ...titleFor('plan', { id: plan.id }), items: cleanItems(plan.items, ITEM_CAPS_WRITE),
           kcal: plan.kcal, p: plan.p, c: plan.c, f: plan.f, fib: plan.fib, tier: 'plan',
         });
         // A plan meal without a picture takes this photo as its own
@@ -646,13 +646,14 @@ async function analyzeEntry(id, opts = {}) {
         }
       } else {
         delete e.tk; // the title now comes from the model
-        const items = Array.isArray(data.items) ? data.items.slice(0, 12).map((i) => ({ n: String((i && i.n) || '').slice(0, 80), g: cap(i && i.g, 5000), kcal: cap(i && i.kcal, 3000), p: cap(i && i.p, 300) })) : [];
-        const sumKcal = items.reduce((a, i) => a + i.kcal, 0);
+        const items = cleanItems(data.items, ITEM_CAPS_ANALYSIS);
+        const sumMacros = (k) => items.reduce((a, i) => a + i[k], 0);
+        const sumKcal = sumMacros('kcal');
         Object.assign(e, {
           planId: '', title: String(data.title || e.text || 'Meal').slice(0, 80), items, // i18n-ok: the stored title stays English
-          // The item list is what explains the total, so the total is their sum whenever items carry calories
-          kcal: Math.round(cap(sumKcal || data.kcal, 6000)), p: cap(data.p, 500) || items.reduce((a, i) => a + i.p, 0), edited: false,
-          c: cap(data.c, 800), f: cap(data.f, 500), fib: cap(data.fib, 150),
+          // The item list is what explains the total, so the total is their sum whenever items carry the number
+          kcal: Math.round(cap(sumKcal || data.kcal, 6000)), p: cap(cap(data.p, 500) || sumMacros('p'), 500), edited: false,
+          c: cap(cap(data.c, 800) || sumMacros('c'), 800), f: cap(cap(data.f, 500) || sumMacros('f'), 500), fib: cap(cap(data.fib, 150) || sumMacros('fib'), 150),
           tier: ['plan', 'flex', 'off'].includes(data.tier) ? data.tier : 'plan',
         });
       }

@@ -22,6 +22,9 @@ export function buildPlan(raw) {
         n: foods[k].name, g, measure: measure || '',
         kcal: Math.round((foods[k].v[0] * g) / 100),
         p: round1((foods[k].v[1] * g) / 100),
+        c: round1((foods[k].v[2] * g) / 100),
+        f: round1((foods[k].v[3] * g) / 100),
+        fib: round1((foods[k].v[4] * g) / 100),
       })),
     };
   });

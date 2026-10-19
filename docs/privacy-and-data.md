@@ -63,7 +63,7 @@ leaves everything else in that database alone.
 | `weightplan_supplement_log` | day, supplement_id | `day`, `supplement_id` (one row per supplement ticked that day) |
 | `weightplan_days` | day | `day`, `weight_kg`, `steps`, `water_ml`, `coffee_cups`, `workout`, `target_kcal`, `target_weight_kg` |
 | `weightplan_meals` | logged meal | `id`, `day`, `logged_at`, `slot`, `title`, `source`, `plan_id`, `tier`, `status`, `portion`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g`, `confidence`, `place`, `note`, `photos`, `flags` |
-| `weightplan_meal_items` | ingredient of a meal | `meal_id`, `position`, `name`, `grams`, `kcal`, `protein_g` |
+| `weightplan_meal_items` | ingredient of a meal | `meal_id`, `position`, `name`, `grams`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g` |
 | `weightplan_settings` | setting | `key`, `value` (dates, weights, daily goals, and the export's own version and time) |
 | `weightplan_daily` (view) | day | the day's values, the 7-day weight average, and the meal totals with the day's `beers` |
 

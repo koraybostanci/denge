@@ -5,10 +5,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { buildSql } from '../js/export.js';
 
 const settings = { startDate: '2026-10-05', targetDate: '2026-12-31', startKg: 86, targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, fiber: 30, steps: 8000, water: 2500 };
-const meal = (id, day, extra) => ({ id, day, ts: new Date(`${day}T12:00:00`).getTime(), kind: 'meal', status: 'ok', slot: 'lunch', title: `It's ${id}`, src: 'text', kcal: 800, p: 40, c: 50, f: 30, fib: 5, mult: 1, tier: 'plan', conf: 0.7, photoIds: [], flags: [], items: [{ n: 'egg', g: 100, kcal: 143, p: 12 }], ...extra });
+const meal = (id, day, extra) => ({ id, day, ts: new Date(`${day}T12:00:00`).getTime(), kind: 'meal', status: 'ok', slot: 'lunch', title: `It's ${id}`, src: 'text', kcal: 800, p: 40, c: 50, f: 30, fib: 5, mult: 1, tier: 'plan', conf: 0.7, photoIds: [], flags: [], items: [{ n: 'egg', g: 100, kcal: 143, p: 12, c: 0.7, f: 10, fib: 0 }], ...extra });
 const entries = [
   meal('a', '2026-10-06', {}),
-  meal('b', '2026-10-06', { kcal: 1000, tier: 'off', title: "semi;colon -- and 'quotes'\nnewline", mult: 1.5 }),
+  meal('b', '2026-10-06', { kcal: 1000, tier: 'off', title: "semi;colon -- and 'quotes'\nnewline", mult: 1.5, items: [{ n: 'egg', g: 100, kcal: 143, p: 12 }] }),
   meal('c', '2026-10-07', { status: 'pending', kcal: 0 }),
   meal('d', '2026-10-06', { title: 'Beer 0.5 l', src: 'flex', tier: 'flex', slot: 'late', kcal: 215, flags: ['alcohol'], items: [] }),
 ];
@@ -31,6 +31,15 @@ test('only meals with status ok carry numbers', () => {
   const db = new DatabaseSync(':memory:');
   load(db);
   assert.equal(rows(db, "SELECT kcal FROM weightplan_meals WHERE id = 'c'")[0].kcal, null);
+});
+
+test('meal items export the macro columns, multiplied by the portion; old items without macros export 0', () => {
+  const db = new DatabaseSync(':memory:');
+  load(db);
+  assert.deepEqual(rows(db, "SELECT name, grams, kcal, protein_g, carbs_g, fat_g, fibre_g FROM weightplan_meal_items WHERE meal_id = 'a' ORDER BY position").map((r) => ({ ...r })),
+    [{ name: 'egg', grams: 100, kcal: 143, protein_g: 12, carbs_g: 0.7, fat_g: 10, fibre_g: 0 }]);
+  const b = rows(db, "SELECT grams, protein_g, carbs_g, fat_g, fibre_g FROM weightplan_meal_items WHERE meal_id = 'b'")[0];
+  assert.deepEqual([b.grams, b.protein_g, b.carbs_g, b.fat_g, b.fibre_g], [150, 18, 0, 0, 0]); // item macros × 1.5, absent macros as 0
 });
 
 test('the README queries run', () => {
@@ -79,7 +88,7 @@ test('badges: one row per earned step, and none without any', () => {
   assert.deepEqual(rows(db, 'SELECT id, threshold, day FROM weightplan_badges ORDER BY id, threshold').map((r) => ({ ...r })), [
     { id: 'days_on', threshold: 7, day: '2026-10-12' }, { id: 'days_on', threshold: 30, day: '2026-11-05' }, { id: 'first_meal', threshold: 1, day: '2026-10-06' },
   ]);
-  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '4');
+  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '5');
   const none = new DatabaseSync(':memory:');
   load(none);
   load(none);

@@ -24,7 +24,7 @@ function workoutNote(plan) {
 const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
-For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
+For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
 slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
@@ -57,8 +57,8 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['n', 'g', 'kcal', 'p'],
-        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' } },
+        required: ['n', 'g', 'kcal', 'p', 'c', 'f', 'fib'],
+        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
       },
     },
     kcal: { type: 'number' },
@@ -140,7 +140,7 @@ export const ZEN_FREE = [
   'longcat-2.5-preview-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'ling-3.0-flash-fin-free', 'jev-1.13-free',
 ];
 
-const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
+const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
 
 function classify(status, msg) {
   // 429 is a quota or rate limit, whatever the text says: Gemini's quota message mentions "billing" on the free tier too.
@@ -276,7 +276,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
+  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 800 };
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -557,6 +557,29 @@ export function cleanFoodValues(d) {
   if (!known || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
   const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
   return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
+}
+
+// The caps of one food item, per call site. Call sites that already cap items keep their own values, so behaviour
+// does not change under them: the analysis handler keeps its tighter kcal/p caps, the template paths (a matched
+// plan meal, logMeal, logCheckOption) use the persisted range that cleanEntry/itemList in js/backup.js enforce on
+// any backup/restore (kcal 6,000, p 500) — values above it are transient today, so clamping at write time aligns
+// stored items with that convention. c, f, fib mirror cleanEntry's entry-level caps and cleanVerdict's option caps.
+export const ITEM_CAPS_ANALYSIS = { g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 };
+export const ITEM_CAPS_WRITE = { g: 5000, kcal: 6000, p: 500, c: 800, f: 500, fib: 150 };
+
+// The items of a meal entry, the way any path stores them: a fixed shape of n, g and the five macros, missing
+// values coerced to 0 and never undefined (structured clone preserves undefined into IndexedDB, and one backup
+// round-trip would then flip it to 0, silently mutating old favourites). At most 12 items; unknown junk is dropped.
+// Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
+export function cleanItems(items, caps) {
+  const cap = (v, max) => Math.min(max, Math.max(0, +v || 0)); // NaN and undefined fall to 0
+  return (Array.isArray(items) ? items : []).slice(0, 12)
+    .map((i) => (i && typeof i === 'object' ? i : {}))
+    .map((i) => ({
+      n: clean(i.n, 80),
+      g: cap(i.g, caps.g), kcal: cap(i.kcal, caps.kcal), p: cap(i.p, caps.p),
+      c: cap(i.c, caps.c), f: cap(i.f, caps.f), fib: cap(i.fib, caps.fib),
+    }));
 }
 
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message

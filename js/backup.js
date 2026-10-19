@@ -25,7 +25,10 @@ const MEAL_ID = new RegExp(`^[A-Za-z][\\w-]{0,${MEAL_ID_MAX - 1}}$`);
 const isMealId = (k) => ownSafe(k) && MEAL_ID.test(k);
 const PLAN_PHOTOS_MAX = 200;
 const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 20)).slice(0, 4) : []);
-const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => ({ n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500) }));
+// An item keeps only its shape (n, grams and the five macros); a missing macro is stored as 0, an old backup
+// without the new fields still restores through it, and the caps are the ones an app entry can carry (kcal and
+// macros here mirror cleanEntry's entry-level caps below).
+const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => ({ n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500), c: pos(i && i.c, 800), f: pos(i && i.f, 500), fib: pos(i && i.fib, 150) }));
 
 // The recipe of a generated title (see titleOf in js/core.js): a known kind and a few plain parameters. Anything else is dropped,
 // and the entry keeps its English title.

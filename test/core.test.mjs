@@ -225,7 +225,7 @@ test('buildPlan works out the macros from the food table and skips an ingredient
   const plan = buildPlan({ id: 'p', name: 'P', foods, meals: [{ id: 'M-1', slot: 'lunch', name: 'M', ingredients: [['a', 150, '1 cup'], ['gone', 100], ['toString', 50]] }] });
   const m = plan.meals[0];
   assert.deepEqual([m.kcal, m.p, m.c, m.f, m.fib], [150, 15, 30, 7.5, 3]);
-  assert.deepEqual(m.items, [{ n: 'A', g: 150, measure: '1 cup', kcal: 150, p: 15 }]);
+  assert.deepEqual(m.items, [{ n: 'A', g: 150, measure: '1 cup', kcal: 150, p: 15, c: 30, f: 7.5, fib: 3 }]);
   assert.deepEqual(m.ingredients, [['a', 150, '1 cup']]);
   assert.equal(SEED.meals.find((x) => x.id === 'L-A').kcal, 487); // the shipped plan's numbers are unchanged
 });

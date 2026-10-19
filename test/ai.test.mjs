@@ -2,7 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -42,6 +42,18 @@ test('an OpenAI-compatible request describes the reply in words and sends no sch
   assert.equal(calls[0].url, 'https://x.test/v1/chat/completions');
   assert.match(calls[0].body.messages[0].content, /Return exactly one JSON object/);
   assert.equal('output_config' in calls[0].body, false);
+});
+
+test('items carry all five macros: the schema requires c, f, fib and the shape contract in words matches it', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  const item = calls[0].body.output_config.format.schema.properties.items.items;
+  assert.deepEqual(item.required, ['n', 'g', 'kcal', 'p', 'c', 'f', 'fib']);
+  assert.ok(item.properties.c && item.properties.f && item.properties.fib);
+  assert.match(calls[0].body.system, /Each item also reports its own kcal, p, c, f and fib/); // the system prompt asks for them
+  mockFetch(() => reply(200, { choices: [{ message: { content: meal }, finish_reason: 'stop' }], usage: {} }));
+  await ask(gemini);
+  assert.match(calls[1].body.messages[0].content, /"items":\[\{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0\}\]/);
 });
 
 test('an answer cut off at the token limit says so, instead of "SyntaxError"', async () => {
@@ -97,6 +109,44 @@ test('a check: hostile numbers and shapes from the model are clamped', async () 
   const { data } = await check({ cfg: haiku, brief: 'b' });
   assert.equal(data.options.length, 1);
   assert.deepEqual([data.options[0].kcal, data.options[0].rating, data.options[0].p], [5000, 5, 0]);
+});
+
+test('an analysis request sets its own token budget above the callModel default: three macros × up to 12 items', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  assert.equal(calls[0].body.max_tokens, 800);
+});
+
+// ——— Per-item macros at write time (cleanItems) ———
+test('cleanItems: items keep all five macros, missing ones become 0', () => {
+  assert.deepEqual(
+    cleanItems([{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }], ITEM_CAPS_ANALYSIS),
+    [{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }],
+  );
+  // a pre-feature item (no macros anywhere) and a template item missing some of them both store 0, never undefined
+  assert.deepEqual(cleanItems([{ n: 'old favourite', g: 100, kcal: 143, p: 12 }, { n: 'Soup' }, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 }], ITEM_CAPS_WRITE), [
+    { n: 'old favourite', g: 100, kcal: 143, p: 12, c: 0, f: 0, fib: 0 },
+    { n: 'Soup', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
+    { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17, f: 0, fib: 0 },
+  ]);
+  assert.deepEqual(cleanItems(undefined, ITEM_CAPS_WRITE), []);
+  assert.deepEqual(cleanItems('junk', ITEM_CAPS_WRITE), []);
+});
+
+test('cleanItems: junk entries are emptied, capped at 12, and the caps come from the call site', () => {
+  const junk = cleanItems([{ n: 'x', g: 1e9, kcal: 1e9, p: -4, c: 'x', f: true }, null, 'junk', 5], ITEM_CAPS_WRITE);
+  assert.deepEqual(junk, [
+    { n: 'x', g: 5000, kcal: 6000, p: 0, c: 0, f: 1, fib: 0 },
+    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
+    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
+    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
+  ]);
+  const big = { n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 };
+  assert.deepEqual(cleanItems([big], ITEM_CAPS_ANALYSIS)[0], { n: 'x', g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 });
+  const write = cleanItems([big], ITEM_CAPS_WRITE)[0];
+  assert.deepEqual([write.g, write.kcal, write.p, write.c, write.f, write.fib], [5000, 6000, 500, 800, 500, 150]);
+  const names = cleanItems([{ n: ` ${'y'.repeat(90)} ` }, { n: 5 }], ITEM_CAPS_WRITE);
+  assert.deepEqual(names.map((i) => i.n), ['y'.repeat(80), '5']);
 });
 
 test('a review whose list is a plain string is accepted', async () => {
