@@ -122,7 +122,7 @@ async function pseudoOn() {
 // What is allowed to stay as it is in the pseudo-locale, and why:
 const EXCEPT = {
   // Text the person typed, or the model wrote, in the fixtures (shown as written; user data is never translated)
-  data: ['Oats with yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
+  data: ['Oats with yoghurt', 'Jumbo oats', 'Greek yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
   // Names from ai.js that are not marked with T() yet (the models and providers of the Settings sheet): brand names with a few English words
   models: [...Object.values(MODELS).map((m) => m.name), ...PRESETS.map((p) => p.name), ...Object.values(MODELS).map((m) => m.name.split(' (')[0]), ...PRESETS.map((p) => p.name.split(' (')[0])],
   // Words that are not English text: units, brand names, the two language names, and the host part of a placeholder
