@@ -591,11 +591,12 @@ function entryDetail(e) {
     const mult = e.mult || 1;
     const canReanalyse = e.src === 'photo' || e.src === 'text';
     // Item table: what the total is made of. A last row accounts for any difference, so the column always adds up.
+    // Only the kcal column is balanced by that rest row: the per-item carbs/fat/fibre are model estimates that may not sum to the entry totals, and a manual macro edit updates the summary line without touching the items.
     const list = e.items || [];
     const macros = list.some((i) => i.c != null || i.f != null || i.fib != null); // no item carries macros (an old entry): the table keeps its three columns
     const itemSum = list.reduce((a, i) => a + (i.kcal || 0), 0) * mult;
     const rest = Math.round(v.kcal - itemSum);
-    // An odd restored entry may miss c/f/fib: '–' stands where no number was stored
+    // Entry-summary macros are always real stored numbers: eff() coerces a missing c/f/fib to 0, so the line reads "0 g" on old entries; '–' shows only in per-item cells (macroCells; onum elsewhere), where nothing was stored
     const gnum = (x) => (x == null ? '–' : n0(x));
     const restRow = list.length && itemSum > 0 && Math.abs(rest) >= 5
       ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : t('Not itemised')}</th><td></td><td class="items-kcal">${rest > 0 ? '+' : '−'}${n0(Math.abs(rest))}</td>${macros ? '<td colspan="4"></td>' : ''}</tr>` : '';
@@ -620,6 +621,9 @@ function entryDetail(e) {
       <div class="field-grid">
         <label for="edit-kcal-${esc(e.id)}">${t('Calories')}<input id="edit-kcal-${esc(e.id)}" type="text" inputmode="numeric" value="${Math.round(v.kcal)}"></label>
         <label for="edit-protein-${esc(e.id)}">${t('Protein (g)')}<input id="edit-protein-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.p)}"></label>
+        <label for="edit-carbs-${esc(e.id)}">${t('Carbs (g)')}<input id="edit-carbs-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.c)}"></label>
+        <label for="edit-fat-${esc(e.id)}">${t('Fat (g)')}<input id="edit-fat-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.f)}"></label>
+        <label for="edit-fibre-${esc(e.id)}">${t('Fibre (g)')}<input id="edit-fibre-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.fib)}"></label>
         <label for="edit-slot-${esc(e.id)}">${t('Meal')}<select id="edit-slot-${esc(e.id)}">${slotOptions}</select></label>
         <label for="edit-time-${esc(e.id)}">${t('Time')}<input id="edit-time-${esc(e.id)}" type="time" value="${hhmm(e.ts)}"></label>
       </div>

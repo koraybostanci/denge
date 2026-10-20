@@ -48,5 +48,5 @@ With a large My plan they grow with its size. The Default plan roughly doubles t
 largest review measured about 1,640 characters before and 3,000 after).
 
 Estimates from a photo are rough. Treat them as a starting point and correct the portion when
-it is off.
-
+it is off. Each item in an estimate now carries carbohydrates, fat and fibre next to the
+calories and protein, and the entry sheet's edit fields let you correct them along with the rest.

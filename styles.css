@@ -492,6 +492,8 @@ button.tile:active, .tile-main:active, .chip:active, .btn:active { transform: sc
 .items-table td { color: var(--ink2); }
 .items-table td.items-kcal { color: var(--ink); font-weight: 600; }
 .items-rest th, .items-rest td { color: var(--ink2); font-style: italic; }
+/* The rest row sits in the kcal column, which the item cells render dark and bold on; the muted italic of .items-rest wins back there */
+.items-rest td.items-kcal { color: var(--ink2); font-weight: 400; font-style: italic; }
 .question { margin-top: 12px; padding: 10px 12px; border-radius: var(--r-card); background: var(--raised); border: 1px solid var(--line); }
 .question.is-asked { border-color: var(--tape); }
 .question .note { margin-top: 6px; font-size: 13px; font-weight: 400; }

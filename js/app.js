@@ -1471,11 +1471,19 @@ const ACT = {
     const field = (k) => document.getElementById(`${k}-${id}`);
     const kcal = parseFloat(field('edit-kcal').value.replace(',', '.'));
     const p = parseFloat(field('edit-protein').value.replace(',', '.'));
+    const c = parseFloat(field('edit-carbs').value.replace(',', '.'));
+    const f = parseFloat(field('edit-fat').value.replace(',', '.'));
+    const fib = parseFloat(field('edit-fibre').value.replace(',', '.'));
     const slot = field('edit-slot').value;
     const time = field('edit-time').value;
     const next = { ...e, slot };
     if (kcal >= 0 && Math.round(kcal) !== Math.round(eff(e).kcal)) { next.kcal = Math.round(kcal / (e.mult || 1)); next.conf = 1; next.planId = ''; next.edited = true; }
+    // Macros follow the protein behavior: stored single-portion, and an edit does not unmatch a plan meal or dirty the entry.
+    // A macro is written back only when it differs from the rounded value the fields show, so an untouched save keeps the stored precision.
     if (p >= 0) next.p = Math.round((p / (e.mult || 1)) * 10) / 10;
+    if (c >= 0 && Number.isFinite(c) && Math.round(c) !== Math.round(eff(e).c)) next.c = Math.round((c / (e.mult || 1)) * 10) / 10;
+    if (f >= 0 && Number.isFinite(f) && Math.round(f) !== Math.round(eff(e).f)) next.f = Math.round((f / (e.mult || 1)) * 10) / 10;
+    if (fib >= 0 && Number.isFinite(fib) && Math.round(fib) !== Math.round(eff(e).fib)) next.fib = Math.round((fib / (e.mult || 1)) * 10) / 10;
     if (/^\d{2}:\d{2}$/.test(time)) {
       const d = new Date(e.ts);
       d.setHours(+time.slice(0, 2), +time.slice(3, 5), 0, 0);
