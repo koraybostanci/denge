@@ -560,6 +560,8 @@ const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { pla
 
 // The macro columns of the two item tables (entry sheet and plan sheet, kept identical): compact headers with the full word
 // in the abbr's title and the unit in small print; cells show '–' where an item lacks the key (one from before per-item macros).
+// Both item tables also render their items in the same display order: sorted by kcal, biggest first — the tables stay identical.
+// The sort never touches storage: a spread copy is sorted, so e.items / m.items keep their stored order.
 const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat')}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib')}</abbr><small>g</small></th>`;
 const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, the check line below treats it the same way now
 
@@ -607,7 +609,7 @@ function entryDetail(e) {
     const restPct = kcalRest && shares ? Math.round(Math.abs(r.kcal) / denom * 100) : 0;
     const items = list.length ? `<div class="items-scroll"><table class="items-table">
         <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macros ? macroHead() : ''}</tr></thead>
-        <tbody>${list.map((i) => {
+        <tbody>${[...list].sort((a, b) => (b.kcal || 0) - (a.kcal || 0)).map((i) => {
           const pct = shares && !loneItem && i.kcal ? Math.round((i.kcal * mult) / denom * 100) : 0;
           return `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td class="items-kcal">${i.kcal ? n0(i.kcal * mult) : '–'}${pct >= 1 ? `<small title="${t('Share of the meal')}">${pct}%</small>` : ''}</td>${macros ? macroCells(i, mult) : ''}</tr>`;
         }).join('')}${kcalRest || macroGap ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : macroGap ? t('Estimate gap') : t('Not itemised')}</th><td></td>${
@@ -1458,7 +1460,7 @@ export function renderPlanSheet(id) {
   <p class="entry-value"><b>${m.kcal}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(m.p), c: n0(m.c), f: n0(m.f), fib: n0(m.fib) })}</span></p>
   <div class="items-scroll"><table class="items-table">
     <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macroHead()}</tr></thead>
-    <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td class="items-kcal">${n0(i.kcal)}</td>${macroCells(i)}</tr>`).join('')}</tbody>
+    <tbody>${[...m.items].sort((a, b) => (b.kcal || 0) - (a.kcal || 0)).map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td class="items-kcal">${n0(i.kcal)}</td>${macroCells(i)}</tr>`).join('')}</tbody>
   </table></div>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button>${canEditPlan() ? `
     <button type="button" class="btn btn-wide" data-act="plan-meal-edit" data-id="${id}">${t('Edit meal')}</button>` : ''}</div>`;
