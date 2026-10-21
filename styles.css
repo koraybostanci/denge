@@ -495,6 +495,8 @@ abbr { text-decoration: none; }
 .items-table td, .items-table thead th + th { text-align: right; white-space: nowrap; padding-left: 14px; font-family: var(--num); font-variant-numeric: tabular-nums; }
 .items-table td { color: var(--ink2); }
 .items-table td.items-kcal { color: var(--ink); font-weight: 600; }
+/* The share-% chip rides along inside the kcal cell, so it must not inherit that cell's dark bold weight */
+.items-kcal small { color: var(--ink2); font-weight: 400; margin-left: 4px; }
 .items-rest th, .items-rest td { color: var(--ink2); font-style: italic; }
 /* The rest row sits in the kcal column, which the item cells render dark and bold on; the muted italic of .items-rest wins back there */
 .items-rest td.items-kcal { color: var(--ink2); font-weight: 400; font-style: italic; }

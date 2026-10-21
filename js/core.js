@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '52'; // bump together with VERSION in sw.js
+export const APP_VERSION = '53'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -143,6 +143,29 @@ export const eff = (e) => {
   const m = e.mult || 1;
   return { kcal: (e.kcal || 0) * m, p: (e.p || 0) * m, c: (e.c || 0) * m, f: (e.f || 0) * m, fib: (e.fib || 0) * m };
 };
+
+// Thresholds for the entry-sheet rest row: a column shows its rest only when the display-rounded absolute residual
+// reaches them (|rest| ≥ REST_KCAL for kcal, |rest| ≥ REST_MACROS for each macro), so sub-threshold noise from
+// rounding stays hidden in either direction (negative rests count too, when items overshoot the total)
+export const REST_KCAL = 5;
+export const REST_MACROS = 2;
+
+// The unexplained residue between an entry's displayed totals and its per-item rows, as { kcal, p, c, f, fib }:
+// per key = Math.round(eff(e)[k]) − Σ per item Math.round(i[k] * (e.mult || 1)), both sides display-rounded so the
+// printed rest cell exactly reconciles the printed cells for the numeric cells (a key absent on an item prints as
+// '–' instead of a number, yet counts as 0 in the sum, so '–' columns do not reconcile numerically). An item key
+// that is absent or stored-0 counts as 0 (an entry with no stored c/f/fib and items without macros still
+// reconciles). Pure and read-only: e and e.items are never touched, and an entry whose items are missing (or not
+// an array) rests on its full totals.
+export function itemRests(e) {
+  const mult = e.mult || 1; // the totals (via eff(e)) and the item cells always scale by the same e.mult
+  const ef = eff(e);
+  const r = { kcal: Math.round(ef.kcal), p: Math.round(ef.p), c: Math.round(ef.c), f: Math.round(ef.f), fib: Math.round(ef.fib) };
+  const list = Array.isArray(e.items) ? e.items : [];
+  for (const i of list)
+    for (const k of ['kcal', 'p', 'c', 'f', 'fib']) r[k] -= Math.round((i[k] || 0) * mult);
+  return r;
+}
 
 // What the edit sheet's kcal and macro fields write back on Save, as a {kcal, p, c, f, fib} patch ({ conf: 1, planId: '',
 // edited: true } added when kcal itself was changed), or {} when nothing changes. Pure: app.js reads the fields and spreads the

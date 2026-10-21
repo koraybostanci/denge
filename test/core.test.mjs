@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
+  itemRests, REST_KCAL, REST_MACROS,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
   parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
@@ -684,4 +685,53 @@ test('progressGen accessors: bump increments, reset sets 0', () => {
   resetProgressGen(); assert.equal(getProgressGen(), 0);
   bumpProgressGen(); bumpProgressGen(); assert.equal(getProgressGen(), 2);
   resetProgressGen(); assert.equal(getProgressGen(), 0);
+});
+
+const entryWithItems = { id: 'm1', day: '2026-10-21', kind: 'meal', kcal: 500, p: 30, c: 50, f: 20, fib: 4,
+  items: [{ n: 'egg', g: 100, kcal: 143, p: 12, c: 1, f: 10, fib: 0 }, { n: 'bread', g: 60, kcal: 157, p: 6, c: 30, f: 2, fib: 2 }] };
+test('itemRests: printed item cells reconcile to the printed entry totals (kcal and a macro)', () => {
+  assert.deepEqual(itemRests(entryWithItems), { kcal: 200, p: 12, c: 19, f: 8, fib: 2 });
+  // both sides display-rounded per key: complementary halves on either side cancel, so printed cells add up exactly
+  const halves = { id: 'm3', kind: 'meal', kcal: 500.6, p: 30.5, items: [{ kcal: 143.4, p: 12.5 }, { kcal: 356.6, p: 17.5 }] };
+  assert.deepEqual(itemRests(halves), { kcal: 1, p: 0, c: 0, f: 0, fib: 0 });
+});
+test('itemRests: an item key that is absent or stored-0 rests on the entry value, both cases alike', () => {
+  const noKeys = { ...entryWithItems, items: [{ n: 'tea' }, { n: 'bread', kcal: 157 }] }; // macro keys absent, fib stored-0 on the egg
+  assert.deepEqual(itemRests(noKeys), { kcal: 343, p: 30, c: 50, f: 20, fib: 4 });
+  const zeros = { ...entryWithItems, items: [{ n: 'tea', kcal: 0, p: 0, c: 0, f: 0, fib: 0 }, { n: 'bread', kcal: 157, fib: 0 }] };
+  assert.deepEqual(itemRests(zeros), itemRests(noKeys)); // stored-0 and absent are equal in the sum
+  const noItemMacros = { ...entryWithItems, p: 30.4, items: [{ kcal: 143 }, { kcal: 157 }] };
+  assert.deepEqual(itemRests(noItemMacros), { kcal: 200, p: 30, c: 50, f: 20, fib: 4 }); // eff coerces absent entry macros
+});
+test('itemRests: e.mult scales the totals and the item cells together; the printed cells still add up', () => {
+  const m = { id: 'm2', kind: 'meal', kcal: 500.4, p: 30.2, c: 50.6, f: 20.3, fib: 4.4,
+    items: [{ kcal: 143.2, p: 12.1, c: 10.3, f: 4.7, fib: 1.2 }, { kcal: 156.8, p: 13.8, c: 19.7, f: 5.9, fib: 1.4 }] };
+  assert.deepEqual(itemRests(m), { kcal: 200, p: 4, c: 21, f: 9, fib: 2 }); // no e.mult defaults it to 1
+  const half = { ...m, mult: 0.5 };
+  // e.mult scales both sides at once, so eff(e) and the item cells halve together and the residual halves with them
+  assert.deepEqual(itemRests(half), { kcal: 100, p: 2, c: 10, f: 5, fib: 0 });
+  assert.deepEqual(itemRests({ ...m, mult: 1.5 }), { kcal: 301, p: 6, c: 31, f: 14, fib: 3 });
+  assert.deepEqual(itemRests({ ...m, mult: 2 }), { kcal: 401, p: 8, c: 41, f: 20, fib: 4 });
+  for (const e of [m, half]) // property: the rest is the rounded total minus the rounded item sum, as printed
+    assert.equal(itemRests(e).kcal, Math.round(eff(e).kcal) - e.items.reduce((a, i) => a + Math.round((i.kcal || 0) * (e.mult || 1)), 0));
+});
+test('itemRests: items above the entry total rest negative, and an entry without items rests on its totals', () => {
+  const big = { ...entryWithItems, items: [{ kcal: 300 }, { kcal: 260 }] };
+  assert.deepEqual(itemRests(big), { kcal: -60, p: 30, c: 50, f: 20, fib: 4 });
+  const bare = { id: 'w0', kind: 'meal', kcal: 333.4, p: 10.4, items: undefined };
+  assert.deepEqual(itemRests(bare), { kcal: 333, p: 10, c: 0, f: 0, fib: 0 }); // absent items array is tolerated
+  assert.deepEqual(itemRests({ id: 'x', kind: 'meal', kcal: 100, items: 'not-an-array' }), { kcal: 100, p: 0, c: 0, f: 0, fib: 0 }); // truthy-but-not-array counts as no items
+  for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.equal(itemRests({ id: 'w1', kind: 'meal' })[k], 0); // never NaN
+});
+test('itemRests is pure and read-only: a frozen entry does not throw and prints the same JSON after', () => {
+  const before = JSON.stringify(entryWithItems);
+  itemRests(entryWithItems);
+  itemRests({ ...entryWithItems, mult: 1.5 });
+  assert.equal(JSON.stringify(entryWithItems), before);
+  const frozen = Object.freeze({ ...entryWithItems, items: entryWithItems.items.map(Object.freeze) });
+  assert.doesNotThrow(() => itemRests(frozen));
+});
+test('the run gates for the rest row are the named constants 5 kcal and 2 macro grams', () => {
+  assert.equal(REST_KCAL, 5);
+  assert.equal(REST_MACROS, 2);
 });
