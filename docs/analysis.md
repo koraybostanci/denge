@@ -50,3 +50,13 @@ largest review measured about 1,640 characters before and 3,000 after).
 Estimates from a photo are rough. Treat them as a starting point and correct the portion when
 it is off. Each item in an estimate now carries carbohydrates, fat and fibre next to the
 calories and protein, and the entry sheet's edit fields let you correct them along with the rest.
+
+In the entry sheet the item table shows what each food contributes: items are listed by
+calories, biggest first, and each kcal cell carries the item's share of the meal (`71%`, best read
+on a real screen — a tooltip names it). A last row explains what the item list cannot: a column
+with a residual of 5 kcal / 2 g or more gets its own rest cell, labelled "Your edit" after a
+manual calorie edit, "Estimate gap" where the item macros diverge from the entry totals, or
+"Not itemised" for an unedited calorie-only gap, so every column still adds up to the line above.
+When a correction pushes the total below the items' sum, the chips switch to sharing out the
+items' total instead, with a negative share on the rest row, so no item can claim more than
+100% of the meal. Storage is never rewritten by any of this: it is display-only.
