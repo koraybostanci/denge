@@ -561,7 +561,7 @@ const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { pla
 // The macro columns of the two item tables (entry sheet and plan sheet, kept identical): compact headers with the full word
 // in the abbr's title and the unit in small print; cells show '–' where an item lacks the key (one from before per-item macros).
 const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat')}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib')}</abbr><small>g</small></th>`;
-const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, unlike the check line below
+const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, the check line below treats it the same way now
 
 // Full entry, shown in the bottom sheet: photos, numbers, corrections
 function entryDetail(e) {
@@ -600,10 +600,10 @@ function entryDetail(e) {
     const gnum = (x) => (x == null ? '–' : n0(x));
     const restRow = list.length && itemSum > 0 && Math.abs(rest) >= 5
       ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : t('Not itemised')}</th><td></td><td class="items-kcal">${rest > 0 ? '+' : '−'}${n0(Math.abs(rest))}</td>${macros ? '<td colspan="4"></td>' : ''}</tr>` : '';
-    const items = list.length ? `<table class="items-table">
+    const items = list.length ? `<div class="items-scroll"><table class="items-table">
         <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macros ? macroHead() : ''}</tr></thead>
         <tbody>${list.map((i) => `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td class="items-kcal">${i.kcal ? n0(i.kcal * mult) : '–'}</td>${macros ? macroCells(i, mult) : ''}</tr>`).join('')}${restRow}</tbody>
-      </table>` : '';
+      </table></div>` : '';
     // The person can always tell the model what it could not see; if the model asked, its question is the prompt
     const prompt = e.q || (e.src === 'photo' ? t('Something the photo does not show?') : t('Something to correct?'));
     const question = canReanalyse ? `<div class="question${e.q ? ' is-asked' : ''}"><p id="ask-${esc(e.id)}">${esc(prompt)}</p><div><input id="answer-${esc(e.id)}" type="text" aria-labelledby="ask-${esc(e.id)}" enterkeyhint="send" autocomplete="off" placeholder="${e.q ? t('Answer briefly') : t('e.g. 2 eggs, low-fat cheese, baked')}"><button type="button" class="btn" data-act="answer" data-id="${esc(e.id)}">${t('Update')}</button></div><p class="note">${t('The model revises the items with your note.')}</p></div>` : '';
@@ -762,9 +762,9 @@ const checkWhen = (ts) => (dayKey(new Date(ts)) === today() ? hhmm(ts) : dTiny.f
 function checkOption(rec, o, i, rem) {
   const [label, pill] = FIT[o.fit] || FIT.ok;
   const dots = [1, 2, 3, 4, 5].map((k) => `<i${k <= o.rating ? ' class="on"' : ''}></i>`).join('');
-  // Macros after the kcal/protein line, kcal staying the bold primary number; '–' stands where a check has some but not all macros stored
-  const onum = (v) => (!v || v == null ? '–' : n0(v)); // a stored 0 next to the facts reads as noise: shown as '–' too, table cells keep theirs
-  const macros = o.c || o.f || o.fib; // a provider can omit c/f/fib entirely (they sit at 0): the macro clause then drops out instead of reading "– g"
+  // Macros after the kcal/protein line, kcal staying the bold primary number; '–' stands only where a check stores nothing for a macro, a stored 0 reads as a real 0
+  const onum = (v) => (v == null ? '–' : n0(v)); // absence ('never estimated') and a stored 0 differ: only absence is '–', like the table cells above
+  const macros = o.c != null || o.f != null || o.fib != null; // when all of c/f/fib are absent the clause drops out; all zeros are real values and stay, also for old rows that store them
   const nums = (o.kcal
     ? o.p
       ? macros
@@ -1446,10 +1446,10 @@ export function renderPlanSheet(id) {
     ${has ? `<button type="button" class="link link-danger" data-act="plan-photo-remove" data-id="${id}">${t('Remove photo')}</button>` : ''}
   </div>
   <p class="entry-value"><b>${m.kcal}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(m.p), c: n0(m.c), f: n0(m.f), fib: n0(m.fib) })}</span></p>
-  <table class="items-table">
+  <div class="items-scroll"><table class="items-table">
     <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macroHead()}</tr></thead>
     <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td class="items-kcal">${n0(i.kcal)}</td>${macroCells(i)}</tr>`).join('')}</tbody>
-  </table>
+  </table></div>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button>${canEditPlan() ? `
     <button type="button" class="btn btn-wide" data-act="plan-meal-edit" data-id="${id}">${t('Edit meal')}</button>` : ''}</div>`;
 }

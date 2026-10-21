@@ -68,7 +68,10 @@ leaves everything else in that database alone.
 | `weightplan_daily` (view) | day | the day's values, the 7-day weight average, and the meal totals with the day's `beers` |
 
 Calories, macros and grams are already multiplied by the portion. Only meals with `status = 'ok'`
-have numbers. `target_kcal` and `target_weight_kg` are worked out from your current Goals, so
+have numbers. The per-item macro columns (`carbs_g`, `fat_g`, `fibre_g` in `weightplan_meal_items`)
+lose the app's difference between "estimated as 0" and "never estimated", which the app shows as
+`–`: where nothing was stored for an item, the export writes 0. `target_kcal` and `target_weight_kg`
+are worked out from your current Goals, so
 changing them changes past rows. Photos, API keys and the coordinates of saved places are not
 exported.
 

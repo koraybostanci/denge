@@ -461,7 +461,7 @@ export default {
   // The macro headers of the item tables: Pro and Carb are shorthands with no plain entry, so they are keyed by id; the
   // abbr title and the Fat/Fib labels use the plain entries (Fat above, Fib below), no duplicate keys for the same cell.
   'itemth.pro': 'Pro',
-  'itemth.carb': 'Karb',
+  'itemth.carb': 'Karb.',
   Carbohydrate: 'Karbonhidrat',
   Fat: 'Yağ',
   Fibre: 'Lif',

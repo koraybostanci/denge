@@ -3,6 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { cleanEntry, PLAN_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -148,6 +149,17 @@ test('cleanItems: junk entries are emptied, capped at 12, and the caps come from
   assert.deepEqual([write.g, write.kcal, write.p, write.c, write.f, write.fib], [5000, 6000, 500, 800, 500, 150]);
   const names = cleanItems([{ n: ` ${'y'.repeat(90)} ` }, { n: 5 }], ITEM_CAPS_WRITE);
   assert.deepEqual(names.map((i) => i.n), ['y'.repeat(80), '5']);
+});
+
+// The caps must not drift: g mirrors the plan's grams cap, the other five mirror cleanEntry's entry-level caps
+// (the same numbers logMeal clamps the entry totals with), so a big plan food cannot store items bigger than its totals
+test('cleanItems: the item caps stay pinned to PLAN_CAPS.grams and cleanEntry\'s entry-level caps', () => {
+  const big = cleanItems([{ n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 }], ITEM_CAPS_WRITE)[0];
+  const entry = cleanEntry({ id: 'x1', day: '2026-10-14', ts: 0, kind: 'meal', kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 });
+  assert.equal(big.g, PLAN_CAPS.grams);
+  for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.equal(big[k], entry[k], `ITEM_CAPS_WRITE.${k} drifts from cleanEntry's entry-level cap`);
+  // the analysis handler keeps its tighter kcal/p caps inside the write range; c, f and fib are the same
+  for (const k of ['g', 'kcal', 'p', 'c', 'f', 'fib']) assert.ok(ITEM_CAPS_ANALYSIS[k] <= ITEM_CAPS_WRITE[k], `ITEM_CAPS_ANALYSIS.${k} exceeds ITEM_CAPS_WRITE.${k}`);
 });
 
 test('a review whose list is a plain string is accepted', async () => {

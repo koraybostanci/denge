@@ -105,12 +105,16 @@ function timestampFor(day, slotId) {
 
 async function logMeal(tpl, src, day = S.viewDay) {
   const ts = timestampFor(day, tpl.slot);
+  // The entry totals get the same clamps cleanEntry applies on any backup/restore (kcal 6,000, p 500, c 800, f 500,
+  // fib 150 — minus g, the numbers ITEM_CAPS_WRITE carries, which a test pins to cleanEntry), so the items and their
+  // sum cannot disagree at the cap
+  const cap = (v, max) => Math.min(max, Math.max(0, Number.isFinite(+v) ? +v : 0));
   const e = {
     id: db.uid(), ts, day, createdAt: Date.now(), kind: 'meal', status: 'ok', src,
     slot: tpl.slot && tpl.slot !== 'any' ? tpl.slot : slotByTime(new Date(ts)),
     planId: src === 'plan' ? tpl.id : '', title: tpl.name, ...((src === 'plan' || src === 'flex') && tpl.id ? titleFor('plan', { id: tpl.id }) : {}),
     items: cleanItems(tpl.items, ITEM_CAPS_WRITE), // a favourite whose items never had macros keeps them absent, not stored 0
-    kcal: tpl.kcal, p: tpl.p, c: tpl.c, f: tpl.f, fib: tpl.fib,
+    kcal: cap(tpl.kcal, ITEM_CAPS_WRITE.kcal), p: cap(tpl.p, ITEM_CAPS_WRITE.p), c: cap(tpl.c, ITEM_CAPS_WRITE.c), f: cap(tpl.f, ITEM_CAPS_WRITE.f), fib: cap(tpl.fib, ITEM_CAPS_WRITE.fib),
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
     photoIds: [], timeSrc: day === today() ? 'now' : 'manual', place: null,
   };
