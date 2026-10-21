@@ -45,8 +45,9 @@ test('label trifecta: a manual kcal edit → Your edit, a macro-only gap → Est
   assert.match(render(kcalOnly), /<th scope="row">Not itemised<\/th>/);
 });
 
-test('denominator branch: with items overshooting the total every chip stays at or under 100 percent, and no chip renders without a rest row', () => {
+test('denominator branch: with items overshooting the total every chip stays at or under 100 percent', () => {
   const e = put({ kcal: 100, items: [{ n: 'a', g: 10, kcal: 80 }, { n: 'b', g: 10, kcal: 50 }] }); // items sum 130 > 100, rest −30
+  // Chips render wherever more than one kcal-carrying item is shown — with or without a rest row; the lone-item rule below is what suppresses them
   const html = render(e);
   const pcts = [...html.matchAll(new RegExp(`title="${CHIP}">(?:−)?(\\d+)%<`, 'g'))].map((m) => Number(m[1]));
   assert.ok(pcts.length >= 3, 'two item chips and the rest chip should render');
