@@ -40,7 +40,7 @@ export function fixture() {
   for (let i = 0; i <= 9; i++) {
     const d = day(-i);
     // Today's breakfast carries items: one from before per-item macros (its macro cells show '–') and one with them, and
-    // kcal items do not add up to the entry, so the 'Not itemised' rest row shows too — all in the entry-sheet snapshot
+    // kcal items do not add up to the entry, so the 'Estimate gap' rest row shows too — all in the entry-sheet snapshot
     S.entries.push(meal(d, 8, 'breakfast', 'Oats with yoghurt', 420, 30, i === 0 ? { items: [{ n: 'Jumbo oats', g: 80, kcal: 300, p: 12 }, { n: 'Greek yoghurt', g: 170, kcal: 100, p: 18, c: 8, f: 0, fib: 0 }] } : {}), meal(d, 13, 'lunch', 'Chicken and rice', 650, 45), meal(d, 19, 'dinner', i % 3 === 0 ? 'Pizza night' : 'Salmon and salad', i % 3 === 0 ? 900 : 560, i % 3 === 0 ? 30 : 40, i % 3 === 0 ? { tier: 'flex' } : {}));
     S.entries.push({ id: `w${i}`, day: d, ts: at(d, 7), createdAt: at(d, 7), kind: 'weight', status: 'ok', kg: 87 - i * -0.1, title: 'Weight' });
     S.days[d] = { day: d, kg: 86.5 + i * 0.1, steps: 6000 + i * 400, water: 1500 + i * 100, train: i % 2 === 0, coffee: i % 4 };

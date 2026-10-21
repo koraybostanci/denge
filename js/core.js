@@ -144,20 +144,25 @@ export const eff = (e) => {
   return { kcal: (e.kcal || 0) * m, p: (e.p || 0) * m, c: (e.c || 0) * m, f: (e.f || 0) * m, fib: (e.fib || 0) * m };
 };
 
-// Thresholds for the entry-sheet rest row: a column shows its rest only when the display-rounded residual
-// reaches them (kcal ≥ REST_KCAL, each macro ≥ REST_MACROS), so sub-threshold noise from rounding stays hidden
+// Thresholds for the entry-sheet rest row: a column shows its rest only when the display-rounded absolute residual
+// reaches them (|rest| ≥ REST_KCAL for kcal, |rest| ≥ REST_MACROS for each macro), so sub-threshold noise from
+// rounding stays hidden in either direction (negative rests count too, when items overshoot the total)
 export const REST_KCAL = 5;
 export const REST_MACROS = 2;
 
 // The unexplained residue between an entry's displayed totals and its per-item rows, as { kcal, p, c, f, fib }:
-// per key = Math.round(eff(e)[k]) − Σ per item Math.round(i[k] * mult), both sides display-rounded so the
-// printed rest cell exactly reconciles the printed cells. An item key that is absent or stored-0 counts as 0
-// (an entry with no stored c/f/fib and items without macros still reconciles). Pure and read-only: e and
-// e.items are never touched, and an entry without an items array rests on its full totals.
-export function itemRests(e, mult = e.mult || 1) {
+// per key = Math.round(eff(e)[k]) − Σ per item Math.round(i[k] * (e.mult || 1)), both sides display-rounded so the
+// printed rest cell exactly reconciles the printed cells for the numeric cells (a key absent on an item prints as
+// '–' instead of a number, yet counts as 0 in the sum, so '–' columns do not reconcile numerically). An item key
+// that is absent or stored-0 counts as 0 (an entry with no stored c/f/fib and items without macros still
+// reconciles). Pure and read-only: e and e.items are never touched, and an entry whose items are missing (or not
+// an array) rests on its full totals.
+export function itemRests(e) {
+  const mult = e.mult || 1; // the totals (via eff(e)) and the item cells always scale by the same e.mult
   const ef = eff(e);
   const r = { kcal: Math.round(ef.kcal), p: Math.round(ef.p), c: Math.round(ef.c), f: Math.round(ef.f), fib: Math.round(ef.fib) };
-  for (const i of e.items || [])
+  const list = Array.isArray(e.items) ? e.items : [];
+  for (const i of list)
     for (const k of ['kcal', 'p', 'c', 'f', 'fib']) r[k] -= Math.round((i[k] || 0) * mult);
   return r;
 }

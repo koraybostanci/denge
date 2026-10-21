@@ -563,7 +563,7 @@ const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { pla
 // Both item tables also render their items in the same display order: sorted by kcal, biggest first — the tables stay identical.
 // The sort never touches storage: a spread copy is sorted, so e.items / m.items keep their stored order.
 const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat')}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib')}</abbr><small>g</small></th>`;
-const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, the check line below treats it the same way now
+const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value the person can see and edit, so it prints as "0 g" rather than collapsing into the missing-key '–'
 
 // Full entry, shown in the bottom sheet: photos, numbers, corrections
 function entryDetail(e) {
@@ -596,7 +596,7 @@ function entryDetail(e) {
     // Per-column rest cells absorb what per-item estimates and manual edits leave over: a manual edit updates the summary line without touching the items, so the rest cells carry the divergence honestly.
     const list = e.items || [];
     const macros = list.some((i) => i.c != null || i.f != null || i.fib != null); // no item carries macros (an old entry): the table keeps its three columns
-    const r = itemRests(e, mult);
+    const r = itemRests(e);
     // A column shows its rest only where the entry has a real total (eff > 0) and the display-rounded residual reaches its threshold; everything below stays an empty cell
     const kcalRest = v.kcal > 0 && Math.abs(r.kcal) >= REST_KCAL;
     const macroRest = macros ? { p: v.p > 0 && Math.abs(r.p) >= REST_MACROS, c: v.c > 0 && Math.abs(r.c) >= REST_MACROS, f: v.f > 0 && Math.abs(r.f) >= REST_MACROS, fib: v.fib > 0 && Math.abs(r.fib) >= REST_MACROS } : {};
@@ -604,16 +604,16 @@ function entryDetail(e) {
     // Share-% chips live in the kcal column only: against the shown total when the rest is non-negative, against the scaled item sum when items overshoot it (so shares cannot pass 100%); at denom ≤ 0 there is nothing to share out
     const itemSum = list.reduce((a, i) => a + (i.kcal || 0) * mult, 0);
     const denom = r.kcal < 0 ? itemSum : v.kcal;
-    const shares = denom > 0;
+    const shoppable = denom > 0; // yes/no gate: chips show only where there is something to share out
     const loneItem = !kcalRest && !macroGap && list.filter((i) => i.kcal).length === 1; // a single item making up the whole meal needs no chip
-    const restPct = kcalRest && shares ? Math.round(Math.abs(r.kcal) / denom * 100) : 0;
+    const restPct = kcalRest && shoppable ? Math.round(Math.abs(r.kcal) / denom * 100) : 0;
     const items = list.length ? `<div class="items-scroll"><table class="items-table">
         <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macros ? macroHead() : ''}</tr></thead>
         <tbody>${[...list].sort((a, b) => (b.kcal || 0) - (a.kcal || 0)).map((i) => {
-          const pct = shares && !loneItem && i.kcal ? Math.round((i.kcal * mult) / denom * 100) : 0;
-          return `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td class="items-kcal">${i.kcal ? n0(i.kcal * mult) : '–'}${pct >= 1 ? `<small title="${t('Share of the meal')}">${pct}%</small>` : ''}</td>${macros ? macroCells(i, mult) : ''}</tr>`;
+          const pct = shoppable && !loneItem && i.kcal ? Math.round((i.kcal * mult) / denom * 100) : 0;
+          return `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td class="items-kcal">${i.kcal ? n0(i.kcal * mult) : '–'}${pct >= 1 ? `<small title="${esc(t('Share of the meal'))}">${pct}%</small>` : ''}</td>${macros ? macroCells(i, mult) : ''}</tr>`;
         }).join('')}${kcalRest || macroGap ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : macroGap ? t('Estimate gap') : t('Not itemised')}</th><td></td>${
-          kcalRest ? `<td class="items-kcal">${r.kcal > 0 ? '+' : '−'}${n0(Math.abs(r.kcal))}${restPct >= 1 ? `<small title="${t('Share of the meal')}">${r.kcal < 0 ? '−' : ''}${restPct}%</small>` : ''}</td>` : '<td></td>'
+          kcalRest ? `<td class="items-kcal">${r.kcal > 0 ? '+' : '−'}${n0(Math.abs(r.kcal))}${restPct >= 1 ? `<small title="${esc(t('Share of the meal'))}">${r.kcal < 0 ? '−' : ''}${restPct}%</small>` : ''}</td>` : '<td></td>'
         }${Object.entries(macroRest).map(([k, on]) => on ? `<td>${r[k] > 0 ? '+' : '−'}${n0(Math.abs(r[k]))} g</td>` : '<td></td>').join('')}</tr>` : ''}</tbody>
       </table></div>` : '';
     // The person can always tell the model what it could not see; if the model asked, its question is the prompt
