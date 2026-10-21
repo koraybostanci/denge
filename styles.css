@@ -115,7 +115,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; touch-action: pan-x pan-y; } /* panning only: a two-finger pinch must not resize the page (the frame canvas opts back in with touch-action: none) */
 body {
   margin: 0;
   background: var(--bg);
