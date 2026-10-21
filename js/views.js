@@ -560,7 +560,7 @@ const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { pla
 
 // The macro columns of the two item tables (entry sheet and plan sheet, kept identical): compact headers with the full word
 // in the abbr's title and the unit in small print; cells show '–' where an item lacks the key (one from before per-item macros).
-const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat', { $id: 'itemth.fat' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib', { $id: 'itemth.fib' })}</abbr><small>g</small></th>`;
+const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat')}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib')}</abbr><small>g</small></th>`;
 const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, unlike the check line below
 
 // Full entry, shown in the bottom sheet: photos, numbers, corrections
@@ -762,11 +762,18 @@ const checkWhen = (ts) => (dayKey(new Date(ts)) === today() ? hhmm(ts) : dTiny.f
 function checkOption(rec, o, i, rem) {
   const [label, pill] = FIT[o.fit] || FIT.ok;
   const dots = [1, 2, 3, 4, 5].map((k) => `<i${k <= o.rating ? ' class="on"' : ''}></i>`).join('');
-  // Macros after the kcal/protein line, kcal staying the bold primary number; '–' stands where an old check has no value stored
+  // Macros after the kcal/protein line, kcal staying the bold primary number; '–' stands where a check has some but not all macros stored
   const onum = (v) => (!v || v == null ? '–' : n0(v)); // a stored 0 next to the facts reads as noise: shown as '–' too, table cells keep theirs
-  const nums = o.kcal
-    ? `${o.p ? t('<b>{kcal}</b> kcal, {p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), p: n0(o.p), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) }) : t('<b>{kcal}</b> kcal, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) })}${o.portion ? `<small>${esc(o.portion)}</small>` : ''}`
-    : esc(o.portion);
+  const macros = o.c || o.f || o.fib; // a provider can omit c/f/fib entirely (they sit at 0): the macro clause then drops out instead of reading "– g"
+  const nums = (o.kcal
+    ? o.p
+      ? macros
+        ? t('<b>{kcal}</b> kcal, {p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), p: n0(o.p), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) })
+        : t('<b>{kcal}</b> kcal, {p} g protein', { kcal: n0(o.kcal), p: n0(o.p) })
+      : macros
+        ? t('<b>{kcal}</b> kcal, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) })
+        : t('<b>{kcal}</b> kcal', { kcal: n0(o.kcal) })
+    : esc(o.portion)) + (o.kcal && o.portion ? `<small>${esc(o.portion)}</small>` : '');
   // What the portion does to today's budget: for food eaten now, not for shopping, and only on the day of the check
   let budget = '';
   if (rec.kind !== 'product' && o.kcal && rem != null) {

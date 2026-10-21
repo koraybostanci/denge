@@ -111,24 +111,25 @@ test('a check: hostile numbers and shapes from the model are clamped', async () 
   assert.deepEqual([data.options[0].kcal, data.options[0].rating, data.options[0].p], [5000, 5, 0]);
 });
 
-test('an analysis request sets its own token budget above the callModel default: three macros × up to 12 items', async () => {
+test('an analysis request sets its own token budget above the callModel default: three macros × up to 12 items, with headroom', async () => {
   mockFetch(() => reply(200, claudeBody(meal)));
   await ask(haiku);
-  assert.equal(calls[0].body.max_tokens, 800);
+  assert.equal(calls[0].body.max_tokens, 1000);
 });
 
 // ——— Per-item macros at write time (cleanItems) ———
-test('cleanItems: items keep all five macros, missing ones become 0', () => {
+test('cleanItems: an explicit macro is capped in, a real 0 stays 0, and a macro the source does not give stays absent', () => {
   assert.deepEqual(
     cleanItems([{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }], ITEM_CAPS_ANALYSIS),
     [{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }],
   );
-  // a pre-feature item (no macros anywhere) and a template item missing some of them both store 0, never undefined
-  assert.deepEqual(cleanItems([{ n: 'old favourite', g: 100, kcal: 143, p: 12 }, { n: 'Soup' }, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 }], ITEM_CAPS_WRITE), [
-    { n: 'old favourite', g: 100, kcal: 143, p: 12, c: 0, f: 0, fib: 0 },
-    { n: 'Soup', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
-    { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17, f: 0, fib: 0 },
-  ]);
+  // a pre-feature item (no macros anywhere) and a template item missing some of them: the missing keys are stored absent
+  // ('never estimated', so the sheet reads '–', not '0 g'), n/g/kcal/p are always present
+  const [oldFavourite, soup, beer] = cleanItems([{ n: 'old favourite', g: 100, kcal: 143, p: 12 }, { n: 'Soup' }, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 }], ITEM_CAPS_WRITE);
+  assert.deepEqual(oldFavourite, { n: 'old favourite', g: 100, kcal: 143, p: 12 });
+  assert.deepEqual(soup, { n: 'Soup', g: 0, kcal: 0, p: 0 });
+  assert.deepEqual(beer, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 });
+  assert.equal(['c', 'f', 'fib'].some((k) => k in oldFavourite), false);
   assert.deepEqual(cleanItems(undefined, ITEM_CAPS_WRITE), []);
   assert.deepEqual(cleanItems('junk', ITEM_CAPS_WRITE), []);
 });
@@ -136,10 +137,10 @@ test('cleanItems: items keep all five macros, missing ones become 0', () => {
 test('cleanItems: junk entries are emptied, capped at 12, and the caps come from the call site', () => {
   const junk = cleanItems([{ n: 'x', g: 1e9, kcal: 1e9, p: -4, c: 'x', f: true }, null, 'junk', 5], ITEM_CAPS_WRITE);
   assert.deepEqual(junk, [
-    { n: 'x', g: 5000, kcal: 6000, p: 0, c: 0, f: 1, fib: 0 },
-    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
-    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
-    { n: '', g: 0, kcal: 0, p: 0, c: 0, f: 0, fib: 0 },
+    { n: 'x', g: 5000, kcal: 6000, p: 0, f: 1 }, // p is clamped to 0 (it was given), junk c falls to absent, +true is 1
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: '', g: 0, kcal: 0, p: 0 },
   ]);
   const big = { n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 };
   assert.deepEqual(cleanItems([big], ITEM_CAPS_ANALYSIS)[0], { n: 'x', g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 });

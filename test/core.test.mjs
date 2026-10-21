@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
   parseLocal, mealById, titleFor, releasePhotos, mealTimesLine, mainSlots,
@@ -548,6 +548,25 @@ test('titleFor: a plan kind gives only its tk, the other kinds a title and tk', 
     assert.equal(r.tk.kind, kind);
     assert.ok(r.title);
   }
+});
+
+// ——— The edit sheet save (macroEdits): the raw save-edit path is DOM code, so the pure seam lives here ———
+test('macroEdits: an untouched rounded-display field keeps the stored precision, an edit saves single-portion rounded', () => {
+  // stored 1.2 at half portions shows 1: saving it again must not overwrite 1.2 with 1
+  assert.deepEqual(macroEdits({ mult: 0.5, kcal: 300, p: 12, c: 1.2, f: 10.4, fib: 3 }, { kcal: 150, p: 6, c: 1, f: 5, fib: 2 }), {});
+  // what the person typed is stored single-portion: kcal to a whole number, macros to 0.1 — kcal applies it after the edit
+  assert.deepEqual(macroEdits({ kcal: 300, p: 20, c: 30, f: 12, fib: 5 }, { kcal: 420, p: 11, c: 0.63, f: 30, fib: 0.04 }),
+    { kcal: 420, conf: 1, planId: '', edited: true, p: 11, c: 0.6, f: 30, fib: 0 });
+  assert.deepEqual(macroEdits({ mult: 2, p: 10 }, { p: 21 }), { p: 10.5 }); // typed at two portions: stored for one
+  // a plan meal keeps its match while macros are edited; the kcal edit is the one that marks and unmatches
+  assert.deepEqual(macroEdits({ kcal: 300, planId: 'L-A', mult: 1 }, { c: 15 }), { c: 15 });
+});
+test('macroEdits: blank, non-finite or negative fields change nothing; absent macros fill in from the sheet as stored', () => {
+  assert.deepEqual(macroEdits({ mult: 1.5, p: 10, c: 8, f: 6, fib: 2 }, { kcal: '', p: NaN, c: undefined, f: Infinity, fib: -3 }), {});
+  // fib was never estimated (absent, eff treats it as 0): the shown 0 matches, so nothing is written; a typed
+  // value over that 0 is stored as it is
+  assert.deepEqual(macroEdits({ p: 10, c: 8, f: 6 }, { kcal: 300, p: 10, c: 8, f: 6, fib: 0 }), { kcal: 300, conf: 1, planId: '', edited: true });
+  assert.deepEqual(macroEdits({ p: 10, c: 8, f: 6 }, { fib: 4 }), { fib: 4 });
 });
 
 // ——— The review of the whole log ———

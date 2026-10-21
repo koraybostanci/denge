@@ -25,10 +25,21 @@ const MEAL_ID = new RegExp(`^[A-Za-z][\\w-]{0,${MEAL_ID_MAX - 1}}$`);
 const isMealId = (k) => ownSafe(k) && MEAL_ID.test(k);
 const PLAN_PHOTOS_MAX = 200;
 const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 20)).slice(0, 4) : []);
-// An item keeps only its shape (n, grams and the five macros); a missing macro is stored as 0, an old backup
-// without the new fields still restores through it, and the caps are the ones an app entry can carry (kcal and
-// macros here mirror cleanEntry's entry-level caps below).
-const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => ({ n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500), c: pos(i && i.c, 800), f: pos(i && i.f, 500), fib: pos(i && i.fib, 150) }));
+// A macro of one item: capped when the source carries a number, absent when it does not (never silent 0; see itemList below)
+// An item keeps only its shape (n, grams and the five macros); the caps are the ones an app entry can carry (kcal and
+// macros here mirror cleanEntry's entry-level caps below). Like cleanItems in js/ai.js: a macro the source item does
+// not give (or gives as junk) stays absent, an explicit one is capped, so a backup round-trip never turns a
+// "never estimated" item into "0 g". An old backup without the new fields still restores through it.
+const macro = (v, max) => (Number.isFinite(+v) && (typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.trim())) ? Math.max(0, Math.min(max, +v)) : undefined);
+const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => {
+  const item = { n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500) };
+  const src = i && typeof i === 'object' ? i : {};
+  for (const [k, max] of [['c', 800], ['f', 500], ['fib', 150]]) {
+    const x = macro(src[k], max);
+    if (x !== undefined) item[k] = x; // the key stays absent when the source gives no number
+  }
+  return item;
+});
 
 // The recipe of a generated title (see titleOf in js/core.js): a known kind and a few plain parameters. Anything else is dropped,
 // and the entry keeps its English title.

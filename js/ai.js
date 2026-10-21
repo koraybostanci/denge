@@ -276,7 +276,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 800 };
+  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1000 }; // headroom above the analysis shape; the OpenAI path doubles the budget for thinking models
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -567,19 +567,26 @@ export function cleanFoodValues(d) {
 export const ITEM_CAPS_ANALYSIS = { g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 };
 export const ITEM_CAPS_WRITE = { g: 5000, kcal: 6000, p: 500, c: 800, f: 500, fib: 150 };
 
-// The items of a meal entry, the way any path stores them: a fixed shape of n, g and the five macros, missing
-// values coerced to 0 and never undefined (structured clone preserves undefined into IndexedDB, and one backup
-// round-trip would then flip it to 0, silently mutating old favourites). At most 12 items; unknown junk is dropped.
-// Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
+// The items of a meal entry, the way any path stores them: a fixed shape of n, g and the five macros. n, g, kcal and p
+// are always present; the key of c, f or fib stays absent when the SOURCE item gives no usable number for it —
+// absence means "never estimated", a stored 0 means "estimated as 0", so a meal logged from an old favourite does not
+// claim "0 g carbs". Absence survives both storages: a spread of such an item never adds an undefined key, and a backup
+// round-trip restores through itemList in js/backup.js, which leaves the keys absent the same way. At most 12 items;
+// unknown junk is dropped. Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
 export function cleanItems(items, caps) {
   const cap = (v, max) => Math.min(max, Math.max(0, +v || 0)); // NaN and undefined fall to 0
+  const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
+  const macro = (v, max) => (Number.isFinite(num(v)) ? Math.min(max, Math.max(0, num(v))) : undefined); // absent when the source has no number
   return (Array.isArray(items) ? items : []).slice(0, 12)
     .map((i) => (i && typeof i === 'object' ? i : {}))
-    .map((i) => ({
-      n: clean(i.n, 80),
-      g: cap(i.g, caps.g), kcal: cap(i.kcal, caps.kcal), p: cap(i.p, caps.p),
-      c: cap(i.c, caps.c), f: cap(i.f, caps.f), fib: cap(i.fib, caps.fib),
-    }));
+    .map((i) => {
+      const item = { n: clean(i.n, 80), g: cap(i.g, caps.g), kcal: cap(i.kcal, caps.kcal), p: cap(i.p, caps.p) };
+      for (const k of ['c', 'f', 'fib']) {
+        const m = macro(i[k], caps[k]);
+        if (m !== undefined) item[k] = m; // the key only enters the object when the source gave a number
+      }
+      return item;
+    });
 }
 
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message
