@@ -450,6 +450,8 @@ export default {
   'Plan meal': 'Plan öğünü',
   'Your edit': 'Düzenlemen',
   'Not itemised': 'Kalemlere ayrılmadı',
+  'Estimate gap': 'Tahmin farkı',
+  'Share of the meal': 'Yemeğindeki payı',
   Item: 'Kalem',
   Amount: 'Miktar',
   'Something the photo does not show?': 'Fotoğrafın göstermediği bir şey mi var?',
