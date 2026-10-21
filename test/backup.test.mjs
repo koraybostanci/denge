@@ -6,7 +6,7 @@ import { SCHEMA_VERSION } from '../js/core.js';
 
 const good = {
   id: 'abc123', ts: 1759300000000, day: '2026-10-01', kind: 'meal', status: 'ok', slot: 'lunch', title: 'Egg', kcal: 500, p: 30, c: 5, f: 20, fib: 2,
-  tier: 'plan', flags: ['alcohol'], conf: 0.8, mult: 1.5, photoIds: ['p1'], items: [{ n: 'egg', g: 100, kcal: 143, p: 12 }],
+  tier: 'plan', flags: ['alcohol'], conf: 0.8, mult: 1.5, photoIds: ['p1'], items: [{ n: 'egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }],
   place: 'Home', timeSrc: 'exif', src: 'photo', q: '', planId: 'L-A', edited: true,
 };
 
@@ -44,6 +44,18 @@ test('entry fields are clamped and given the right type', () => {
   assert.equal(cleanEntry({ ...good, kcal: Infinity }).kcal, 0);
   assert.equal(cleanEntry({ ...good, place: { x: 1 } }).place, null);
   assert.deepEqual(cleanEntry({ ...good, photoIds: ['ok1', '"><b>', 5, 'x'.repeat(50)] }).photoIds, ['ok1']);
+});
+
+test('items: capped and cut to the item limits; absence survives the round trip (absent = never estimated, not 0)', () => {
+  const capped = cleanEntry({ ...good, items: [{ n: 'x', g: 1e9, kcal: 1e9, p: -4, c: 'x', f: 900, fib: 999 }, null, 'junk', { n: 'y' }] });
+  assert.deepEqual(capped.items, [
+    { n: 'x', g: 5000, kcal: 6000, p: 0, f: 500, fib: 150 }, // c given as junk text stays absent, f and fib are capped
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: 'y', g: 0, kcal: 0, p: 0 },
+  ]);
+  // a JSON round trip (a backup file) drops the absent keys and restores through itemList as absent again
+  assert.deepEqual(cleanEntry(JSON.parse(JSON.stringify(capped))).items, capped.items);
 });
 
 test('a weigh-in keeps only the fields it had', () => {

@@ -458,7 +458,14 @@ export default {
   'e.g. 2 eggs, low-fat cheese, baked': 'örn. 2 yumurta, az yağlı peynir, fırında',
   Update: 'Güncelle',
   'The model revises the items with your note.': 'Model kalemleri notunla yeniden düzenler.',
-  '{p} g protein, {c} g carbs, {f} g fat': '{p} g protein, {c} g karbonhidrat, {f} g yağ',
+  // The macro headers of the item tables: Pro and Carb are shorthands with no plain entry, so they are keyed by id; the
+  // abbr title and the Fat/Fib labels use the plain entries (Fat above, Fib below), no duplicate keys for the same cell.
+  'itemth.pro': 'Pro',
+  'itemth.carb': 'Karb.',
+  Carbohydrate: 'Karbonhidrat',
+  Fat: 'Yağ',
+  Fibre: 'Lif',
+  Fib: 'Lif',
   'Rough estimate. A short note below tightens it.': 'Kaba tahmin. Aşağıya kısa bir not yazarsan daha kesin olur.',
   Portion: 'Porsiyon',
   'Protein (g)': 'Protein (g)',
@@ -508,7 +515,9 @@ export default {
   Menu: 'Menü',
   Product: 'Ürün',
   Dish: 'Yemek',
-  '<b>{kcal}</b> kcal, {p} g protein': '<b>{kcal}</b> kcal, {p} g protein',
+  '<b>{kcal}</b> kcal, {p} g protein, {c} g carbs, {f} g fat, {fib} g fibre': '<b>{kcal}</b> kcal, {p} g protein, {c} g karbonhidrat, {f} g yağ, {fib} g lif',
+  '<b>{kcal}</b> kcal, {c} g carbs, {f} g fat, {fib} g fibre': '<b>{kcal}</b> kcal, {c} g karbonhidrat, {f} g yağ, {fib} g lif',
+  '<b>{kcal}</b> kcal, {p} g protein': '<b>{kcal}</b> kcal, {p} g protein', // a check the provider gave no macros for: the kcal and protein stay
   '<b>{kcal}</b> kcal': '<b>{kcal}</b> kcal',
   'Leaves {kcal} kcal of today’s budget.': 'Bugünün bütçesinde {kcal} kcal kalır.',
   '{kcal} kcal more than is left today.': 'Bugün kalandan {kcal} kcal fazla.',

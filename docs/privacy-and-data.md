@@ -63,12 +63,15 @@ leaves everything else in that database alone.
 | `weightplan_supplement_log` | day, supplement_id | `day`, `supplement_id` (one row per supplement ticked that day) |
 | `weightplan_days` | day | `day`, `weight_kg`, `steps`, `water_ml`, `coffee_cups`, `workout`, `target_kcal`, `target_weight_kg` |
 | `weightplan_meals` | logged meal | `id`, `day`, `logged_at`, `slot`, `title`, `source`, `plan_id`, `tier`, `status`, `portion`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g`, `confidence`, `place`, `note`, `photos`, `flags` |
-| `weightplan_meal_items` | ingredient of a meal | `meal_id`, `position`, `name`, `grams`, `kcal`, `protein_g` |
+| `weightplan_meal_items` | ingredient of a meal | `meal_id`, `position`, `name`, `grams`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g` |
 | `weightplan_settings` | setting | `key`, `value` (dates, weights, daily goals, and the export's own version and time) |
 | `weightplan_daily` (view) | day | the day's values, the 7-day weight average, and the meal totals with the day's `beers` |
 
 Calories, macros and grams are already multiplied by the portion. Only meals with `status = 'ok'`
-have numbers. `target_kcal` and `target_weight_kg` are worked out from your current Goals, so
+have numbers. The per-item macro columns (`carbs_g`, `fat_g`, `fibre_g` in `weightplan_meal_items`)
+lose the app's difference between "estimated as 0" and "never estimated", which the app shows as
+`–`: where nothing was stored for an item, the export writes 0. `target_kcal` and `target_weight_kg`
+are worked out from your current Goals, so
 changing them changes past rows. Photos, API keys and the coordinates of saved places are not
 exported.
 

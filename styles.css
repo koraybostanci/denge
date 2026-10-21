@@ -485,13 +485,19 @@ button.tile:active, .tile-main:active, .chip:active, .btn:active { transform: sc
 @keyframes spin { to { transform: rotate(1turn); } }
 .items { margin-top: 12px; border-top: 1px solid var(--line); }
 .items li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
-.items-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14.5px; }
+/* The table may grow past 100% when a long item squeezes badly; its .items-scroll wrapper scrolls sideways instead */
+.items-table { width: max-content; min-width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14.5px; }
+.items-scroll { overflow-x: auto; }
+/* The macro headers' <abbr> tooltips must not get the browser's dotted underline */
+abbr { text-decoration: none; }
 .items-table th, .items-table td { padding: 7px 0; border-bottom: 1px solid var(--line); font-weight: 400; text-align: left; vertical-align: baseline; }
 .items-table thead th { font-size: 12.5px; color: var(--ink2); padding-top: 0; }
 .items-table td, .items-table thead th + th { text-align: right; white-space: nowrap; padding-left: 14px; font-family: var(--num); font-variant-numeric: tabular-nums; }
 .items-table td { color: var(--ink2); }
-.items-table td:last-child { color: var(--ink); font-weight: 600; }
+.items-table td.items-kcal { color: var(--ink); font-weight: 600; }
 .items-rest th, .items-rest td { color: var(--ink2); font-style: italic; }
+/* The rest row sits in the kcal column, which the item cells render dark and bold on; the muted italic of .items-rest wins back there */
+.items-rest td.items-kcal { color: var(--ink2); font-weight: 400; font-style: italic; }
 .question { margin-top: 12px; padding: 10px 12px; border-radius: var(--r-card); background: var(--raised); border: 1px solid var(--line); }
 .question.is-asked { border-color: var(--tape); }
 .question .note { margin-top: 6px; font-size: 13px; font-weight: 400; }

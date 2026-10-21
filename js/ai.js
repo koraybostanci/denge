@@ -4,6 +4,7 @@
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
 import { S, mealTimesLine, kcalMinDay } from './core.js';
+import { MACRO_CAPS, ITEM_MACRO_CAPS } from './backup.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -24,7 +25,7 @@ function workoutNote(plan) {
 const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
-For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
+For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
 slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
@@ -58,7 +59,7 @@ const SCHEMA = {
         type: 'object',
         additionalProperties: false,
         required: ['n', 'g', 'kcal', 'p'],
-        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' } },
+        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
       },
     },
     kcal: { type: 'number' },
@@ -140,7 +141,7 @@ export const ZEN_FREE = [
   'longcat-2.5-preview-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'ling-3.0-flash-fin-free', 'jev-1.13-free',
 ];
 
-const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
+const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
 
 function classify(status, msg) {
   // 429 is a quota or rate limit, whatever the text says: Gemini's quota message mentions "billing" on the free tier too.
@@ -276,7 +277,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true };
+  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -511,7 +512,7 @@ export function cleanVerdict(d) {
     return {
       name: clean(x.name, 90), rating: Math.min(5, Math.max(1, Math.round(+x.rating || 3))),
       fit: ['good', 'ok', 'avoid'].includes(x.fit) ? x.fit : 'ok', portion: clean(x.portion, 40),
-      kcal: num(x.kcal, 5000), p: num(x.p, 500), c: num(x.c, 800), f: num(x.f, 500), fib: num(x.fib, 150),
+      kcal: num(x.kcal, 5000), p: num(x.p, MACRO_CAPS.p), c: num(x.c, ITEM_MACRO_CAPS.c), f: num(x.f, ITEM_MACRO_CAPS.f), fib: num(x.fib, ITEM_MACRO_CAPS.fib),
       facts: clean(x.facts, 160), why: clean(x.why, 220), tip: clean(x.tip, 160),
       tier: ['plan', 'flex', 'off'].includes(x.tier) ? x.tier : 'flex',
     };
@@ -557,6 +558,46 @@ export function cleanFoodValues(d) {
   if (!known || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
   const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
   return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
+}
+
+// The caps of one food item, per call site. Call sites that already cap items keep their own values, so behaviour
+// does not change under them: the analysis handler keeps its tighter kcal/p caps, the template paths (a matched
+// plan meal, logMeal, logCheckOption) use the persisted range that cleanEntry/itemList in js/backup.js enforce on
+// any backup/restore; values above it are transient today, so write-time clamping aligns stored items with it.
+// The macros are not restated here: they read backup.js's MACRO_CAPS and ITEM_MACRO_CAPS, the
+// one range cleanEntry clamps an entry with, so the numbers cannot drift. The reads are getters because the two
+// modules import each other and, when backup.js is loaded first (views.js, the backup tests), it is still
+// evaluating while this file runs — reading the constants top-level would throw there.
+export const ITEM_CAPS_ANALYSIS = {
+  get g() { return 5000; }, get kcal() { return 3000; }, get p() { return 300; },
+  get c() { return ITEM_MACRO_CAPS.c; }, get f() { return ITEM_MACRO_CAPS.f; }, get fib() { return ITEM_MACRO_CAPS.fib; },
+};
+export const ITEM_CAPS_WRITE = {
+  get g() { return 5000; },
+  get kcal() { return MACRO_CAPS.kcal; }, get p() { return MACRO_CAPS.p; },
+  get c() { return ITEM_MACRO_CAPS.c; }, get f() { return ITEM_MACRO_CAPS.f; }, get fib() { return ITEM_MACRO_CAPS.fib; },
+};
+
+// The items of a meal entry, the way any path stores them: a fixed shape of n, g and the five macros. n, g, kcal and p
+// are always present; the key of c, f or fib stays absent when the SOURCE item gives no usable number for it —
+// absence means "never estimated", a stored 0 means "estimated as 0", so a meal logged from an old favourite does not
+// claim "0 g carbs". Absence survives both storages: a spread of such an item never adds an undefined key, and a backup
+// round-trip restores through itemList in js/backup.js, which leaves the keys absent the same way. At most 12 items;
+// unknown junk is dropped. Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
+export function cleanItems(items, caps) {
+  const cap = (v, max) => Math.min(max, Math.max(0, +v || 0)); // NaN and undefined fall to 0
+  const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
+  const macro = (v, max) => (Number.isFinite(num(v)) ? Math.min(max, Math.max(0, num(v))) : undefined); // absent when the source has no number
+  return (Array.isArray(items) ? items : []).slice(0, 12)
+    .map((i) => (i && typeof i === 'object' ? i : {}))
+    .map((i) => {
+      const item = { n: clean(i.n, 80), g: cap(i.g, caps.g), kcal: cap(i.kcal, caps.kcal), p: cap(i.p, caps.p) };
+      for (const k of ['c', 'f', 'fib']) {
+        const m = macro(i[k], caps[k]);
+        if (m !== undefined) item[k] = m; // the key only enters the object when the source gave a number
+      }
+      return item;
+    });
 }
 
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message

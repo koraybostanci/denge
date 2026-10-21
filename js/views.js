@@ -558,6 +558,11 @@ export function renderNumSheet(kind, day) {
 const TIME_SOURCE = { exif: T('from photo'), file: T('from file'), manual: T('edited') };
 const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { place: lower(String(place)) }));
 
+// The macro columns of the two item tables (entry sheet and plan sheet, kept identical): compact headers with the full word
+// in the abbr's title and the unit in small print; cells show '–' where an item lacks the key (one from before per-item macros).
+const macroHead = () => `<th scope="col"><abbr title="${esc(t('Protein'))}">${t('Pro', { $id: 'itemth.pro' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Carbohydrate'))}">${t('Carb', { $id: 'itemth.carb' })}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fat'))}">${t('Fat')}</abbr><small>g</small></th><th scope="col"><abbr title="${esc(t('Fibre'))}">${t('Fib')}</abbr><small>g</small></th>`;
+const macroCells = (i, mult = 1) => [`<td>${i.p == null ? '–' : n0(i.p * mult)}</td>`, `<td>${i.c == null ? '–' : n0(i.c * mult)}</td>`, `<td>${i.f == null ? '–' : n0(i.f * mult)}</td>`, `<td>${i.fib == null ? '–' : n0(i.fib * mult)}</td>`].join(''); // table cells keep a stored 0: it is a real value, the check line below treats it the same way now
+
 // Full entry, shown in the bottom sheet: photos, numbers, corrections
 function entryDetail(e) {
   const when = `${hhmm(e.ts)}${TIME_SOURCE[e.timeSrc] ? ` (${td(TIME_SOURCE[e.timeSrc])})` : ''}`;
@@ -586,22 +591,25 @@ function entryDetail(e) {
     const mult = e.mult || 1;
     const canReanalyse = e.src === 'photo' || e.src === 'text';
     // Item table: what the total is made of. A last row accounts for any difference, so the column always adds up.
+    // Only the kcal column is balanced by that rest row: the per-item carbs/fat/fibre are model estimates that may not sum to the entry totals, and a manual macro edit updates the summary line without touching the items.
     const list = e.items || [];
+    const macros = list.some((i) => i.c != null || i.f != null || i.fib != null); // no item carries macros (an old entry): the table keeps its three columns
     const itemSum = list.reduce((a, i) => a + (i.kcal || 0), 0) * mult;
     const rest = Math.round(v.kcal - itemSum);
+    // The entry-summary numbers come from eff(), which coerces an absent macro with || 0, so absent never reaches the line
     const restRow = list.length && itemSum > 0 && Math.abs(rest) >= 5
-      ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : t('Not itemised')}</th><td></td><td>${rest > 0 ? '+' : '−'}${n0(Math.abs(rest))}</td></tr>` : '';
-    const items = list.length ? `<table class="items-table">
-        <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th></tr></thead>
-        <tbody>${list.map((i) => `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td>${i.kcal ? n0(i.kcal * mult) : '–'}</td></tr>`).join('')}${restRow}</tbody>
-      </table>` : '';
+      ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : t('Not itemised')}</th><td></td><td class="items-kcal">${rest > 0 ? '+' : '−'}${n0(Math.abs(rest))}</td>${macros ? '<td colspan="4"></td>' : ''}</tr>` : '';
+    const items = list.length ? `<div class="items-scroll"><table class="items-table">
+        <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macros ? macroHead() : ''}</tr></thead>
+        <tbody>${list.map((i) => `<tr><th scope="row">${esc(i.n)}</th><td>${i.g ? n0(i.g * mult) + ' g' : ''}</td><td class="items-kcal">${i.kcal ? n0(i.kcal * mult) : '–'}</td>${macros ? macroCells(i, mult) : ''}</tr>`).join('')}${restRow}</tbody>
+      </table></div>` : '';
     // The person can always tell the model what it could not see; if the model asked, its question is the prompt
     const prompt = e.q || (e.src === 'photo' ? t('Something the photo does not show?') : t('Something to correct?'));
     const question = canReanalyse ? `<div class="question${e.q ? ' is-asked' : ''}"><p id="ask-${esc(e.id)}">${esc(prompt)}</p><div><input id="answer-${esc(e.id)}" type="text" aria-labelledby="ask-${esc(e.id)}" enterkeyhint="send" autocomplete="off" placeholder="${e.q ? t('Answer briefly') : t('e.g. 2 eggs, low-fat cheese, baked')}"><button type="button" class="btn" data-act="answer" data-id="${esc(e.id)}">${t('Update')}</button></div><p class="note">${t('The model revises the items with your note.')}</p></div>` : '';
     const mults = [0.5, 1, 1.5, 2].map((m) => `<button type="button" data-act="mult" data-id="${esc(e.id)}" data-v="${m}" aria-pressed="${(e.mult || 1) === m}">${m === 1 ? '1' : multLabel(m)}</button>`).join('');
     const slotOptions = Object.entries(SLOT_NAME).map(([k, name]) => `<option value="${k}"${e.slot === k ? ' selected' : ''}>${td(name)}</option>`).join('');
     body = `
-      <p class="entry-value"><b>${n0(v.kcal)}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat', { p: n0(v.p), c: n0(v.c), f: n0(v.f) })}</span></p>
+      <p class="entry-value"><b>${n0(v.kcal)}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(v.p), c: n0(v.c), f: n0(v.f), fib: n0(v.fib) })}</span></p>
       ${rough ? `<p class="status">${t('Rough estimate. A short note below tightens it.')}</p>` : ''}
       ${items}
       ${question}
@@ -612,6 +620,9 @@ function entryDetail(e) {
       <div class="field-grid">
         <label for="edit-kcal-${esc(e.id)}">${t('Calories')}<input id="edit-kcal-${esc(e.id)}" type="text" inputmode="numeric" value="${Math.round(v.kcal)}"></label>
         <label for="edit-protein-${esc(e.id)}">${t('Protein (g)')}<input id="edit-protein-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.p)}"></label>
+        <label for="edit-carbs-${esc(e.id)}">${t('Carbs (g)')}<input id="edit-carbs-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.c)}"></label>
+        <label for="edit-fat-${esc(e.id)}">${t('Fat (g)')}<input id="edit-fat-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.f)}"></label>
+        <label for="edit-fibre-${esc(e.id)}">${t('Fibre (g)')}<input id="edit-fibre-${esc(e.id)}" type="text" inputmode="decimal" value="${Math.round(v.fib)}"></label>
         <label for="edit-slot-${esc(e.id)}">${t('Meal')}<select id="edit-slot-${esc(e.id)}">${slotOptions}</select></label>
         <label for="edit-time-${esc(e.id)}">${t('Time')}<input id="edit-time-${esc(e.id)}" type="time" value="${hhmm(e.ts)}"></label>
       </div>
@@ -750,9 +761,18 @@ const checkWhen = (ts) => (dayKey(new Date(ts)) === today() ? hhmm(ts) : dTiny.f
 function checkOption(rec, o, i, rem) {
   const [label, pill] = FIT[o.fit] || FIT.ok;
   const dots = [1, 2, 3, 4, 5].map((k) => `<i${k <= o.rating ? ' class="on"' : ''}></i>`).join('');
-  const nums = o.kcal
-    ? `${o.p ? t('<b>{kcal}</b> kcal, {p} g protein', { kcal: n0(o.kcal), p: n0(o.p) }) : t('<b>{kcal}</b> kcal', { kcal: n0(o.kcal) })}${o.portion ? `<small>${esc(o.portion)}</small>` : ''}`
-    : esc(o.portion);
+  // Macros after the kcal/protein line, kcal staying the bold primary number; '–' stands only where a check stores nothing for a macro, a stored 0 reads as a real 0
+  const onum = (v) => (v == null ? '–' : n0(v)); // absence ('never estimated') and a stored 0 differ: only absence is '–', like the table cells above
+  const macros = o.c != null || o.f != null || o.fib != null; // when all of c/f/fib are absent the clause drops out; all zeros are real values and stay, also for old rows that store them
+  const nums = (o.kcal
+    ? o.p
+      ? macros
+        ? t('<b>{kcal}</b> kcal, {p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), p: n0(o.p), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) })
+        : t('<b>{kcal}</b> kcal, {p} g protein', { kcal: n0(o.kcal), p: n0(o.p) })
+      : macros
+        ? t('<b>{kcal}</b> kcal, {c} g carbs, {f} g fat, {fib} g fibre', { kcal: n0(o.kcal), c: onum(o.c), f: onum(o.f), fib: onum(o.fib) })
+        : t('<b>{kcal}</b> kcal', { kcal: n0(o.kcal) })
+    : esc(o.portion)) + (o.kcal && o.portion ? `<small>${esc(o.portion)}</small>` : '');
   // What the portion does to today's budget: for food eaten now, not for shopping, and only on the day of the check
   let budget = '';
   if (rec.kind !== 'product' && o.kcal && rem != null) {
@@ -1425,10 +1445,10 @@ export function renderPlanSheet(id) {
     ${has ? `<button type="button" class="link link-danger" data-act="plan-photo-remove" data-id="${id}">${t('Remove photo')}</button>` : ''}
   </div>
   <p class="entry-value"><b>${m.kcal}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(m.p), c: n0(m.c), f: n0(m.f), fib: n0(m.fib) })}</span></p>
-  <table class="items-table">
-    <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th></tr></thead>
-    <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td>${n0(i.kcal)}</td></tr>`).join('')}</tbody>
-  </table>
+  <div class="items-scroll"><table class="items-table">
+    <thead><tr><th scope="col">${t('Item')}</th><th scope="col">${t('Amount')}</th><th scope="col">kcal</th>${macroHead()}</tr></thead>
+    <tbody>${m.items.map((i) => `<tr><th scope="row">${esc(td(i.n))}${i.measure ? `<small>${esc(td(i.measure))}</small>` : ''}</th><td>${i.g} g</td><td class="items-kcal">${n0(i.kcal)}</td>${macroCells(i)}</tr>`).join('')}</tbody>
+  </table></div>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="log-plan-today" data-id="${id}">${t('Log for today')}</button>${canEditPlan() ? `
     <button type="button" class="btn btn-wide" data-act="plan-meal-edit" data-id="${id}">${t('Edit meal')}</button>` : ''}</div>`;
 }

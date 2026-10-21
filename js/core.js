@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '50'; // bump together with VERSION in sw.js
+export const APP_VERSION = '51'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -138,10 +138,32 @@ export const hasKey = () => { const c = aiCfg(); return !!c.key && (c.provider !
 export const today = () => dayKey(new Date());
 
 // ——— Calculations ———
+// Missing kcal and macros are treated as 0, so entry totals are always numbers: an entry with no stored c/f/fib counts "0 g" in the totals instead of an unknown
 export const eff = (e) => {
   const m = e.mult || 1;
   return { kcal: (e.kcal || 0) * m, p: (e.p || 0) * m, c: (e.c || 0) * m, f: (e.f || 0) * m, fib: (e.fib || 0) * m };
 };
+
+// What the edit sheet's kcal and macro fields write back on Save, as a {kcal, p, c, f, fib} patch ({ conf: 1, planId: '',
+// edited: true } added when kcal itself was changed), or {} when nothing changes. Pure: app.js reads the fields and spreads the
+// patch into the entry. The fields show whole kcal/grams at the entry's portion (eff), so a value that rounds to what is already
+// on screen is not stored again: the stored single-portion precision survives an untouched save (1.2 in a sheet that shows 1 at
+// half portions stays 1.2, and protein joins macros in that guard). An edited value is stored single-portion, divided by the
+// portion, kcal to a whole number and the macros to 0.1. A blank, non-finite or negative field keeps the stored value.
+export function macroEdits(e, v = {}) {
+  const n = (x) => (Number.isFinite(x) && x >= 0 ? x : NaN);
+  const cur = eff(e);
+  const kcal = n(v.kcal);
+  const patch = {};
+  if (Number.isFinite(kcal) && Math.round(kcal) !== Math.round(cur.kcal)) {
+    patch.kcal = Math.round(kcal / (e.mult || 1)); patch.conf = 1; patch.planId = ''; patch.edited = true;
+  }
+  for (const k of ['p', 'c', 'f', 'fib']) {
+    const x = n(v[k]);
+    if (Number.isFinite(x) && Math.round(x) !== Math.round(cur[k])) patch[k] = Math.round((x / (e.mult || 1)) * 10) / 10;
+  }
+  return patch;
+}
 let dayIndex = null; // day → entries, set only while withDayIndex runs
 export const mealsOf = (day) => (dayIndex ? dayIndex.get(day) || [] : S.entries).filter((e) => e.day === day && e.kind === 'meal' && e.status === 'ok');
 // Runs fn with the entries bucketed by day, so a pass over many days does not filter the whole log for each one. fn must not be async.

@@ -2,7 +2,8 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -42,6 +43,21 @@ test('an OpenAI-compatible request describes the reply in words and sends no sch
   assert.equal(calls[0].url, 'https://x.test/v1/chat/completions');
   assert.match(calls[0].body.messages[0].content, /Return exactly one JSON object/);
   assert.equal('output_config' in calls[0].body, false);
+});
+
+test('item macros are optional: c, f, fib stay off the item required list while the entry-level totals stay required', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  const schema = calls[0].body.output_config.format.schema;
+  const item = schema.properties.items.items;
+  assert.deepEqual(item.required, ['n', 'g', 'kcal', 'p']);
+  assert.ok(item.properties.c && item.properties.f && item.properties.fib);
+  for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.ok(schema.required.includes(k), `top-level ${k} stays required`); // relaxing totals would be a bug
+  assert.match(calls[0].body.system, /Each item also reports its own kcal, p, c, f and fib/); // the system prompt asks for them
+  assert.match(calls[0].body.system, /omit the key when you cannot/); // …and lets it leave a macro out
+  mockFetch(() => reply(200, { choices: [{ message: { content: meal }, finish_reason: 'stop' }], usage: {} }));
+  await ask(gemini);
+  assert.match(calls[1].body.messages[0].content, /"items":\[\{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0\}\]/);
 });
 
 test('an answer cut off at the token limit says so, instead of "SyntaxError"', async () => {
@@ -97,6 +113,60 @@ test('a check: hostile numbers and shapes from the model are clamped', async () 
   const { data } = await check({ cfg: haiku, brief: 'b' });
   assert.equal(data.options.length, 1);
   assert.deepEqual([data.options[0].kcal, data.options[0].rating, data.options[0].p], [5000, 5, 0]);
+});
+
+test('an analysis request sets its own token budget above the callModel default: three macros × up to 12 items, with headroom', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  assert.equal(calls[0].body.max_tokens, 1500);
+});
+
+// ——— Per-item macros at write time (cleanItems) ———
+test('cleanItems: an explicit macro is capped in, a real 0 stays 0, and a macro the source does not give stays absent', () => {
+  assert.deepEqual(
+    cleanItems([{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }], ITEM_CAPS_ANALYSIS),
+    [{ n: 'Egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }],
+  );
+  // a pre-feature item (no macros anywhere) and a template item missing some of them: the missing keys are stored absent
+  // ('never estimated', so the sheet reads '–', not '0 g'), n/g/kcal/p are always present
+  const [oldFavourite, soup, beer] = cleanItems([{ n: 'old favourite', g: 100, kcal: 143, p: 12 }, { n: 'Soup' }, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 }], ITEM_CAPS_WRITE);
+  assert.deepEqual(oldFavourite, { n: 'old favourite', g: 100, kcal: 143, p: 12 });
+  assert.deepEqual(soup, { n: 'Soup', g: 0, kcal: 0, p: 0 });
+  assert.deepEqual(beer, { n: 'Beer', g: 0, kcal: 215, p: 2, c: 17 });
+  assert.equal(['c', 'f', 'fib'].some((k) => k in oldFavourite), false);
+  assert.deepEqual(cleanItems(undefined, ITEM_CAPS_WRITE), []);
+  assert.deepEqual(cleanItems('junk', ITEM_CAPS_WRITE), []);
+});
+
+test('cleanItems: junk entries are emptied, capped at 12, and the caps come from the call site', () => {
+  const junk = cleanItems([{ n: 'x', g: 1e9, kcal: 1e9, p: -4, c: 'x', f: true }, null, 'junk', 5], ITEM_CAPS_WRITE);
+  assert.deepEqual(junk, [
+    { n: 'x', g: 5000, kcal: 6000, p: 0, f: 1 }, // p is clamped to 0 (it was given), junk c falls to absent, +true is 1
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: '', g: 0, kcal: 0, p: 0 },
+    { n: '', g: 0, kcal: 0, p: 0 },
+  ]);
+  const big = { n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 };
+  assert.deepEqual(cleanItems([big], ITEM_CAPS_ANALYSIS)[0], { n: 'x', g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 });
+  const write = cleanItems([big], ITEM_CAPS_WRITE)[0];
+  assert.deepEqual([write.g, write.kcal, write.p, write.c, write.f, write.fib], [5000, 6000, 500, 800, 500, 150]);
+  const names = cleanItems([{ n: ` ${'y'.repeat(90)} ` }, { n: 5 }], ITEM_CAPS_WRITE);
+  assert.deepEqual(names.map((i) => i.n), ['y'.repeat(80), '5']);
+});
+
+// The caps must not drift because they are the same objects: the macros of a written item are MACRO_CAPS's own
+// values (the numbers cleanEntry clamps an entry with, via ITEM_MACRO_CAPS for c/f/fib), and g mirrors the plan's
+// grams cap, so a big plan food cannot store items bigger than its totals
+test('cleanItems: the item caps stay pinned to MACRO_CAPS, ITEM_MACRO_CAPS and PLAN_CAPS.grams', () => {
+  const big = cleanItems([{ n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 }], ITEM_CAPS_WRITE)[0];
+  const entry = cleanEntry({ id: 'x1', day: '2026-10-14', ts: 0, kind: 'meal', kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 });
+  assert.equal(MACRO_CAPS.kcal, 6000); // one persisted range, defined once in js/backup.js
+  assert.equal(big.g, PLAN_CAPS.grams);
+  for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.equal(big[k], entry[k], `ITEM_CAPS_WRITE.${k} drifts from cleanEntry's entry-level cap`);
+  for (const k of ['kcal', 'p']) assert.equal(ITEM_CAPS_WRITE[k], MACRO_CAPS[k], `ITEM_CAPS_WRITE.${k} drifts from MACRO_CAPS`);
+  for (const k of ['c', 'f', 'fib']) assert.equal(ITEM_CAPS_ANALYSIS[k], ITEM_MACRO_CAPS[k], `ITEM_CAPS_ANALYSIS.${k} drifts from ITEM_MACRO_CAPS`);
+  // the analysis handler keeps its tighter kcal/p caps inside the write range; c, f and fib are the same
+  for (const k of ['g', 'kcal', 'p', 'c', 'f', 'fib']) assert.ok(ITEM_CAPS_ANALYSIS[k] <= ITEM_CAPS_WRITE[k], `ITEM_CAPS_ANALYSIS.${k} exceeds ITEM_CAPS_WRITE.${k}`);
 });
 
 test('a review whose list is a plain string is accepted', async () => {
