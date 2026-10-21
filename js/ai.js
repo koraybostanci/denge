@@ -24,7 +24,7 @@ function workoutNote(plan) {
 const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
-For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
+For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
 slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
@@ -57,7 +57,7 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['n', 'g', 'kcal', 'p', 'c', 'f', 'fib'],
+        required: ['n', 'g', 'kcal', 'p'],
         properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
       },
     },

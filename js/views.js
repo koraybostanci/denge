@@ -596,8 +596,7 @@ function entryDetail(e) {
     const macros = list.some((i) => i.c != null || i.f != null || i.fib != null); // no item carries macros (an old entry): the table keeps its three columns
     const itemSum = list.reduce((a, i) => a + (i.kcal || 0), 0) * mult;
     const rest = Math.round(v.kcal - itemSum);
-    // Entry-summary macros are always real stored numbers: eff() coerces a missing c/f/fib to 0, so the line reads "0 g" on old entries; '–' shows only in per-item cells (macroCells; onum elsewhere), where nothing was stored
-    const gnum = (x) => (x == null ? '–' : n0(x));
+    // The entry-summary numbers come from eff(), which coerces an absent macro with || 0, so absent never reaches the line
     const restRow = list.length && itemSum > 0 && Math.abs(rest) >= 5
       ? `<tr class="items-rest"><th scope="row">${e.edited || (e.conf === 1 && !e.planId) ? t('Your edit') : t('Not itemised')}</th><td></td><td class="items-kcal">${rest > 0 ? '+' : '−'}${n0(Math.abs(rest))}</td>${macros ? '<td colspan="4"></td>' : ''}</tr>` : '';
     const items = list.length ? `<div class="items-scroll"><table class="items-table">
@@ -610,7 +609,7 @@ function entryDetail(e) {
     const mults = [0.5, 1, 1.5, 2].map((m) => `<button type="button" data-act="mult" data-id="${esc(e.id)}" data-v="${m}" aria-pressed="${(e.mult || 1) === m}">${m === 1 ? '1' : multLabel(m)}</button>`).join('');
     const slotOptions = Object.entries(SLOT_NAME).map(([k, name]) => `<option value="${k}"${e.slot === k ? ' selected' : ''}>${td(name)}</option>`).join('');
     body = `
-      <p class="entry-value"><b>${n0(v.kcal)}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: gnum(v.p), c: gnum(v.c), f: gnum(v.f), fib: gnum(v.fib) })}</span></p>
+      <p class="entry-value"><b>${n0(v.kcal)}</b> kcal<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(v.p), c: n0(v.c), f: n0(v.f), fib: n0(v.fib) })}</span></p>
       ${rough ? `<p class="status">${t('Rough estimate. A short note below tightens it.')}</p>` : ''}
       ${items}
       ${question}

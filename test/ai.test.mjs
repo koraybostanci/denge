@@ -45,13 +45,16 @@ test('an OpenAI-compatible request describes the reply in words and sends no sch
   assert.equal('output_config' in calls[0].body, false);
 });
 
-test('items carry all five macros: the schema requires c, f, fib and the shape contract in words matches it', async () => {
+test('item macros are optional: c, f, fib stay off the item required list while the entry-level totals stay required', async () => {
   mockFetch(() => reply(200, claudeBody(meal)));
   await ask(haiku);
-  const item = calls[0].body.output_config.format.schema.properties.items.items;
-  assert.deepEqual(item.required, ['n', 'g', 'kcal', 'p', 'c', 'f', 'fib']);
+  const schema = calls[0].body.output_config.format.schema;
+  const item = schema.properties.items.items;
+  assert.deepEqual(item.required, ['n', 'g', 'kcal', 'p']);
   assert.ok(item.properties.c && item.properties.f && item.properties.fib);
+  for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.ok(schema.required.includes(k), `top-level ${k} stays required`); // relaxing totals would be a bug
   assert.match(calls[0].body.system, /Each item also reports its own kcal, p, c, f and fib/); // the system prompt asks for them
+  assert.match(calls[0].body.system, /omit the key when you cannot/); // …and lets it leave a macro out
   mockFetch(() => reply(200, { choices: [{ message: { content: meal }, finish_reason: 'stop' }], usage: {} }));
   await ask(gemini);
   assert.match(calls[1].body.messages[0].content, /"items":\[\{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0\}\]/);
