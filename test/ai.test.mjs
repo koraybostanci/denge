@@ -3,7 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
-import { cleanEntry, PLAN_CAPS } from '../js/backup.js';
+import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
@@ -118,7 +118,7 @@ test('a check: hostile numbers and shapes from the model are clamped', async () 
 test('an analysis request sets its own token budget above the callModel default: three macros × up to 12 items, with headroom', async () => {
   mockFetch(() => reply(200, claudeBody(meal)));
   await ask(haiku);
-  assert.equal(calls[0].body.max_tokens, 1000);
+  assert.equal(calls[0].body.max_tokens, 1500);
 });
 
 // ——— Per-item macros at write time (cleanItems) ———
@@ -154,13 +154,17 @@ test('cleanItems: junk entries are emptied, capped at 12, and the caps come from
   assert.deepEqual(names.map((i) => i.n), ['y'.repeat(80), '5']);
 });
 
-// The caps must not drift: g mirrors the plan's grams cap, the other five mirror cleanEntry's entry-level caps
-// (the same numbers logMeal clamps the entry totals with), so a big plan food cannot store items bigger than its totals
-test('cleanItems: the item caps stay pinned to PLAN_CAPS.grams and cleanEntry\'s entry-level caps', () => {
+// The caps must not drift because they are the same objects: the macros of a written item are MACRO_CAPS's own
+// values (the numbers cleanEntry clamps an entry with, via ITEM_MACRO_CAPS for c/f/fib), and g mirrors the plan's
+// grams cap, so a big plan food cannot store items bigger than its totals
+test('cleanItems: the item caps stay pinned to MACRO_CAPS, ITEM_MACRO_CAPS and PLAN_CAPS.grams', () => {
   const big = cleanItems([{ n: 'x', g: 9e9, kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 }], ITEM_CAPS_WRITE)[0];
   const entry = cleanEntry({ id: 'x1', day: '2026-10-14', ts: 0, kind: 'meal', kcal: 9e9, p: 9e9, c: 9e9, f: 9e9, fib: 9e9 });
+  assert.equal(MACRO_CAPS.kcal, 6000); // one persisted range, defined once in js/backup.js
   assert.equal(big.g, PLAN_CAPS.grams);
   for (const k of ['kcal', 'p', 'c', 'f', 'fib']) assert.equal(big[k], entry[k], `ITEM_CAPS_WRITE.${k} drifts from cleanEntry's entry-level cap`);
+  for (const k of ['kcal', 'p']) assert.equal(ITEM_CAPS_WRITE[k], MACRO_CAPS[k], `ITEM_CAPS_WRITE.${k} drifts from MACRO_CAPS`);
+  for (const k of ['c', 'f', 'fib']) assert.equal(ITEM_CAPS_ANALYSIS[k], ITEM_MACRO_CAPS[k], `ITEM_CAPS_ANALYSIS.${k} drifts from ITEM_MACRO_CAPS`);
   // the analysis handler keeps its tighter kcal/p caps inside the write range; c, f and fib are the same
   for (const k of ['g', 'kcal', 'p', 'c', 'f', 'fib']) assert.ok(ITEM_CAPS_ANALYSIS[k] <= ITEM_CAPS_WRITE[k], `ITEM_CAPS_ANALYSIS.${k} exceeds ITEM_CAPS_WRITE.${k}`);
 });

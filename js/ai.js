@@ -4,6 +4,7 @@
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
 import { T, inEnglish, getUiLang } from './i18n.js';
 import { S, mealTimesLine, kcalMinDay } from './core.js';
+import { MACRO_CAPS, ITEM_MACRO_CAPS } from './backup.js';
 import { decode } from './picture.js';
 
 export const MODELS = {
@@ -276,7 +277,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1000 }; // headroom above the analysis shape; the OpenAI path doubles the budget for thinking models
+  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -511,7 +512,7 @@ export function cleanVerdict(d) {
     return {
       name: clean(x.name, 90), rating: Math.min(5, Math.max(1, Math.round(+x.rating || 3))),
       fit: ['good', 'ok', 'avoid'].includes(x.fit) ? x.fit : 'ok', portion: clean(x.portion, 40),
-      kcal: num(x.kcal, 5000), p: num(x.p, 500), c: num(x.c, 800), f: num(x.f, 500), fib: num(x.fib, 150),
+      kcal: num(x.kcal, 5000), p: num(x.p, MACRO_CAPS.p), c: num(x.c, ITEM_MACRO_CAPS.c), f: num(x.f, ITEM_MACRO_CAPS.f), fib: num(x.fib, ITEM_MACRO_CAPS.fib),
       facts: clean(x.facts, 160), why: clean(x.why, 220), tip: clean(x.tip, 160),
       tier: ['plan', 'flex', 'off'].includes(x.tier) ? x.tier : 'flex',
     };
@@ -562,10 +563,20 @@ export function cleanFoodValues(d) {
 // The caps of one food item, per call site. Call sites that already cap items keep their own values, so behaviour
 // does not change under them: the analysis handler keeps its tighter kcal/p caps, the template paths (a matched
 // plan meal, logMeal, logCheckOption) use the persisted range that cleanEntry/itemList in js/backup.js enforce on
-// any backup/restore (kcal 6,000, p 500) — values above it are transient today, so clamping at write time aligns
-// stored items with that convention. c, f, fib mirror cleanEntry's entry-level caps and cleanVerdict's option caps.
-export const ITEM_CAPS_ANALYSIS = { g: 5000, kcal: 3000, p: 300, c: 800, f: 500, fib: 150 };
-export const ITEM_CAPS_WRITE = { g: 5000, kcal: 6000, p: 500, c: 800, f: 500, fib: 150 };
+// any backup/restore; values above it are transient today, so write-time clamping aligns stored items with it.
+// The macros are not restated here: they read backup.js's MACRO_CAPS and ITEM_MACRO_CAPS, the
+// one range cleanEntry clamps an entry with, so the numbers cannot drift. The reads are getters because the two
+// modules import each other and, when backup.js is loaded first (views.js, the backup tests), it is still
+// evaluating while this file runs — reading the constants top-level would throw there.
+export const ITEM_CAPS_ANALYSIS = {
+  get g() { return 5000; }, get kcal() { return 3000; }, get p() { return 300; },
+  get c() { return ITEM_MACRO_CAPS.c; }, get f() { return ITEM_MACRO_CAPS.f; }, get fib() { return ITEM_MACRO_CAPS.fib; },
+};
+export const ITEM_CAPS_WRITE = {
+  get g() { return 5000; },
+  get kcal() { return MACRO_CAPS.kcal; }, get p() { return MACRO_CAPS.p; },
+  get c() { return ITEM_MACRO_CAPS.c; }, get f() { return ITEM_MACRO_CAPS.f; }, get fib() { return ITEM_MACRO_CAPS.fib; },
+};
 
 // The items of a meal entry, the way any path stores them: a fixed shape of n, g and the five macros. n, g, kcal and p
 // are always present; the key of c, f or fib stays absent when the SOURCE item gives no usable number for it —

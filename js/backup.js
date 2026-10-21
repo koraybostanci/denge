@@ -32,9 +32,9 @@ const flagList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string
 // "never estimated" item into "0 g". An old backup without the new fields still restores through it.
 const macro = (v, max) => (Number.isFinite(+v) && (typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.trim())) ? Math.max(0, Math.min(max, +v)) : undefined);
 const itemList = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((i) => {
-  const item = { n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, 6000), p: pos(i && i.p, 500) };
+  const item = { n: txt(i && i.n, 80), g: pos(i && i.g, 5000), kcal: pos(i && i.kcal, MACRO_CAPS.kcal), p: pos(i && i.p, MACRO_CAPS.p) };
   const src = i && typeof i === 'object' ? i : {};
-  for (const [k, max] of [['c', 800], ['f', 500], ['fib', 150]]) {
+  for (const [k, max] of Object.entries(ITEM_MACRO_CAPS)) {
     const x = macro(src[k], max);
     if (x !== undefined) item[k] = x; // the key stays absent when the source gives no number
   }
@@ -87,7 +87,7 @@ export function cleanEntry(e) {
     status: oneOf(e.status, ['ok', 'pending', 'error'], 'error'),
     src: txt(e.src, 20), text: txt(e.text), title: txt(e.title, 80), err: txt(e.err, 300),
     slot: oneOf(e.slot, Object.keys(SLOT_NAME), 'dinner'), planId: txt(e.planId, MEAL_ID_MAX), items: itemList(e.items),
-    kcal: pos(e.kcal, 6000), p: pos(e.p, 500), c: pos(e.c, 800), f: pos(e.f, 500), fib: pos(e.fib, 150),
+    kcal: pos(e.kcal, MACRO_CAPS.kcal), p: pos(e.p, MACRO_CAPS.p), c: pos(e.c, MACRO_CAPS.c), f: pos(e.f, MACRO_CAPS.f), fib: pos(e.fib, MACRO_CAPS.fib),
     tier: oneOf(e.tier, TIERS, 'plan'), flags: flagList(e.flags), conf: pos(e.conf, 1), q: txt(e.q, 160),
     mult: isNum(e.mult) && e.mult > 0 ? Math.min(10, e.mult) : 1,
     photoIds: (Array.isArray(e.photoIds) ? e.photoIds : []).filter(isId).slice(0, 6),
@@ -147,7 +147,7 @@ export function cleanPhoto(p) {
 function cleanFavorite(f) {
   if (!f || typeof f !== 'object' || !isId(f.id)) return null;
   return {
-    id: f.id, name: txt(f.name, 80), slot: 'any', kcal: pos(f.kcal, 6000), p: pos(f.p, 500), c: pos(f.c, 800), f: pos(f.f, 500), fib: pos(f.fib, 150),
+    id: f.id, name: txt(f.name, 80), slot: 'any', kcal: pos(f.kcal, MACRO_CAPS.kcal), p: pos(f.p, MACRO_CAPS.p), c: pos(f.c, MACRO_CAPS.c), f: pos(f.f, MACRO_CAPS.f), fib: pos(f.fib, MACRO_CAPS.fib),
     tier: oneOf(f.tier, TIERS, 'plan'), flags: flagList(f.flags), items: itemList(f.items),
   };
 }
@@ -180,6 +180,12 @@ export function cleanSettings(s) {
   if (s.wins && typeof s.wins === 'object') out.wins = { kilos: Math.round(pos(s.wins.kilos, 1000)), perfect: isDay(s.wins.perfect) ? s.wins.perfect : '' };
   return out;
 }
+
+// One persisted range that a stored entry (cleanEntry) and one of its items can carry; see cleanItems and
+// cleanVerdict in js/ai.js, which mirror these by reference. ITEM_MACRO_CAPS is the item-sized slice (c, f, fib
+// only: an item's g and the tighter kcal/p it gets at analysis time are call-site values in js/ai.js).
+export const MACRO_CAPS = { kcal: 6000, p: 500, c: 800, f: 500, fib: 150 };
+export const ITEM_MACRO_CAPS = { c: MACRO_CAPS.c, f: MACRO_CAPS.f, fib: MACRO_CAPS.fib };
 
 // ——— Plans (kv `plans`: { active, list: [the Default seed, My plan] }) ———
 // The limits of a user plan. A save over one is refused; a file is trimmed to them.
