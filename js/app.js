@@ -1919,6 +1919,11 @@ window.addEventListener('online', () => { if (RUNS) resumePending(); });
 // For tests and debugging
 if (location.hostname === 'localhost') window.__app = { S, parseLocal, render, submitPhotos, dayVerdict, verdictText, reviewBrief, autoReview, checkBrief };
 
+// A two-finger pinch must not resize the page. The viewport meta blocks it everywhere the meta is
+// honored, but iOS Safari ignores user-scalable=no, so the gesture events are cancelled as well.
+// Pointer events are unaffected: the frame canvas keeps its own pinch (touch-action: none there).
+document.addEventListener('gesturestart', (ev) => ev.preventDefault());
+
 // Keep the composer above the on-screen keyboard
 if (window.visualViewport) {
   const vv = window.visualViewport;
