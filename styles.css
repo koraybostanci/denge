@@ -667,6 +667,12 @@ button.cal-d::before, button.cal-wk::before { content: ""; position: absolute; i
 .meal-thumb img:not([src]) { visibility: hidden; }
 .meal-thumb.is-empty { display: grid; place-items: center; background: var(--tape-track); color: var(--ink3); }
 .meal-thumb.is-empty svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; opacity: .7; }
+/* Pantry: a Settings row's picture and text, and the editor's ingredients field (a textarea has no global styles) */
+.pantry-text { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.pantry-lines { min-width: 0; display: grid; gap: 2px; }
+.pantry-lines span { color: var(--ink2); font-size: 13px; }
+.pf-ing { display: grid; gap: 4px; margin-top: 14px; font-size: 13px; color: var(--ink2); text-align: left; }
+.pf-ing textarea { min-height: 64px; resize: vertical; width: 100%; padding: 8px 10px; border: 1px solid var(--edge); border-radius: var(--r-ctl); background: var(--raised); color: var(--ink); font: inherit; font-size: 16px; }
 .plan-rules h2 { margin-bottom: 4px; }
 /* Framing a new picture */
 /* The ring is the edge of the stored picture: what is inside it is what the plan shows */

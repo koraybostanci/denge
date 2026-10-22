@@ -739,6 +739,23 @@ export default {
   'Fat (g)': 'Yağ (g)',
   'Fibre (g)': 'Lif (g)',
 
+  // ——— js/views.js, js/app.js: the Pantry ———
+  Pantry: 'Dolap',
+  '{n} food|{n} foods': '{n} yemek|{n} yemek',
+  'Add a product': 'Dolaba ekle',
+  'Add your usual products so checks use them.': 'Sık yediğin ürünleri ekle, kontroller bunları kullansın.',
+  'At most {n} products': 'En fazla {n} ürün',
+  'Remove {name}? Its photo is deleted too.': '{name} kaldırılsın mı? Fotoğrafı da silinir.',
+  '{n} kcal / 100 g': '{n} kcal / 100 g', // the words in it are units and a number, so both languages read the same
+  'Eker Skyr natural': 'Eker Skyr doğal',
+  'Ingredients (optional)': 'Malzemeler (isteğe bağlı)',
+  'Ingredients: {ing}': 'Malzemeler: {ing}',
+  'No photo of the product yet. Take one or choose one.': 'Ürünün henüz fotoğrafı yok. Çek ya da bir tane seç.',
+  'Light and colour are evened out. Only this framed picture is stored, not the original photo.': 'Işık ve renk dengelenir. Yalnızca bu çerçevelenmiş resim saklanır, orijinal fotoğraf değil.',
+  'The photo is sent for the fill and never kept. The product’s picture is stored only when you frame it and save.': 'Fotoğraf doldurmak için gönderilir, asla saklanmaz. Ürünün resmi, yalnızca çerçeveleyip kaydettiğinde saklanır.',
+  'Pantry: {n}': 'Dolap: {n}',
+  'Open the Pantry': 'Dolabı aç',
+
   // ——— js/views.js: Settings ———
   'No backup yet': 'Henüz yedek yok',
   'Last backup today': 'Son yedek bugün',

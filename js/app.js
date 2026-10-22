@@ -7,13 +7,13 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -565,12 +565,14 @@ function zoomFrame(z) {
   const r = document.getElementById('frame-zoom');
   if (r && Math.abs(Number(r.value) - frame.zoom) > 0.005) r.value = String(frame.zoom);
 }
-async function openFrame(mealId, file) {
-  if (!mealById(mealId)) return;
+async function openFrame(target, file) {
+  const meal = mealById(target);
+  const food = meal ? null : S.foods.find((x) => x.id === target); // a pantry product is framed like a meal
+  if (!meal && !food) return;
   let src;
   try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
-  frame = { id: mealId, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
-  openSheet(renderFrameSheet(mealId), { type: 'plan-frame', id: mealId });
+  frame = { id: target, food: food ? food.id : undefined, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
+  openSheet(renderFrameSheet(target), { type: meal ? 'plan-frame' : 'pantry-frame', id: target });
   paintFrame();
   const c = frameCanvas();
   const pts = new Map();
@@ -595,21 +597,40 @@ async function openFrame(mealId, file) {
 async function saveFrame() {
   if (!frame) return;
   const f = frame;
-  const { id, src, zoom, cx, cy } = f;
   frame = null; // a second tap while this one is saving does nothing
-  try {
-    await storePlanPhoto(id, await picture.render(src, zoom, cx, cy), picture.PICTURE_SIZE, picture.PICTURE_SIZE);
-  } catch (err) {
-    frame = f;
-    return toast(t('Could not save the picture'));
+  const food = f.food && S.foods.some((x) => x.id === f.food) ? f.food : null;
+  let blob;
+  try { blob = await picture.render(f.src, f.zoom, f.cx, f.cy); }
+  catch (err) { frame = f; return toast(t('Could not save the picture')); }
+  if (!food) {
+    try { await storePlanPhoto(f.id, blob, picture.PICTURE_SIZE, picture.PICTURE_SIZE); }
+    catch (err) { frame = f; return toast(t('Could not save the picture')); }
+    openSheet(renderPlanSheet(f.id), { type: 'plan', id: f.id });
+    render();
+    toast(t('Picture saved'));
+    return;
   }
-  openSheet(renderPlanSheet(id), { type: 'plan', id });
+  const d = S.foodDraft;
+  if (d && !d.id) { // a product that is not saved yet holds the square in its draft, so nothing is written for a save that never happens
+    if (d.newPhoto) URL.revokeObjectURL(d.newPhoto.url);
+    d.newPhoto = { blob, url: URL.createObjectURL(blob) };
+    return openPantryEditor();
+  }
+  try { await storeFoodPhoto(food, blob); }
+  catch (err) { frame = f; return toast(t('Could not save the picture')); }
+  openSheet(renderPantrySheet(food), { type: 'pantry', id: food });
   render();
   toast(t('Picture saved'));
 }
 function cancelFrame() {
-  const id = frame ? frame.id : S.sheet && S.sheet.id;
+  const f = frame;
   frame = null;
+  if (f && f.food && S.foods.some((x) => x.id === f.food)) { // a pantry product's picture: back to its record sheet
+    openSheet(renderPantrySheet(f.food), { type: 'pantry', id: f.food });
+    hydratePhotos();
+    return;
+  }
+  const id = f ? f.id : S.sheet && S.sheet.id;
   if (id) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
   hydratePhotos();
 }
@@ -618,6 +639,102 @@ async function removePlanPhoto(mealId) {
   const { [mealId]: gone, ...rest } = S.settings.planPhotos;
   await setPlanPhotos(rest);
   render();
+}
+
+// ——— The Pantry (S.foodDraft): the record sheet and the editor over it ———
+const PANTRY_PICK = '__pantry_pick'; // marks the photo picker as opened from the pantry editor's fill
+const openPantryEditor = (focusSel, keepFocus) => openSheet(renderPantryEditor(), { type: 'pantry-edit' }, focusSel, keepFocus);
+// Ids like the other record's, matched by isId: a cheap prefix plus db.uid()
+const newFoodId = () => 'f' + db.uid();
+// The ingredients text as a save keeps it (cleanFood squeezes and caps it): the same here, so a save passes unchanged
+const cleanIng = (ing) => (typeof ing === 'string' ? ing.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400) : '');
+// A draft holds the editor's fields and one working photo (pick: the unframed copy the fill reads, never stored) and,
+// for a product that is not saved yet, the framed square (newPhoto), which only a save writes.
+function startPantry(id) {
+  const food = id ? S.foods.find((x) => x.id === id) : null;
+  S.foodDraft = { id: id || '', name: food ? food.name : '', v: food ? [...food.v] : ['', '', '', '', ''], ing: food ? (food.ing || '') : '', pick: null, newPhoto: null, busy: false, err: '', note: '', status: '' };
+}
+// What the editor's fields hold, into the draft (the values stay as typed until a save reads them)
+function syncPantry() {
+  const d = S.foodDraft;
+  const name = $('#pf-name');
+  if (!d || !name) return;
+  d.name = name.value;
+  d.v = d.v.map((x, i) => $(`#pf-v-${i}`).value);
+  const ing = $('#pf-ing');
+  if (ing) d.ing = ing.value;
+}
+// After typing: the marks on wrong fields, Save and the AI button, without redrawing the fields
+function checkPantry() {
+  syncPantry();
+  const d = S.foodDraft;
+  const r = readFood(d);
+  mark($('#pf-name'), r.bad.name);
+  r.bad.v.forEach((b, i) => mark($(`#pf-v-${i}`), b));
+  const save = document.querySelector('[data-act="pantry-save"]');
+  if (save) save.disabled = !r.valid || d.busy;
+  const ai = $('#pf-ai');
+  if (ai) ai.disabled = d.busy || !(d.pick || d.name.trim());
+}
+// The draft's photos go: nothing else does (a Cancel and a Close write nothing)
+function dropPantry() {
+  const d = S.foodDraft;
+  S.foodDraft = null;
+  if (d) for (const p of [d.pick, d.newPhoto]) if (p && p.url) URL.revokeObjectURL(p.url);
+}
+const canvasBlob = (canvas) => new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.86));
+// The working photo for the fill: the unframed copy picture.prepare makes, held in memory only (one at a time — a new
+// pick drops the old one and any framed square with it). The stored picture comes only from framing.
+async function addPantryPick(file) {
+  const d = S.foodDraft;
+  if (!d || d.busy) return;
+  let src;
+  try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
+  if (!S.foodDraft || S.foodDraft !== d) return;
+  const blob = await canvasBlob(src);
+  if (!blob || !S.foodDraft || S.foodDraft !== d) return;
+  if (d.pick && d.pick.url) URL.revokeObjectURL(d.pick.url);
+  if (d.newPhoto) { URL.revokeObjectURL(d.newPhoto.url); d.newPhoto = null; }
+  d.pick = { src, blob, url: URL.createObjectURL(blob) };
+  syncPantry();
+  openPantryEditor('#pf-ai');
+}
+// Fill in with AI, like the food form over the meal editor; the blobs are the pick's alone
+async function runPantryFood() {
+  const d = S.foodDraft;
+  if (!d || d.busy) return;
+  syncPantry();
+  const name = readFood(d).food.name;
+  if (!hasKey()) return openPantryEditor();
+  if (!name && !d.pick) return;
+  if (navigator.onLine === false) { d.err = modelFailure({ code: 'offline' }, 'values'); d.note = ''; return openPantryEditor('#pf-ai'); }
+  const live = () => S.foodDraft === d;
+  d.busy = true; d.err = ''; d.note = ''; d.status = '';
+  openPantryEditor();
+  try {
+    const { data, usage, model } = await foodValues({
+      cfg: aiCfg(), name, blobs: d.pick ? [d.pick.blob] : [],
+      onRetry: (...a) => { if (live()) { d.status = retryNote(...a); syncPantry(); openPantryEditor(null, true); } },
+    });
+    await addUsage(model, usage);
+    if (!live()) { d.busy = false; return; }
+    d.v = [data.kcal, data.p, data.c, data.f, data.fib];
+    if (!name && data.name) d.name = data.name;
+    d.note = t('Filled in by AI. Check the values.');
+  } catch (err) {
+    if (!live()) { d.busy = false; return; }
+    d.err = err.code === 'empty' ? t('Couldn’t read values. Try the nutrition label, or type them.') : modelFailure(err, 'values');
+  }
+  d.busy = false; d.status = '';
+  openPantryEditor('#pf-ai');
+}
+// The framed square of a stored product: it is written under its own photo id first and the food then points at it,
+// so the sweep that setFoods runs can never delete its own new picture; the one the food replaced goes.
+async function storeFoodPhoto(foodId, blob) {
+  const pid = db.uid();
+  await db.put('photos', { id: pid, buf: await blob.arrayBuffer(), type: 'image/jpeg', w: picture.PICTURE_SIZE, h: picture.PICTURE_SIZE, food: foodId });
+  await setFoods(S.foods.map((f) => (f.id === foodId ? { ...f, photo: pid } : f)));
+  return pid;
 }
 
 async function photoBlob(pid) {
@@ -838,6 +955,7 @@ async function importBackup(file) {
     return render();
   }
   dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
+  dropPantry(); // and so does a pantry editor: the restored list is what stands
   await load();
   badgesMode = 'restore';
   restoredFrom = gotBefore;
@@ -1119,6 +1237,7 @@ function closeSheet() {
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
   dropDraft(); // and so is a meal being edited (with its food form's photos): nothing is written
+  dropPantry(); // nor a pantry editor (a Cancel writes nothing); its pick or held square goes
   $('#app').inert = false;
   document.body.classList.remove('sheet-open');
   // A render may have replaced the button that opened the sheet: find it again by its id
@@ -1137,9 +1256,17 @@ function dismissSheet() {
     S.suppEdit = '';
     return openFood(hasKey() ? null : '[data-act="settings"]');
   }
+  if (S.sheet && S.sheet.type === 'settings' && S.foodDraft) {
+    S.suppEdit = '';
+    return openPantryEditor(hasKey() ? null : '[data-act="settings"]'); // Settings from the pantry editor's Add key goes back to it
+  }
   if (S.sheet && S.sheet.type === 'food' && S.draft && S.draft.foodForm) {
     if (foodFormChanged(S.draft.foodForm) && !window.confirm(t('Discard your changes?'))) return; // the form stays open
     return closeFood(-1);
+  }
+  if (S.sheet && (S.sheet.type === 'pantry' || S.sheet.type === 'pantry-edit')) { // the Pantry rides Settings: back at its section
+    dropPantry();
+    return openSettings('foods');
   }
   if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
   closeSheet();
@@ -1287,7 +1414,7 @@ async function runFood() {
 // ——— Actions ———
 const ACT = {
   'tab': (el) => go(el.dataset.tab),
-  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); return openSettings(el && el.dataset.sec); }, // the food form's typing is kept for the way back
+  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); if (S.sheet && S.sheet.type === 'pantry-edit') syncPantry(); return openSettings(el && el.dataset.sec); }, // the food form's and pantry editor's typing is kept for the way back
   'close-sheet': () => dismissSheet(),
   'week-prev': () => { S.viewDay = addDays(S.viewDay, -7); render(); },
   'week-next': () => { const d = addDays(S.viewDay, 7); S.viewDay = d > today() ? today() : d; render(); },
@@ -1406,6 +1533,69 @@ const ACT = {
   'plan-photo-remove': (el) => removePlanPhoto(el.dataset.id),
   'frame-save': () => saveFrame(),
   'frame-cancel': () => cancelFrame(),
+  // The Pantry: one product at a time, from Settings; every write goes through setFoods (or storeFoodPhoto over it)
+  'pantry-add': () => {
+    if (S.foods.length >= FOODS_MAX) return toast(t('At most {n} products', { n: FOODS_MAX }));
+    startPantry('');
+    openPantryEditor('#pf-name');
+  },
+  'pantry-open': (el) => { const f = S.foods.find((x) => x.id === el.dataset.id); if (!f) return; startPantry(f.id); openSheet(renderPantrySheet(f.id), { type: 'pantry', id: f.id }); },
+  'pantry-edit': (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f) return;
+    if (!(S.foodDraft && S.foodDraft.id === f.id)) startPantry(f.id); // the record sheet opened with its draft
+    openPantryEditor();
+  },
+  'pantry-save': async (el) => {
+    const d = S.foodDraft;
+    if (!d || d.busy) return;
+    syncPantry();
+    const r = readFood(d);
+    if (!r.valid) return;
+    if (!d.id && S.foods.length >= FOODS_MAX) return toast(t('At most {n} products', { n: FOODS_MAX }));
+    el.disabled = true; // no second save while this one is written (typing enables it again)
+    const sq = d.newPhoto && d.newPhoto.blob;
+    const ing = cleanIng(d.ing);
+    if (d.id) {
+      const id = d.id;
+      await setFoods(S.foods.map((f) => (f.id === id ? { ...f, name: r.food.name, v: r.food.v, ing } : f)));
+      if (sq) await storeFoodPhoto(id, sq); // only reachable for a stored product, so a held square has its food now
+      dropPantry();
+      openSheet(renderPantrySheet(id), { type: 'pantry', id });
+      render();
+      toast(t('{title} saved', { title: td(r.food.name) }));
+      return;
+    }
+    const food = { id: newFoodId(), name: r.food.name, v: r.food.v, ing };
+    await setFoods([...S.foods, food]);
+    dropPantry();
+    if (sq) await storeFoodPhoto(food.id, sq); // the food is in the list first, so the sweep keeps its picture
+    openSheet(renderPantrySheet(food.id), { type: 'pantry', id: food.id });
+    render();
+    toast(t('{title} saved', { title: td(food.name) }));
+  },
+  'pantry-remove': async (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f) return;
+    if (!window.confirm(t('Remove {name}? Its photo is deleted too.', { name: td(f.name) }))) return;
+    await setFoods(S.foods.filter((x) => x.id !== f.id));
+    dropPantry();
+    render();
+    return openSettings('foods');
+  },
+  'pantry-close': () => { dropPantry(); return openSettings('foods'); },
+  'pantry-cancel': () => { dropPantry(); return openSettings('foods'); },
+  'pantry-photo-cam': (el) => { photoTarget = el.dataset.id; $('#f-cam').click(); },
+  'pantry-photo-lib': (el) => { photoTarget = el.dataset.id; $('#f-lib').click(); },
+  'pantry-photo-remove': async (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f || !f.photo) return;
+    await setFoods(S.foods.map((x) => (x.id === f.id ? { ...x, photo: null } : x))); // setFoods sweeps the picture
+    openSheet(renderPantrySheet(f.id), { type: 'pantry', id: f.id });
+  },
+  'pantry-pick-cam': () => { photoTarget = PANTRY_PICK; $('#f-cam').click(); },
+  'pantry-pick-lib': () => { photoTarget = PANTRY_PICK; $('#f-lib').click(); },
+  'pantry-ai': () => runPantryFood(),
   'log-plan-today': (el) => { closeSheet(); return logMeal(mealById(el.dataset.id), 'plan', today()); },
   'hint': (el) => {
     const inp = $('#composer-input');
@@ -1746,6 +1936,7 @@ const ACT = {
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
     autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
+    dropPantry();
     closeSheet();
     go('today');
     toast(keepKey ? t('Factory reset done. Your API key is kept') : t('Factory reset done'));
@@ -1779,6 +1970,7 @@ document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
+  if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -1797,6 +1989,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     photoTarget = null;
     if (target === CHECK_PHOTOS) { if (files.length) await addCheckPhotos(files); return; }
     if (target === FOOD_PHOTOS) { if (files.length) await addFoodPhotos(files); return; }
+    if (target === PANTRY_PICK) { if (files.length) await addPantryPick(files[0]); return; }
     if (target) { if (files.length) await openFrame(target, files[0]); return; }
     const note = $('#composer-input').value.trim();
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
