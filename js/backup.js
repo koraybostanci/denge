@@ -57,7 +57,10 @@ function cleanTk(tk) {
   return tkValid({ kind: tk.kind, params }) ? { kind: tk.kind, params } : null;
 }
 
-// Why a file cannot be restored, or '' when it can be tried
+// Why a file cannot be restored, or '' when it can be tried.
+// The backup shape only ever gains keys (a new one like `foods` returns as its default and changes nothing), so
+// SCHEMA_VERSION does not move for them: a bump would make the older build refuse a whole restore that would have
+// worked both ways. The SQL export's own EXPORT_SCHEMA (js/export.js) is versioned for its consumers and does move.
 export function backupProblem(data) {
   if (!data || typeof data !== 'object' || data.app !== APP_ID || !Array.isArray(data.entries)) return T('This is not a Pickle backup');
   if (!Number.isInteger(data.v)) return T('This backup has no valid version number, so it cannot be restored');
@@ -141,6 +144,7 @@ export function cleanPhoto(p) {
   try { buf = bufFromB64(p.b64); } catch { return null; }
   const out = { id: p.id, buf, type: 'image/jpeg', w: Math.round(pos(p.w, 10000)), h: Math.round(pos(p.h, 10000)) };
   if (isMealId(p.plan)) out.plan = p.plan; // a meal id of any plan, so only its shape is checked
+  if (isId(p.food)) out.food = p.food; // a pantry food's id, the same shape-only check
   return out;
 }
 
@@ -362,6 +366,85 @@ export function sweepPlanPhotos(prev, next, record) {
   const kept = new Set(Object.values(planPhotos));
   const all = [...Object.values(plain(prev) ? prev : {}), ...Object.values(plain(next) ? next : {})];
   return { planPhotos, gone: [...new Set(all)].filter((id) => isId(id) && !kept.has(id)) };
+}
+
+// ——— The pantry (kv `foods`: an array of branded foods the person eats often) ———
+// One record: { id, name, v: [kcal, p, c, f, fib] per 100 g, ing?, photo?, lastUsed? }. The name is one field the
+// brand is typed into ("Eker Skyr natural"); the values are the accuracy payload; photo is an id into the photos
+// store. lastUsed (bumped when a match is applied) merges as the later of the two on a restore. A kv key of its own,
+// after the `checks` one and never inside settings, so a restore adds by id instead of replacing the device's list.
+export const FOODS_MAX = 100;
+
+// One pantry food, checked for a save and for a restore: the id and name must be usable and all five values must be
+// numbers, else the record is dropped; junk values are clamped, the name and the ingredients text are squeezed, and
+// lastUsed survives only when it is in shape (so unusable text clears it). photo keeps only a well-formed id: whether
+// the photo is really there is the site's business, as with a meal's plan ref. Never throws, whatever it is given.
+export function cleanFood(f) {
+  if (!plain(f) || !isId(f.id)) return null;
+  const name = clean1(f.name).slice(0, PLAN_CAPS.name);
+  if (!name || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every(isNum)) return null;
+  const out = { id: f.id, name, v: f.v.map((x, i) => Math.max(0, Math.min(i === 0 ? PLAN_CAPS.kcal : PLAN_CAPS.per100, x))) };
+  const ing = clean1(f.ing);
+  if (ing) out.ing = ing.slice(0, 400);
+  if (isId(f.photo)) out.photo = f.photo;
+  if (isNum(f.lastUsed) && f.lastUsed > 0 && f.lastUsed <= 1e14) out.lastUsed = f.lastUsed;
+  return out;
+}
+
+// The array the kv `foods` key holds: through cleanFood one by one, junk and duplicate ids dropped, at most FOODS_MAX
+// records (the first ones win). Never throws, and the list it gives passes through it again unchanged.
+export function cleanFoods(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const f of Array.isArray(raw) ? raw : []) {
+    const food = cleanFood(f);
+    if (!food || seen.has(food.id)) continue;
+    seen.add(food.id);
+    out.push(food);
+    if (out.length === FOODS_MAX) break;
+  }
+  return out;
+}
+
+// The stored foods and a backup's, merged by id: the backup's values win, a food only one side has stays, and
+// lastUsed is the later of the two. Both lists are already clean (cleanFoods); so is the list it gives. The
+// stored side keeps the head of the list whole, every food in its place: with a stored list always at most
+// FOODS_MAX (cleanFoods), a food only this device has stays, and a backup-only food — added after the stored
+// side, so the FOODS_MAX cap (cleanFoods keeps the first FOODS_MAX) can only ever reach it — goes when there
+// is no room. Feeding the merged list back with the same backup returns the same list again (the stored side
+// keeps both its order and, merged as it was, its values), so restoring the same backup twice ends the same.
+// Stored positions also mean a device's pantry is only ever added to, never reshuffled. Never throws, whatever
+// it is given (junk in place of a list counts as an empty one).
+export function restoreFoods(stored, incoming) {
+  const theirs = new Map((Array.isArray(incoming) ? incoming : []).map((f) => [f.id, f]));
+  const out = [];
+  for (const f of Array.isArray(stored) ? stored : []) {
+    const inc = theirs.get(f.id);
+    theirs.delete(f.id);
+    if (!inc) { out.push(f); continue; }
+    const lastUsed = Math.max(f.lastUsed || 0, inc.lastUsed || 0);
+    out.push(lastUsed ? { ...f, ...inc, lastUsed } : { ...f, ...inc });
+  }
+  return [...out, ...theirs.values()].slice(0, FOODS_MAX);
+}
+
+// The food photos to delete after the foods change: a photo with a `food` ref stays while the kept foods point at it
+// (one of their photo ids) and goes when none does any more — shared by two foods, it survives the first that lets go;
+// replaced or left without a food on either side of a restore's merge, it goes. prev and next hold the photos' { id,
+// food? } shapes kept over the stored and the incoming photos together (judging one side alone would delete the other's
+// photos), foods the kept list. A photo with no well-formed food ref (an entry's or a plan's) is never listed; the
+// photo ids alone say who keeps what, at the merge as in an ordinary save. Never throws.
+export function sweepFoodPhotos(prev, next, foods) {
+  const kept = new Set();
+  for (const f of Array.isArray(foods) ? foods : []) {
+    if (plain(f) && isId(f.photo)) kept.add(f.photo);
+  }
+  const gone = [];
+  for (const p of [...(Array.isArray(prev) ? prev : []), ...(Array.isArray(next) ? next : [])]) {
+    if (!plain(p) || !isId(p.id) || !isId(p.food) || kept.has(p.id)) continue;
+    gone.push(p.id);
+  }
+  return [...new Set(gone)];
 }
 
 // Earned badges, from the stored copy or a backup: only catalog ids, steps on the ladder and real calendar days survive, and a worn

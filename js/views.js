@@ -1655,7 +1655,7 @@ export function renderSettings() {
       <p class="note">${t('Starts your tracking over; the app stays set up as it is.')}</p>
       <dl class="reset-diff">
         <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts.')}</dd></div>
-        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, the plan’s pictures, your API key and provider, and the badges you have earned.')}</dd></div>
+        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
       </dl>
       <div class="actions"><button type="button" class="btn btn-danger" data-act="wipe">${t('Clear my log')}</button></div>
     </section>
@@ -1663,7 +1663,7 @@ export function renderSettings() {
       <h3>${t('Factory reset')}</h3>
       <p class="note">${t('Back to how the app was on its first launch.')}</p>
       <dl class="reset-diff">
-        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, the usage totals and your other settings. The getting-started steps come back.')}</dd></div>
+        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The getting-started steps come back.')}</dd></div>
         <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Nothing, except your API key and provider if the box is ticked.')}</dd></div>
       </dl>
       <label class="check"><input type="checkbox" id="keep-key" checked> ${t('Keep my API key and provider')}</label>

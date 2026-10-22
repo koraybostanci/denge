@@ -7,7 +7,7 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
@@ -44,6 +44,27 @@ export async function setPlanPhotos(next) {
   S.settings.planPhotos = planPhotos;
   if (!same) await saveSettings();
   for (const id of gone) {
+    await db.del('photos', id);
+    const u = S.urls.get(id);
+    if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  }
+}
+// Every change to the pantry goes through here: the list is cleaned, stored and kept in state, and the photos that no
+// food refers to any more are deleted, over this device's photos and the extras together. extras are the photo refs a
+// caller has already read apart from the stored ones (a restore's incoming photos, read as they went in), so the sweep
+// can judge every photo against both sides of a merge without reading the whole photos store into memory at once.
+export async function setFoods(list, extras = []) {
+  const foods = cleanFoods(list);
+  await db.kvSet('foods', foods);
+  S.foods = foods;
+  const incomingIds = new Set(extras.map((p) => p && p.id));
+  const refs = [];
+  for (const id of await db.keys('photos')) {
+    if (incomingIds.has(id)) continue;
+    const p = await db.get('photos', id);
+    if (p) refs.push({ id: p.id, food: p.food });
+  }
+  for (const id of sweepFoodPhotos(refs, extras, foods)) {
     await db.del('photos', id);
     const u = S.urls.get(id);
     if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -731,14 +752,15 @@ async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
   // The user plan travels with the backup; Default is the app's own and never does
   const plans = { active: S.plans.active, list: S.plans.list.filter((p) => p.id !== 'default') };
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans, progress: S.progressReview };
-  // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
-  // They are read one at a time, so the photos that are left out are never loaded.
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans, progress: S.progressReview, foods: S.foods };
+  // The plan's pictures and the pantry's photos always travel with the backup; photos of logged meals only when asked
+  // for. They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
+  const foodIds = new Set(S.foods.map((f) => f.photo));
   const content = [JSON.stringify(data).slice(0, -1) + ',"photos":['];
-  for (const id of (await db.keys('photos')).filter((k) => withPhotos || planIds.has(k))) {
+  for (const id of (await db.keys('photos')).filter((k) => withPhotos || planIds.has(k) || foodIds.has(k))) {
     const p = await db.get('photos', id);
-    if (p) content.push((content.length > 1 ? ',' : '') + JSON.stringify({ id: p.id, type: p.type, w: p.w, h: p.h, plan: p.plan, b64: b64FromBuf(p.buf) }));
+    if (p) content.push((content.length > 1 ? ',' : '') + JSON.stringify({ id: p.id, type: p.type, w: p.w, h: p.h, plan: p.plan, food: p.food, b64: b64FromBuf(p.buf) }));
   }
   content.push(']}');
   const done = await deliverFile(`pickle-backup-${today()}.json`, content, 'application/json');
@@ -751,7 +773,7 @@ async function exportBackup(withPhotos) {
 
 // For analysis elsewhere: a .sql file that builds the tables in any SQLite database
 async function exportSql() {
-  const { sql, counts } = buildSql({ settings: S.settings, entries: S.entries, days: Object.values(S.days), badges: S.badges && S.badges.got, appVersion: APP_VERSION });
+  const { sql, counts } = buildSql({ settings: S.settings, entries: S.entries, days: Object.values(S.days), badges: S.badges && S.badges.got, foods: S.foods, appVersion: APP_VERSION });
   const done = await deliverFile(exportName(), sql, 'text/plain');
   if (done) toast(t('Exported {days} and {meals}', { days: tn('{n} day|{n} days', counts.days), meals: tn('{n} meal|{n} meals', counts.meals) }));
 }
@@ -767,9 +789,10 @@ async function importBackup(file) {
   let skipped = 0;
   const gotBefore = S.badges ? S.badges.got : {};
   try {
+    const newPhotos = []; // the incoming photos' food refs (never their bytes), kept for the pantry's sweep below
     for (const p of Array.isArray(data.photos) ? data.photos : []) {
       const photo = cleanPhoto(p); // photos go in one at a time: a damaged one is skipped, and the others are not held in memory together
-      if (photo) await db.put('photos', photo); else skipped += 1;
+      if (photo) { await db.put('photos', photo); newPhotos.push({ id: photo.id, food: photo.food }); } else skipped += 1;
     }
     const entries = data.entries.map(cleanEntry).filter(Boolean);
     skipped += data.entries.length - entries.length;
@@ -792,6 +815,13 @@ async function importBackup(file) {
     }
     // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
     await setPlanPhotos(pictures);
+    // Then the pantry: an old backup has no foods key and leaves this device's list alone. A backup with one (even an
+    // empty one) is merged in by id — the backup's values win, a food only this device has stays, lastUsed is the later
+    // of the two — and its photos are then swept over this device's photos and the incoming ones together, so a photo
+    // whose food is on either side stays and one whose food is on neither side goes.
+    if (Array.isArray(data.foods)) {
+      await setFoods(restoreFoods(S.foods, cleanFoods(data.foods)), newPhotos);
+    }
     if (Array.isArray(data.checks)) {
       const have = new Set(S.checks.map((c) => c.id));
       const added = data.checks.map(cleanCheck).filter((c) => c && !have.has(c.id));
@@ -839,6 +869,7 @@ async function load() {
   S.entries = await db.all('entries');
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
   S.checks = await db.kvGet('checks', []);
+  S.foods = await db.kvGet('foods', []);
   S.progressReview = readProgress(await db.kvGet('progressReview', null));
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
   S.badges = badges ? cleanBadges(badges) : null;
@@ -1667,11 +1698,15 @@ const ACT = {
   },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures, pantry foods with their photos and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
+    const foodIds = new Set(S.foods.map((f) => f.id));
+    for (const f of S.foods) if (f.photo) keep.add(f.photo); // the pantry's foods and their photos stay too
     await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []); await db.kvSet('progressReview', null);
     for (const id of await db.keys('photos')) {
       if (keep.has(id)) continue;
+      const p = await db.get('photos', id);
+      if (p && p.food && foodIds.has(p.food)) continue; // a photo a pantry food names stays, even if no record points at it by id
       await db.del('photos', id);
       const u = S.urls.get(id);
       if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -1690,7 +1725,7 @@ const ACT = {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
     const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
+    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
     if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -1706,7 +1741,7 @@ const ACT = {
     await saveSettings();
     await writePlans([], 'default'); // the plans start again from the seed
     clearTimeout(announceTimer);
-    S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
+    S.entries = []; S.days = {}; S.checks = []; S.foods = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
@@ -1767,7 +1802,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {

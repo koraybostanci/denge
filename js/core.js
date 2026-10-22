@@ -40,6 +40,7 @@ export const S = {
   reviewOpen: new Map(), // day → whether its review is expanded, once the person has toggled it
   check: freshCheck(), // the check being put together
   checks: [], // earlier verdicts, newest first, without photos
+  foods: [], // the pantry (kv `foods`, see js/backup.js): branded foods eaten often, values per 100 g
   badges: null, // earned badges as stored (kv `badges`, see js/badges.js); null until something is logged
   urls: new Map(),
   persisted: null,
