@@ -5,7 +5,7 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, progressReview, foodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, progressReview, foodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
@@ -492,7 +492,7 @@ async function runCheck() {
   render();
   try {
     const { data, usage, model } = await check({
-      cfg: aiCfg(), blobs, brief: checkBrief(note),
+      cfg: aiCfg(), blobs, brief: checkBrief(note), note, // note: the digest always keeps the products it names
       onRetry: (...a) => { c.status = retryNote(...a); render(); },
     });
     await addUsage(model, usage);
@@ -720,6 +720,7 @@ async function runPantryFood() {
     if (!live()) { d.busy = false; return; }
     d.v = [data.kcal, data.p, data.c, data.f, data.fib];
     if (!name && data.name) d.name = data.name;
+    if (data.ing) d.ing = data.ing; // the reply's ingredients text fills the field too
     d.note = t('Filled in by AI. Check the values.');
   } catch (err) {
     if (!live()) { d.busy = false; return; }
@@ -788,7 +789,12 @@ async function analyzeEntry(id, opts = {}) {
         }
       } else {
         delete e.tk; // the title now comes from the model
-        const items = cleanItems(data.items, ITEM_CAPS_ANALYSIS);
+        // A pantry id beside the planId flow: an item that links to a stored product (a resolvable id and grams
+        // above 0) takes the product's exact values at its grams through the analysis caps and its stored name;
+        // a bad id or no grams leaves the estimate's numbers untouched. The id itself is transient: the matched
+        // items come back without it, so cleanItems cannot store it on the entry.
+        const match = pantryMatch(data.items, S.foods);
+        const items = cleanItems(match ? match.items : data.items, ITEM_CAPS_ANALYSIS);
         const sumMacros = (k) => items.reduce((a, i) => a + (i[k] || 0), 0); // an absent per-item macro is 0 for arithmetic, not NaN
         const sumKcal = sumMacros('kcal');
         Object.assign(e, {
@@ -798,6 +804,12 @@ async function analyzeEntry(id, opts = {}) {
           c: cap(cap(data.c, 800) || sumMacros('c'), 800), f: cap(cap(data.f, 500) || sumMacros('f'), 500), fib: cap(cap(data.fib, 150) || sumMacros('fib'), 150),
           tier: ['plan', 'flex', 'off'].includes(data.tier) ? data.tier : 'plan',
         });
+        // A matched product was really used in this estimate: bump its lastUsed and write the pantry once here,
+        // not once per item — a failing or aborted analysis never reaches this (its throw or early return is above)
+        if (match) {
+          const now = Date.now();
+          await setFoods(S.foods.map((f) => (match.used.includes(f.id) ? { ...f, lastUsed: now } : f)));
+        }
       }
       Object.assign(e, {
         kind: 'meal', status: 'ok',
