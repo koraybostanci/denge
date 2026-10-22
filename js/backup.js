@@ -197,6 +197,12 @@ export const PLAN_CAPS = { grams: 5000, kcal: 1000, per100: 100, ingredients: 12
 const PLAN_ID = /^P-[\w-]{1,38}$/;
 const FOOD_KEY = /^[A-Za-z][\w-]{0,39}$/;
 const isFoodKey = (k) => ownSafe(k) && FOOD_KEY.test(k);
+// The squeeze of a free-text field: control characters to spaces, whitespace runs collapsed, trimmed, at most max
+// characters. cleanFood's name and ing handling and cleanIng in js/app.js all come through here (js/ai.js has its
+// own uncapped sq for the digest text, which must stay byte-stable).
+export function squeeze(v, max) {
+  return typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
+}
 const clean1 = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
 
 // One user plan, checked for both a save and a restore. Returns { plan, changed }: plan is null when nothing usable is left
@@ -384,8 +390,8 @@ export function cleanFood(f) {
   const name = clean1(f.name).slice(0, PLAN_CAPS.name);
   if (!name || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every(isNum)) return null;
   const out = { id: f.id, name, v: f.v.map((x, i) => Math.max(0, Math.min(i === 0 ? PLAN_CAPS.kcal : PLAN_CAPS.per100, x))) };
-  const ing = clean1(f.ing);
-  if (ing) out.ing = ing.slice(0, 400);
+  const ing = squeeze(f.ing, 400);
+  if (ing) out.ing = ing;
   if (isId(f.photo)) out.photo = f.photo;
   if (isNum(f.lastUsed) && f.lastUsed > 0 && f.lastUsed <= 1e14) out.lastUsed = f.lastUsed;
   return out;

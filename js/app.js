@@ -7,7 +7,7 @@ import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
@@ -36,14 +36,18 @@ export async function writePlans(list, active) {
   S.rev++;
   return record;
 }
-// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo that
-// no picture refers to any more is deleted
+// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo
+// that no picture refers to any more is deleted — but never a photo that a pantry product refers to: before each
+// deletion the record is read (a handful at most) and one carrying a `food` ref is the pantry's, whatever the plan
+// sweep thought.
 export async function setPlanPhotos(next) {
   const { planPhotos, gone } = sweepPlanPhotos(S.settings.planPhotos, next, S.plans || plansRecord(seedPlan, [], 'default'));
   const same = JSON.stringify(planPhotos) === JSON.stringify(S.settings.planPhotos);
   S.settings.planPhotos = planPhotos;
   if (!same) await saveSettings();
   for (const id of gone) {
+    const p = await db.get('photos', id);
+    if (p && p.food) continue; // a photo with a food ref is the pantry's, the plan sweep never deletes it
     await db.del('photos', id);
     const u = S.urls.get(id);
     if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -53,10 +57,21 @@ export async function setPlanPhotos(next) {
 // food refers to any more are deleted, over this device's photos and the extras together. extras are the photo refs a
 // caller has already read apart from the stored ones (a restore's incoming photos, read as they went in), so the sweep
 // can judge every photo against both sides of a merge without reading the whole photos store into memory at once.
+// A photo's `food` ref is written only by a backup import, which always arrives with the extras read as they went
+// in, while entry and plan photos get fresh ids and never carry one — so when nothing came in beside the stored
+// ones and the photo ids the foods point at are the same set before and after, no food-ownership line can have
+// changed: the per-record scan and the sweep are skipped entirely (the common edit and lastUsed writes).
+const foodPhotoIds = (fs) => new Set((Array.isArray(fs) ? fs : []).map((f) => f && f.photo).filter((p) => typeof p === 'string' && p));
 export async function setFoods(list, extras = []) {
   const foods = cleanFoods(list);
+  const keep = !extras.length && (() => {
+    const prev = foodPhotoIds(S.foods);
+    const next = foodPhotoIds(foods);
+    return prev.size === next.size && [...prev].every((id) => next.has(id));
+  })();
   await db.kvSet('foods', foods);
   S.foods = foods;
+  if (keep) return;
   const incomingIds = new Set(extras.map((p) => p && p.id));
   const refs = [];
   for (const id of await db.keys('photos')) {
@@ -630,6 +645,14 @@ function cancelFrame() {
     hydratePhotos();
     return;
   }
+  // A save in progress has already cleared frame (saveFrame does first); when the open sheet is that save's
+  // pantry frame sheet, the product it belongs to is known only there — back to its record sheet, not to the
+  // plan fallback, which would carry a food id no meal holds.
+  if (!f && S.sheet && S.sheet.type === 'pantry-frame' && S.foods.some((x) => x.id === S.sheet.id)) {
+    openSheet(renderPantrySheet(S.sheet.id), { type: 'pantry', id: S.sheet.id });
+    hydratePhotos();
+    return;
+  }
   const id = f ? f.id : S.sheet && S.sheet.id;
   if (id) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
   hydratePhotos();
@@ -647,7 +670,7 @@ const openPantryEditor = (focusSel, keepFocus) => openSheet(renderPantryEditor()
 // Ids like the other record's, matched by isId: a cheap prefix plus db.uid()
 const newFoodId = () => 'f' + db.uid();
 // The ingredients text as a save keeps it (cleanFood squeezes and caps it): the same here, so a save passes unchanged
-const cleanIng = (ing) => (typeof ing === 'string' ? ing.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400) : '');
+const cleanIng = (ing) => squeeze(ing, 400);
 // A draft holds the editor's fields and one working photo (pick: the unframed copy the fill reads, never stored) and,
 // for a product that is not saved yet, the framed square (newPhoto), which only a save writes.
 function startPantry(id) {
@@ -1570,6 +1593,12 @@ const ACT = {
     const ing = cleanIng(d.ing);
     if (d.id) {
       const id = d.id;
+      if (!S.foods.some((f) => f.id === id)) { // the product went while it was edited (a restore, another device): nothing to write over
+        dropPantry();
+        await openSettings('foods');
+        render();
+        return toast(t('The product changed while you were editing. Open it again.'));
+      }
       await setFoods(S.foods.map((f) => (f.id === id ? { ...f, name: r.food.name, v: r.food.v, ing } : f)));
       if (sq) await storeFoodPhoto(id, sq); // only reachable for a stored product, so a held square has its food now
       dropPantry();

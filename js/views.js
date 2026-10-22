@@ -806,7 +806,7 @@ function checkOption(rec, o, i, rem) {
 // option when, folded (foldKey in js/i18n.js), one name contains the other and the shorter name is still at
 // least 4 characters, so a name that short cannot ride inside another word. The line only names the products: it
 // never says which numbers the verdict used (a label on the photo outranks the stored values) and never claims provenance.
-const pantryNames = (options) => {
+export const pantryNames = (options) => {
   const opts = (Array.isArray(options) ? options : []).map((o) => foldKey(o && o.name)).filter(Boolean);
   const out = [];
   const shown = new Set();
@@ -1616,10 +1616,10 @@ export function renderPantryEditor() {
     ${hasKey() ? `<button type="button" class="food-photo" data-act="pantry-pick-lib" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
   </div>
   ${ai}
-  <div class="actions">
+  ${hasKey() ? `<div class="actions">
     <button type="button" class="btn" data-act="pantry-pick-cam"${off}>${ICON.camera}${t('Take a photo')}</button>
     <button type="button" class="btn" data-act="pantry-pick-lib"${off}>${t('Choose a photo')}</button>
-  </div>
+  </div>` : ''}
   <p class="note">${t('Values per 100 g')}</p>
   <div class="field-grid">
     ${field(0, t('Calories'), 'numeric')}${field(1, t('Protein (g)'), 'decimal')}${field(2, t('Carbs (g)'), 'decimal')}${field(3, t('Fat (g)'), 'decimal')}${field(4, t('Fibre (g)'), 'decimal')}

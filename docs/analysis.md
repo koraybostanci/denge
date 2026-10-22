@@ -53,9 +53,11 @@ Xf Xfib per 100 g`, and on a check line also `; ingredients: …`, a snippet of 
 characters of the product's stored ingredients text. The most recently used products come first
 (newest first; never-used ones keep their stored order). At most 24 products travel and the whole
 digest stays under about 2,000 characters, whole lines kept; a product your note names travels
-whatever the caps. The lines are part of the SYSTEM text of both requests; with an empty Pantry,
-both prompts stay byte-identical to what they ever were. Only this text travels — the Pantry's
-photos never do.
+whatever the caps. The lines are part of the SYSTEM text of both requests; with an empty Pantry, that
+SYSTEM text stays byte-identical to what it ever was — the analysis reply's schema (and its worded shape
+on schema-less providers) still declares the optional per-item `pantry` key on every request, so the
+reply contract alone gains a few tokens, whether or not any products are stored. Only this text
+travels — the Pantry's photos never do.
 
 When the model marks an estimate's item as one of these products, it sets the item's `pantry` to
 the line's id and the app applies the product's stored values: its per-100 g values at the grams

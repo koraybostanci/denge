@@ -477,6 +477,23 @@ test('the note’s own foods are always in the digest, whatever the caps', async
   });
 });
 
+test('a note cannot force a 1–3 character name in, whatever it says; the food can still travel as a normal one', async () => {
+  const many = [
+    pf('fE', 'Egg', [143, 12.5, 0.7, 9.5, 0]), // 3 characters, at the head, so the ordinary cap keeps it
+    ...Array.from({ length: 23 }, (_, i) => pf(`f${i}`, `Product ${i}`, [100 + i, 5, 10, 4, 1])),
+    pf('f30', 'Good egg', [280, 0, 70, 0, 0]), // past the 24-food cap, named in the note
+  ];
+  await withFoods(many, async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await analyze({ cfg: haiku, text: 'scrambled egg with a slice of Good egg', when: new Date() });
+    const lines = digestOf(calls[0].body.system).split('\n').slice(2);
+    assert.equal(lines.length, 25); // 24 normal foods (fE first, then Product 0..22) plus the one forced food
+    assert.ok(lines.some((l) => l.startsWith('fE: Egg, '))); // the short name rides the ordinary cap, not the note
+    assert.ok(lines.some((l) => l.startsWith('f30: '))); // "Good egg" is long enough and past the cap: forced in
+    assert.equal(lines.filter((l) => l.startsWith('fE: ')).length, 1); // no double line for the short name
+  });
+});
+
 test('the digest caps: at most 24 foods, ~2000 characters with whole lines kept', async () => {
   const many = Array.from({ length: 30 }, (_, i) => pf(`f${i}`, `Product ${i}`, [100 + i, 5, 10, 4, 1]));
   await withFoods(many, async () => {

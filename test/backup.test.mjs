@@ -1,7 +1,7 @@
 // Everything read from a backup file is checked before it is stored or shown (js/backup.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, readProgress, b64FromBuf, cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, PLAN_CAPS } from '../js/backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, readProgress, b64FromBuf, cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, PLAN_CAPS, squeeze } from '../js/backup.js';
 import { SCHEMA_VERSION } from '../js/core.js';
 
 const good = {
@@ -212,8 +212,19 @@ test('a backup with or without a progress key is accepted (older backups have no
   assert.equal(backupProblem({ ...ok, progress: { junk: 1 } }), '');
 });
 
-// ——— The pantry (js/backup.js: cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos) ———
+// ——— The pantry (js/backup.js: cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos) and the shared squeeze ———
 const food = { id: 'f1', name: 'Eker Skyr natural', v: [59, 10.5, 4, 0.5, 0], ing: 'Pasteurised milk, cultures', photo: 'fp1', lastUsed: 1759300000000 };
+
+test('squeeze: control characters to spaces, runs collapsed, trimmed, capped at max, a non-string gives nothing — all idempotent', () => {
+  assert.equal(squeeze('a\u0000x\tto\u007fb\nnow', 400), 'a x to b now'); // control characters including a newline become plain spaces
+  assert.equal(squeeze('   many\tspaces\n\n\nin a   row ', 400), 'many spaces in a row'); // runs collapse, both ends trimmed
+  assert.equal(squeeze(' ab ', 400), 'ab');
+  assert.equal(squeeze('no cap here', 400), 'no cap here');
+  assert.equal(squeeze('a'.repeat(500), 400), 'a'.repeat(400)); // the 400 cap
+  assert.equal(squeeze('abc', 2), 'ab'); // the cap is the caller's choice (the ing field passes 400, clean1 is uncapped by hand)
+  for (const bad of [null, undefined, 5, {}, [], true]) assert.equal(squeeze(bad, 400), '');
+  for (const s of ['a\u0000x \u000b y', '  a\t\tb\n\n c  ', 'a b c']) assert.equal(squeeze(squeeze(s, 400), 400), squeeze(s, 400)); // a clean string passes through unchanged
+});
 
 test('a pantry food: a good record keeps its shape and round-trips', () => {
   assert.deepEqual(cleanFood(food), food);

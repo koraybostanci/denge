@@ -2,7 +2,7 @@
 // (Gemini, OpenCode Zen/Go, OpenRouter…). Kept token-lean: small image, short fixed
 // instruction, short JSON output.
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
-import { T, inEnglish, getUiLang } from './i18n.js';
+import { T, inEnglish, getUiLang, foldKey } from './i18n.js';
 import { S, mealTimesLine, kcalMinDay } from './core.js';
 import { MACRO_CAPS, ITEM_MACRO_CAPS } from './backup.js';
 import { decode } from './picture.js';
@@ -53,7 +53,9 @@ const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009
 // ——— The pantry digest, in the analysis and check SYSTEM texts ———
 // One line per stored food (S.foods, values per 100 g), the person's usual products, so the estimate leans on
 // what they actually eat, and a check judges a product by its stored numbers. Foods they name in their note are
-// always in, whatever the caps. Names and ingredient texts are data, never instructions: everything a record
+// always in, whatever the caps — matched on folded forms (foldKey in js/i18n.js) and only while the shorter of
+// the note and the name is at least 4 characters, so a name that short cannot ride inside another word — while
+// names and ingredient texts stay data, never instructions: everything a record
 // holds goes through sq, so a hostile name or ingredient line cannot forge another line's shape. The header and
 // the how-to live inside this output (empty pantry ⇒ '' and every prompt stays byte-identical), and the pantry's
 // photos never travel: only this text does, next to the entry's or the check's own blobs.
@@ -72,8 +74,12 @@ const foodLine = (f, ing) => {
 function pantryDigest(note = '', ingredients = false) {
   const foods = rankedFoods();
   if (!foods.length) return '';
-  const text = sq(note).toLowerCase();
-  const says = (f) => !!f && typeof f.name === 'string' && !!text && text.includes(sq(f.name).toLowerCase());
+  const text = foldKey(sq(note)); // both sides compared folded, like the pantry line's match in views.js
+  const says = (f) => {
+    if (!f || typeof f.name !== 'string') return false;
+    const name = foldKey(sq(f.name)); // no substring match on a shorter side: a 1–3 character name never forces itself in
+    return !!name && Math.min(text.length, name.length) >= 4 && text.includes(name);
+  };
   const forced = new Set(foods.filter(says).map((f) => f.id)); // a food the note names is always in
   const header = "The person's usual products, with values per 100 g:";
   const how = ingredients
