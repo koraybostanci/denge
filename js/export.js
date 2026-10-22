@@ -5,7 +5,9 @@
 // internal id, APP_ID in core.js, which stays when the app is renamed, so queries keep working).
 import { targetAt, dayKey } from './plan.js';
 
-export const EXPORT_SCHEMA = 5;
+// The export's own version, for whoever loads the .sql file. It moves when the tables change (the backup file's
+// SCHEMA_VERSION does not: a new kv key is invisible to it), and an export is always a full one, never a patch.
+export const EXPORT_SCHEMA = 6;
 export const exportName = (now = new Date()) => `pickle-export-${dayKey(now)}.sql`;
 
 const text = (v) => (v == null || v === '' ? 'NULL' : `'${String(v).replace(/\u0000/g, '').replace(/'/g, "''")}'`);
@@ -90,6 +92,19 @@ CREATE TABLE weightplan_meal_items (
   PRIMARY KEY (meal_id, position)
 );
 
+CREATE TABLE weightplan_foods (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,                 -- what the person named it, brand typed in, for example "Eker Skyr natural"
+  kcal        REAL,                          -- the five values below per 100 g, as stored
+  protein_g   REAL,
+  carbs_g     REAL,
+  fat_g       REAL,
+  fibre_g     REAL,
+  ingredients TEXT,                          -- the ingredients text, as typed; NULL when there is none
+  last_used   TEXT,                          -- local time the food was last used; NULL when never
+  has_photo   INTEGER NOT NULL DEFAULT 0     -- 1 when the food has a photo; the photo itself is not exported
+);
+
 -- One row per day: the day's own values, the 7-day weight average the app uses, and the meal totals.
 -- beers: the planned extras flagged alcohol (Beer 0.33 l, Beer 0.5 l, or a typed "2 beers").
 CREATE VIEW weightplan_daily AS
@@ -121,10 +136,10 @@ LEFT JOIN (
 `;
 
 /**
- * @param {{settings: object, entries: object[], days: object[], badges?: object, appVersion: string, now?: Date}} data
+ * @param {{settings: object, entries: object[], days: object[], badges?: object, foods?: object[], appVersion: string, now?: Date}} data
  * @returns {{sql: string, counts: {days: number, meals: number, items: number}}}
  */
-export function buildSql({ settings: s, entries, days, badges = {}, appVersion, now = new Date() }) {
+export function buildSql({ settings: s, entries, days, badges = {}, foods = [], appVersion, now = new Date() }) {
   const out = [];
   out.push(
     `-- Pickle export, ${localTime(now.getTime())} (app version ${appVersion}, export schema ${EXPORT_SCHEMA})`,
@@ -140,6 +155,7 @@ export function buildSql({ settings: s, entries, days, badges = {}, appVersion, 
     'DROP TABLE IF EXISTS weightplan_supplements;',
     'DROP TABLE IF EXISTS weightplan_meal_items;',
     'DROP TABLE IF EXISTS weightplan_meals;',
+    'DROP TABLE IF EXISTS weightplan_foods;',
     'DROP TABLE IF EXISTS weightplan_days;',
     'DROP TABLE IF EXISTS weightplan_settings;',
     SCHEMA,
@@ -172,6 +188,13 @@ export function buildSql({ settings: s, entries, days, badges = {}, appVersion, 
   out.push('');
 
   for (const [id, steps] of Object.entries(badges || {})) for (const [thr, d] of Object.entries(steps || {})) out.push(`INSERT INTO weightplan_badges (id, threshold, day) VALUES (${text(id)}, ${int(thr)}, ${text(d)});`);
+  out.push('');
+
+  // The pantry: values per 100 g and the photo only as a flag, never as bytes
+  for (const f of (Array.isArray(foods) ? foods : []).filter((f) => f && f.id)) {
+    const v = (i) => num(Array.isArray(f.v) ? f.v[i] : null);
+    out.push(`INSERT INTO weightplan_foods (id, name, kcal, protein_g, carbs_g, fat_g, fibre_g, ingredients, last_used, has_photo) VALUES (${text(f.id)}, ${text(f.name)}, ${v(0)}, ${v(1)}, ${v(2)}, ${v(3)}, ${v(4)}, ${text(f.ing)}, ${f.lastUsed > 0 && f.lastUsed <= 1e14 ? text(localTime(f.lastUsed)) : 'NULL'}, ${f.photo ? 1 : 0});`);
+  }
   out.push('');
 
   let items = 0;

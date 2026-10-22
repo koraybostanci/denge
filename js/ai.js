@@ -2,7 +2,7 @@
 // (Gemini, OpenCode Zen/Go, OpenRouter…). Kept token-lean: small image, short fixed
 // instruction, short JSON output.
 import { planDigest, planFoods, RULES, hhmm } from './plan.js';
-import { T, inEnglish, getUiLang } from './i18n.js';
+import { T, inEnglish, getUiLang, foldKey } from './i18n.js';
 import { S, mealTimesLine, kcalMinDay } from './core.js';
 import { MACRO_CAPS, ITEM_MACRO_CAPS } from './backup.js';
 import { decode } from './picture.js';
@@ -21,8 +21,10 @@ function workoutNote(plan) {
   return names.length ? `workout (${names.join(' or ')})` : 'workout';
 }
 
-// Built at each request, from the active plan
-const SYSTEM = () => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
+// Built at each request, from the active plan and the pantry (the digest is '' when the pantry is empty, so the
+// prompt with no products stays byte-identical). The note is the person's text of this entry: foods they name are
+// always in the digest, whatever the caps.
+const SYSTEM = (note = '') => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
 Input: photo(s) and/or a short text in any language, plus local time and place.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
 For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
@@ -33,7 +35,7 @@ tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a smal
 flags: add "alcohol" for any alcohol.
 conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
 Plan meals:
-${planDigest(S.plan)}`;
+${planDigest(S.plan)}${pantryDigest(note)}`;
 
 // The prompts are English and built at each request from the active plan, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
@@ -43,6 +45,62 @@ const TURKISH = {
   text: '\nWrite all user-facing text (titles, notes, questions, reviews, glosses) in Turkish; keep JSON keys and enum values exactly as specified.',
 };
 export const langLine = (kind = 'text') => (getUiLang() === 'tr' ? TURKISH[kind] : '');
+
+// Text that came from outside (the pantry's records, a model reply): the squeeze of cleanFood in js/backup.js and
+// cleanIng in js/app.js, mirrored here — one plain line, no control characters, so no text can forge a line's shape
+const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
+
+// ——— The pantry digest, in the analysis and check SYSTEM texts ———
+// One line per stored food (S.foods, values per 100 g), the person's usual products, so the estimate leans on
+// what they actually eat, and a check judges a product by its stored numbers. Foods they name in their note are
+// always in, whatever the caps — matched on folded forms (foldKey in js/i18n.js) and only while the shorter of
+// the note and the name is at least 4 characters, so a name that short cannot ride inside another word — while
+// names and ingredient texts stay data, never instructions: everything a record
+// holds goes through sq, so a hostile name or ingredient line cannot forge another line's shape. The header and
+// the how-to live inside this output (empty pantry ⇒ '' and every prompt stays byte-identical), and the pantry's
+// photos never travel: only this text does, next to the entry's or the check's own blobs.
+const PANTRY_FOODS = 24; // foods in the digest at most; a food the note names is always kept regardless
+const PANTRY_CHARS = 2000; // the whole digest at most, header and how-to included: whole lines, trimmed sensibly
+const PANTRY_ING = 60; // the ingredients snippet of a check line, at most
+// The last-used foods first (newest first), the never-used or older ones in their stored place. Array#sort is
+// stable, so foods without lastUsed keep insertion order behind the used ones.
+const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+// One line: `id: name, X kcal Xp Xc Xf Xfib per 100 g`; the check adds `; ingredients: …` (snippet only)
+const foodLine = (f, ing) => {
+  const base = `${f.id}: ${sq(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
+  return ing && f.ing ? `${base}; ingredients: ${sq(f.ing).slice(0, PANTRY_ING)}` : base;
+};
+// The digest text, or '' when the pantry is empty (the prompts then stay exactly as they ever were)
+function pantryDigest(note = '', ingredients = false) {
+  const foods = rankedFoods();
+  if (!foods.length) return '';
+  const text = foldKey(sq(note)); // both sides compared folded, like the pantry line's match in views.js
+  const says = (f) => {
+    if (!f || typeof f.name !== 'string') return false;
+    const name = foldKey(sq(f.name)); // no substring match on a shorter side: a 1–3 character name never forces itself in
+    return !!name && Math.min(text.length, name.length) >= 4 && text.includes(name);
+  };
+  const forced = new Set(foods.filter(says).map((f) => f.id)); // a food the note names is always in
+  const header = "The person's usual products, with values per 100 g:";
+  const how = ingredients
+    ? 'Judge one of these products by its exact name here and its stored per-100 g values; where the photo shows a readable nutrition label, the label outranks the stored values. Never invent a product line.'
+    : 'When an item clearly is one of these products, set that item\'s pantry to that line\'s id and give its kcal, p, c, f and fib as the product\'s per-100 g values at the grams you estimated; name the item as the product is listed here. Never invent a product line.';
+  const lines = [header, how];
+  let chars = (header + how).length + 2;
+  const seen = new Set();
+  let kept = 0; // counts the non-forced foods, so the caps cut only them
+  for (const f of foods) {
+    if (!f || seen.has(f.id) || !Array.isArray(f.v) || f.v.length !== 5) continue; // junk in state too
+    const line = foodLine(f, ingredients);
+    if (!forced.has(f.id) && kept >= PANTRY_FOODS) continue; // the cap cuts only the non-forced foods
+    if (chars + line.length + 1 > PANTRY_CHARS && !forced.has(f.id)) continue; // keep whole lines
+    seen.add(f.id);
+    if (!forced.has(f.id)) kept++;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  return kept || forced.size ? '\n\n' + lines.join('\n') : '';
+}
 
 const SCHEMA = {
   type: 'object',
@@ -59,7 +117,10 @@ const SCHEMA = {
         type: 'object',
         additionalProperties: false,
         required: ['n', 'g', 'kcal', 'p'],
-        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
+        // pantry: an OPTIONAL id from the digest's lines (pantryDigest): a link to a stored product the model
+        // will apply in js/app.js beside its planId flow. Optional in both routes, so a weak or free model can
+        // leave it out and a provider that drops the schema stays just fine.
+        properties: { n: { type: 'string' }, g: { type: 'number' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' }, pantry: { type: 'string' } },
       },
     },
     kcal: { type: 'number' },
@@ -141,7 +202,7 @@ export const ZEN_FREE = [
   'longcat-2.5-preview-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'ling-3.0-flash-fin-free', 'jev-1.13-free',
 ];
 
-const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
+const SHAPE = '\nReturn exactly one JSON object with all of these keys: {"kind":"meal|weight|steps|none","title":"","slot":"morning|lunch|snack1|snack2|dinner|late|workout","plan":"","items":[{"n":"","g":0,"kcal":0,"p":0,"c":0,"f":0,"fib":0,"pantry":""}],"kcal":0,"p":0,"c":0,"f":0,"fib":0,"tier":"plan|flex|off","flags":[],"conf":0,"q":"","kg":0,"steps":0}';
 
 function classify(status, msg) {
   // 429 is a quota or rate limit, whatever the text says: Gemini's quota message mentions "billing" on the free tier too.
@@ -277,7 +338,7 @@ export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
   if (o.text) lines.push(`Note: ${o.text}`);
   if (o.hint) lines.push(o.hint);
-  const req = { system: SYSTEM() + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
+  const req = { system: SYSTEM(o.text) + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
 
@@ -446,7 +507,7 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 
 // ——— Check before ordering or buying: photos of a menu, a dish or a product, judged against the plan ———
 // The prompts are always English, whatever the interface language is
-const CHECK_SYSTEM = () => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
+const CHECK_SYSTEM = (note = '') => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
 The plan is built from: ${planFoods(S.plan)}.
 Plan meals:
 ${planDigest(S.plan)}
@@ -465,7 +526,7 @@ For each option:
 - why: one sentence with the numbers or ingredients that decide it.
 - tip: how to make it fit: "grilled instead of fried, sauce on the side", "eat 30 g, not the bag". For an option to avoid, what to have instead. "" if nothing is needed.
 - tier: "plan" = fits the plan's foods; "flex" = weekly-allowance items; "off" = the off-plan list.
-Judge only what you can read or see; never invent a label value. answer at most 40 words, why at most 24, tip at most 16.`);
+Judge only what you can read or see; never invent a label value. answer at most 40 words, why at most 24, tip at most 16.${pantryDigest(note, true)}`);
 const CHECK_SHAPE = '\nReturn exactly one JSON object with these keys: {"kind":"menu|product|dish|none","title":"","answer":"","options":[{"name":"","rating":0,"fit":"good|ok|avoid","portion":"","kcal":0,"p":0,"c":0,"f":0,"fib":0,"facts":"","why":"","tip":"","tier":"plan|flex|off"}]}';
 const CHECK_SCHEMA = {
   type: 'object',
@@ -492,11 +553,11 @@ const CHECK_SCHEMA = {
 };
 
 /**
- * @param {{cfg:object, blobs:Blob[], brief:string, onRetry?:Function}} o brief: today's state and the person's note, built by the app
+ * @param {{cfg:object, blobs:Blob[], brief:string, note?:string, onRetry?:Function}} o brief: today's state and the person's note, built by the app; note: the same note as a plain string, so the digest can always include the products it names (optional: a source without the text gets no forced foods)
  * @returns {Promise<{data:{kind:string,title:string,answer:string,options:object[]}, usage:{in:number,out:number}, model:string}>}
  */
 export async function check(o) {
-  const req = { system: CHECK_SYSTEM() + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
+  const req = { system: CHECK_SYSTEM(o.note) + langLine(), shape: CHECK_SHAPE, text: o.brief, blobs: o.blobs || [], maxImages: 4, schema: CHECK_SCHEMA, json: true, maxTokens: 1400, timeout: 90000 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   const data = cleanVerdict(r.data);
   if (!data.answer && !data.options.length) throw new AiError('empty', 'The model returned no verdict');
@@ -527,14 +588,17 @@ Input: up to two photos (a nutrition label, a package, or the food itself) and/o
 If a nutrition label is readable, copy its per-100 g values. If it gives values only per serving, convert them to per 100 g using the serving size. If it gives energy only in kJ, divide by 4.184.
 Otherwise estimate typical values per 100 g of the food as shown or named, as it is sold (raw unless it is clearly cooked).
 name: a short name for the food, at most 60 characters: the product name when one is shown, else a plain name.
+ing: the ingredients text as the label or package writes it, squeezed to one line, at most 400 characters, when you can read one; omit the key when you cannot.
 kcal: energy per 100 g. p, c, f, fib: protein, carbohydrate, fat and fibre in grams per 100 g.
 known: true if you can tell what the food is or read its values, false if you cannot (then the other values do not matter). A food with 0 kcal, such as water, is known.`);
-const FOOD_SHAPE = '\nReturn exactly one JSON object with these keys: {"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0}';
+const FOOD_SHAPE = '\nReturn exactly one JSON object with these keys: {"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0,"ing":""}';
 const FOOD_SCHEMA = {
   type: 'object',
   additionalProperties: false,
+  // ing is optional like on the analysis items' pantry id: a weak or free model may leave it out, and a provider
+  // that drops the schema stays fine. ~30–60 tokens once per product.
   required: ['name', 'known', 'kcal', 'p', 'c', 'f', 'fib'],
-  properties: { name: { type: 'string' }, known: { type: 'boolean' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' } },
+  properties: { name: { type: 'string' }, known: { type: 'boolean' }, kcal: { type: 'number' }, p: { type: 'number' }, c: { type: 'number' }, f: { type: 'number' }, fib: { type: 'number' }, ing: { type: 'string' } },
 };
 
 /**
@@ -549,7 +613,10 @@ export async function foodValues(o) {
 }
 
 // Values from the model, the way a plan food stores them: kcal rounded to whole numbers and the rest to 0.1, within cleanPlan's
-// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters. `known` is true or "true"; when it is missing, kcal above 0 counts as known (providers without a strict schema may omit it). An explicit false, no kcal or more than 1,000 is no reading (0 kcal is a reading only when known is true, as for water).
+// ranges (kcal up to 1,000, the rest 0–100), the name at most 60 characters, ing the squeezed ingredients text at
+// most 400 (its key only enters the object when the reply carries one — providers without a strict schema may omit
+// it). `known` is true or "true"; when it is missing, kcal above 0 counts as known (providers without a strict
+// schema may omit it). An explicit false, no kcal or more than 1,000 is no reading (0 kcal is a reading only when known is true, as for water).
 export function cleanFoodValues(d) {
   d = d && typeof d === 'object' ? d : {};
   const num = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim()) ? +v : NaN);
@@ -557,7 +624,10 @@ export function cleanFoodValues(d) {
   const known = d.known === undefined || d.known === null ? kcal > 0 : d.known === true || (typeof d.known === 'string' && d.known.trim().toLowerCase() === 'true');
   if (!known || !(kcal >= 0 && kcal <= 1000)) throw new AiError('empty', 'The model read no values');
   const g = (v) => (Number.isFinite(num(v)) ? Math.min(100, Math.max(0, Math.round(num(v) * 10) / 10)) : 0);
-  return { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
+  const out = { name: clean(d.name, 60), kcal, p: g(d.p), c: g(d.c), f: g(d.f), fib: g(d.fib) };
+  const ing = sq(d.ing).slice(0, 400); // the same squeeze and cap as cleanFood in js/backup.js keeps a save's text
+  if (ing) out.ing = ing;
+  return out;
 }
 
 // The caps of one food item, per call site. Call sites that already cap items keep their own values, so behaviour
@@ -598,6 +668,29 @@ export function cleanItems(items, caps) {
       }
       return item;
     });
+}
+
+// The `pantry` ids of a reply's items, applied beside js/app.js's planId flow: an item whose optional pantry id
+// resolves to a stored food (S.foods) and has grams above 0 takes the product's exact values — its per-100 g v at
+// the item's grams, clamped through the analysis caps by the same cleanItems that writes every analysis item —
+// and the food's stored name. An unresolvable id, no id, junk state or grams of 0 changes nothing, silently: a
+// hallucinated link must not wreck the entry. Pure: no DOM and no storage, so this is the testable seam of the
+// apply. The matched items come back without the pantry key (cleanItems keeps only the six numbers + n), so the
+// transient id can never slip into a stored entry. `used` lists the ids actually applied, in match order (the
+// caller bumps those foods' lastUsed and writes the list once); null when nothing matched and changed.
+export function pantryMatch(items, foods, caps = ITEM_CAPS_ANALYSIS) {
+  const stored = new Map((Array.isArray(foods) ? foods : []).filter((f) => f && f.id).map((f) => [f.id, f]));
+  const used = new Set();
+  const out = (Array.isArray(items) ? items : []).map((i) => {
+    if (!i || typeof i !== 'object' || typeof i.pantry !== 'string' || !(+i.g > 0)) return i;
+    const f = stored.get(i.pantry);
+    if (!f || !Array.isArray(f.v) || f.v.length !== 5 || !f.v.every(Number.isFinite)) return i;
+    const g = Math.min(caps.g, Math.max(0, +i.g)); // the grams cleanItems would let through
+    const [item] = cleanItems([{ n: f.name, g, kcal: (f.v[0] * g) / 100, p: (f.v[1] * g) / 100, c: (f.v[2] * g) / 100, f: (f.v[3] * g) / 100, fib: (f.v[4] * g) / 100 }], caps);
+    used.add(f.id);
+    return item;
+  });
+  return used.size ? { items: out, used: [...used] } : null;
 }
 
 // The useful part of a provider's error text: for quota errors the limit, the model and the wait, otherwise the start of the message

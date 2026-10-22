@@ -47,6 +47,38 @@ names, foods with amounts, calories). The requests are longer than they were and
 With a large My plan they grow with its size. The Default plan roughly doubles the review prompt (the
 largest review measured about 1,640 characters before and 3,000 after).
 
+The Pantry (Settings → "Pantry") feeds the analysis and the check too. Each of these
+requests carries your products as short lines, one per stored product: `id: name, X kcal Xp Xc
+Xf Xfib per 100 g`, and on a check line also `; ingredients: …`, a snippet of at most 60
+characters of the product's stored ingredients text. The most recently used products come first
+(newest first; never-used ones keep their stored order). At most 24 products travel and the whole
+digest stays under about 2,000 characters, whole lines kept; a product your note names travels
+whatever the caps. The lines are part of the SYSTEM text of both requests; with an empty Pantry, that
+SYSTEM text stays byte-identical to what it ever was — the analysis reply's schema (and its worded shape
+on schema-less providers) still declares the optional per-item `pantry` key on every request, so the
+reply contract alone gains a few tokens, whether or not any products are stored. Only this text
+travels — the Pantry's photos never do.
+
+When the model marks an estimate's item as one of these products, it sets the item's `pantry` to
+the line's id and the app applies the product's stored values: its per-100 g values at the grams
+the model estimated, through the usual caps, and the item is named as the product is named in the
+digest. An id that matches no stored product, or grams of 0, is silently ignored and the model's
+own numbers stand. The id is transient: nothing of it is stored with the entry.
+
+On a check's result, if one of the options names a product you have stored, a quiet line under
+the verdict, "From your pantry: …", names them. The app derives the line from the stored verdict
+at render time, and it never says which numbers were used (a label on the photo outranks the
+stored values).
+
+The food form (a product's fill from a photo or a name) can also read its ingredients: a
+product may then carry an ingredients text of at most 400 characters. It is optional and is
+stored with the product; on check requests its first 60 characters are the digest's snippet.
+
+Cost: a digest line runs about 20 tokens, and the caps hold the cost — at most 24 products and
+about 2,000 characters, so under 500 tokens in, in the worst case. The ingredients snippet adds a
+little on each check line. Reading an ingredients text in the form costs about 30–60 tokens, once
+per product.
+
 Estimates from a photo are rough. Treat them as a starting point and correct the portion when
 it is off. Each item in an estimate now carries carbohydrates, fat and fibre next to the
 calories and protein, and the entry sheet's edit fields let you correct them along with the rest.

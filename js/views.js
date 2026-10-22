@@ -6,11 +6,11 @@ import {
   progressGate, progressState, progressRatingHint, progressSig, REST_KCAL, REST_MACROS, itemRests,
 } from './core.js';
 import { progressBrief } from './briefs.js';
-import { readMeal, readFood, PLAN_CAPS } from './backup.js';
+import { readMeal, readFood, PLAN_CAPS, FOODS_MAX } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
-import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
+import { dateFmt, td, t, tn, T, lc, getLang, foldKey } from './i18n.js';
 import { SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm, buildPlan } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -801,12 +801,37 @@ function checkOption(rec, o, i, rem) {
   </li>`;
 }
 
+// The pantry line under a verdict is derived here, at render time, from the stored verdict and the stored
+// products: the verdict keeps its shape and nothing of this is persisted with it. A stored product matches an
+// option when, folded (foldKey in js/i18n.js), one name contains the other and the shorter name is still at
+// least 4 characters, so a name that short cannot ride inside another word. The line only names the products: it
+// never says which numbers the verdict used (a label on the photo outranks the stored values) and never claims provenance.
+export const pantryNames = (options) => {
+  const opts = (Array.isArray(options) ? options : []).map((o) => foldKey(o && o.name)).filter(Boolean);
+  const out = [];
+  const shown = new Set();
+  for (const f of Array.isArray(S.foods) ? S.foods : []) {
+    if (!f || typeof f.name !== 'string' || !f.name.trim()) continue; // junk in state, as everywhere
+    const name = foldKey(f.name);
+    if (shown.has(name)) continue;
+    if (!opts.some((o) => Math.min(o.length, name.length) >= 4 && (o.includes(name) || name.includes(o)))) continue;
+    shown.add(name);
+    out.push(f.name); // the product's name as it is stored, verbatim
+  }
+  return out;
+};
+
 function checkResult(rec, rem) {
   const sameDay = dayKey(new Date(rec.ts)) === today();
+  const pantry = pantryNames(rec.options);
+  const pantryNote = pantry.length
+    ? `<p class="note"><button type="button" class="link link-inline" data-act="settings" data-sec="foods">${t('From your pantry: {names}', { names: pantry.map(esc).join(', ') })}</button></p>`
+    : '';
   return `<section class="verdict" id="check-result" aria-label="${t('Verdict')}">
     <header><h2>${esc(rec.title || kindLabel(rec.kind) || t('Verdict'))}</h2><p>${kindLabel(rec.kind) || t('Check')}, ${checkWhen(rec.ts)}</p></header>
     <p class="verdict-answer">${esc(rec.answer)}</p>
     ${rec.note ? `<p class="note">${t('Your note: {note}', { note: esc(rec.note) })}</p>` : ''}
+    ${pantryNote}
     <ol class="options">${rec.options.map((o, i) => checkOption(rec, o, i, sameDay ? rem : null)).join('')}</ol>
     <p class="review-foot">${rec.photos ? tn('From {n} photo; the photos were not kept. Numbers are estimates.|From {n} photos; the photos were not kept. Numbers are estimates.', Number(rec.photos)) : t('From your note; the photos were not kept. Numbers are estimates.')} <button type="button" class="link" data-act="check-remove" data-id="${esc(rec.id)}">${t('Remove this check')}</button></p>
   </section>`;
@@ -835,11 +860,14 @@ export function renderCheck() {
       </button></li>`;
     }).join('')}</ul>
   </section>` : '';
+  const pantryN = (S.foods || []).length;
+  const pantryLine = `<p class="note">${pantryN ? t('Pantry: {n}', { n: pantryN }) : t('Add your usual products so checks use them.')} <button type="button" class="link link-inline" data-act="settings" data-sec="foods">${t('Open the Pantry')}</button></p>`;
   return `
   <header class="top">
     <div><h1>${t('Check')}</h1><p class="sub">${t('Before you order or buy: photograph the menu, the dish or the product and get a verdict against your plan.')}</p></div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
+  ${pantryLine}
   ${keyNotice}
   <section class="check-new" aria-label="${t('New check')}">
     <p class="check-budget">${rem > 0 ? (remP ? t('Left today: <b>{kcal}</b> kcal, <b>{p}</b> g protein to go.', { kcal: n0(rem), p: n0(remP) }) : t('Left today: <b>{kcal}</b> kcal.', { kcal: n0(rem) })) : rem < -10 ? t('Today’s budget is used up, by <b>{kcal}</b> kcal.', { kcal: n0(-rem) }) : t('Today’s budget is used up.')}</p>
@@ -1384,6 +1412,11 @@ function planPic(id, emptyText) {
   return `<span class="plan-pic${pid ? '' : ' is-empty'}"><span class="plan-pic-empty">${PLATE}${emptyText ? `<em>${emptyText}</em>` : ''}</span>${pid ? `<img data-photo="${esc(pid)}" alt="">` : ''}</span>`;
 }
 
+// The picture of a pantry food: the product's own photo, or an invitation to add one
+function foodPic(f, emptyText) {
+  return `<span class="plan-pic${f.photo ? '' : ' is-empty'}"><span class="plan-pic-empty">${PLATE}${emptyText ? `<em>${emptyText}</em>` : ''}</span>${f.photo ? `<img data-photo="${esc(f.photo)}" alt="">` : ''}</span>`;
+}
+
 export function renderPlan() {
   const s = S.settings;
   const pictured = S.plan.meals.filter((m) => (s.planPhotos || {})[m.id]).length;
@@ -1431,15 +1464,17 @@ export function renderPlan() {
   </section>`;
 }
 
-// Framing a new plan picture: the photo already has the house treatment; the circle shows what will be kept
+// Framing a new picture (a plan meal or a pantry product): the photo already has the house treatment; the circle shows what will be kept
 export function renderFrameSheet(id) {
   const m = mealById(id);
+  const food = m ? null : (S.foods || []).find((x) => x.id === id); // a pantry product being framed names itself too
+  const name = m ? td(m.name) : food ? td(food.name) : '';
   return `
   <header class="sheet-top"><h2 id="sheet-title">${t('Frame the picture')}</h2><button type="button" class="btn" data-act="frame-cancel">${t('Cancel')}</button></header>
-  <p class="note">${t('{meal}. Drag until the plate sits in the circle, zoom until it fills it.', { meal: esc(m ? td(m.name) : '') })}</p>
+  <p class="note">${t('{meal}. Drag until the plate sits in the circle, zoom until it fills it.', { meal: esc(name) })}</p>
   <div class="frame-stage"><canvas id="frame-canvas" width="640" height="640" aria-label="${t('Preview of the picture. Drag to move.')}"></canvas><span class="frame-ring" aria-hidden="true"></span></div>
   <label class="frame-zoom" for="frame-zoom">${t('Zoom')}<input id="frame-zoom" type="range" min="1" max="3" step="0.01" value="1"></label>
-  <p class="note">${t('Light and colour are evened out so all plan pictures match. Only this framed picture is stored, not the original photo.')}</p>
+  <p class="note">${m ? t('Light and colour are evened out so all plan pictures match. Only this framed picture is stored, not the original photo.') : t('Light and colour are evened out. Only this framed picture is stored, not the original photo.')}</p>
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="frame-save">${t('Use this picture')}</button></div>`;
 }
 
@@ -1541,6 +1576,58 @@ export function renderFoodForm() {
   <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="plan-food-done"${r.valid && !busy ? '' : ' disabled'}>${t('Done')}</button></div>`;
 }
 
+// ——— The Pantry: one product at a time ———
+// One pantry food as a sheet: its picture (framing stores it), its values per 100 g, and the ways to change either
+export function renderPantrySheet(id) {
+  const f = (S.foods || []).find((x) => x.id === id);
+  if (!f) return '';
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${esc(td(f.name))}</h2><button type="button" class="btn" data-act="pantry-close">${t('Close')}</button></header>
+  <div class="plan-photo">${foodPic(f, t('No photo of the product yet. Take one or choose one.'))}</div>
+  <div class="actions">
+    <button type="button" class="btn" data-act="pantry-edit" data-id="${id}">${t('Edit')}</button>
+    <button type="button" class="btn" data-act="pantry-photo-cam" data-id="${id}">${f.photo ? t('Retake') : t('Take a photo')}</button>
+    <button type="button" class="btn" data-act="pantry-photo-lib" data-id="${id}">${t('Choose a photo')}</button>
+    ${f.photo ? `<button type="button" class="link link-danger" data-act="pantry-photo-remove" data-id="${id}">${t('Remove photo')}</button>` : ''}
+  </div>
+  <p class="entry-value">${t('{n} kcal / 100 g', { n: n0(f.v[0]) })}<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(f.v[1]), c: n0(f.v[2]), f: n0(f.v[3]), fib: n0(f.v[4]) })}</span></p>
+  ${f.ing ? `<p class="note">${t('Ingredients: {ing}', { ing: esc(f.ing) })}</p>` : ''}`;
+}
+
+// The pantry editor, drawn from S.foodDraft: a name, the five values per 100 g, an optional ingredients line, and the
+// AI fill, which reads the working photo (pick) and never keeps it. Mirrors the food form over the meal editor.
+export function renderPantryEditor() {
+  const d = S.foodDraft;
+  const r = readFood(d);
+  const busy = d.busy;
+  const off = busy ? ' disabled' : '';
+  const inv = (bad) => (bad ? ' aria-invalid="true"' : '');
+  const shown = (x) => (typeof x === 'number' && getLang() === 'tr' ? String(x).replace('.', ',') : String(x));
+  const field = (i, label, mode) => `<label for="pf-v-${i}">${label}<input id="pf-v-${i}" type="text" inputmode="${mode}" autocomplete="off" value="${esc(shown(d.v[i]))}"${inv(r.bad.v[i])}${off}></label>`;
+  const photo = d.newPhoto || d.pick;
+  const ai = hasKey()
+    ? `<button type="button" class="btn btn-wide food-ai" id="pf-ai" data-act="pantry-ai"${!busy && (d.pick || d.name.trim()) ? '' : ' disabled'}>${busy ? `<span class="spin" aria-hidden="true"></span>${t('Reading…')}` : t('Fill in with AI')}</button>
+  ${d.err ? `<p class="note is-error" role="alert">${esc(d.err)}</p>` : `<p class="note" role="status">${busy && d.status ? esc(d.status) : d.note ? esc(d.note) : t('The photo is sent for the fill and never kept. The product’s picture is stored only when you frame it and save.')}</p>`}`
+    : `<div class="notice"><p>${t('Add an API key to fill this in from a photo.')}</p><button type="button" class="link" data-act="settings" data-sec="analysis">${t('Add key')}</button></div>`;
+  return `
+  <header class="sheet-top"><h2 id="sheet-title">${d.id ? esc(td(((S.foods || []).find((x) => x.id === d.id) || d).name)) : t('Add a product')}</h2><button type="button" class="btn" data-act="pantry-cancel">${t('Cancel')}</button></header>
+  <div class="food-name">
+    <label for="pf-name">${t('Name')}<input id="pf-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(d.name)}"${inv(r.bad.name)}${off}${d.id ? '' : ` placeholder="${t('Eker Skyr natural')}"`}></label>
+    ${hasKey() ? `<button type="button" class="food-photo" data-act="pantry-pick-lib" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
+  </div>
+  ${ai}
+  ${hasKey() ? `<div class="actions">
+    <button type="button" class="btn" data-act="pantry-pick-cam"${off}>${ICON.camera}${t('Take a photo')}</button>
+    <button type="button" class="btn" data-act="pantry-pick-lib"${off}>${t('Choose a photo')}</button>
+  </div>` : ''}
+  <p class="note">${t('Values per 100 g')}</p>
+  <div class="field-grid">
+    ${field(0, t('Calories'), 'numeric')}${field(1, t('Protein (g)'), 'decimal')}${field(2, t('Carbs (g)'), 'decimal')}${field(3, t('Fat (g)'), 'decimal')}${field(4, t('Fibre (g)'), 'decimal')}
+  </div>
+  <label class="pf-ing" for="pf-ing">${t('Ingredients (optional)')}<textarea id="pf-ing" maxlength="400" autocomplete="off"${off}>${esc(d.ing)}</textarea></label>
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="pantry-save"${r.valid && !busy ? '' : ' disabled'}>${t('Save')}</button></div>`;
+}
+
 // ——— Settings: every section starts collapsed and shows its current state in the heading ———
 export function renderSettings() {
   const s = S.settings;
@@ -1632,6 +1719,13 @@ export function renderSettings() {
     ? `<ul class="items">${favorites.map((f) => `<li><span>${esc(f.name)}, ${n0(f.kcal)} kcal</span><button type="button" class="link" data-act="favorite-remove" data-id="${esc(f.id)}">${t('Remove')}</button></li>`).join('')}</ul>`
     : `<p class="note">${t('Open an entry and tap “Add to favourites”. It then logs with one tap from the Log tab.')}</p>`;
 
+  const foods = S.foods || [];
+  const pantryBody = `
+    <p class="note">${t('Add your usual products so checks use them.')}</p>
+    ${foods.length ? `<ul class="items">${foods.map((f) => `<li><span class="pantry-text"><span class="meal-thumb${f.photo ? '' : ' is-empty'}">${f.photo ? `<img data-photo="${esc(f.photo)}" alt="">` : PLATE}</span><span class="pantry-lines"><b>${esc(td(f.name))}</b><span>${t('{n} kcal / 100 g', { n: n0(f.v[0]) })}</span></span></span><span><button type="button" class="link" data-act="pantry-open" data-id="${esc(f.id)}">${t('Edit')}</button> <button type="button" class="link link-danger" data-act="pantry-remove" data-id="${esc(f.id)}">${t('Remove')}</button></span></li>`).join('')}</ul>` : `<p class="note">${t('None yet.')}</p>`}
+    <div class="actions"><button type="button" class="btn btn-primary" data-act="pantry-add"${foods.length >= FOODS_MAX ? ' disabled' : ''}>${t('Add a product')}</button></div>
+    ${foods.length >= FOODS_MAX ? `<p class="note">${t('At most {n} products', { n: FOODS_MAX })}</p>` : ''}`;
+  const pantrySection = section('foods', t('Pantry'), foods.length ? tn('{n} food|{n} foods', foods.length) : t('None yet'), pantryBody); // i18n-ok: the section id, like the code words it stands next to
   const supps = s.supplements || [];
   const suppEdit = supps.find((x) => x.id === S.suppEdit);
   const suppBody = `
@@ -1655,7 +1749,7 @@ export function renderSettings() {
       <p class="note">${t('Starts your tracking over; the app stays set up as it is.')}</p>
       <dl class="reset-diff">
         <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts.')}</dd></div>
-        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, the plan’s pictures, your API key and provider, and the badges you have earned.')}</dd></div>
+        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
       </dl>
       <div class="actions"><button type="button" class="btn btn-danger" data-act="wipe">${t('Clear my log')}</button></div>
     </section>
@@ -1663,7 +1757,7 @@ export function renderSettings() {
       <h3>${t('Factory reset')}</h3>
       <p class="note">${t('Back to how the app was on its first launch.')}</p>
       <dl class="reset-diff">
-        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, the usage totals and your other settings. The getting-started steps come back.')}</dd></div>
+        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The getting-started steps come back.')}</dd></div>
         <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Nothing, except your API key and provider if the box is ticked.')}</dd></div>
       </dl>
       <label class="check"><input type="checkbox" id="keep-key" checked> ${t('Keep my API key and provider')}</label>
@@ -1689,6 +1783,7 @@ export function renderSettings() {
     ${section('backup', t('Backup and export'), backupStatus, backup)}
     ${section('location', t('Location'), s.useLocation ? (places.length ? t('On: {names}', { names: places.map((p) => p.name).join(', ') }) : t('On, no saved places')) : t('Off'), location)}
     ${section('favorites', t('Favourites'), favorites.length ? tn('{n} meal|{n} meals', favorites.length) : t('None yet'), favoritesBody)}
+    ${pantrySection}
     ${section('supplements', t('Supplements'), supps.length ? supps.map((x) => x.name).join(', ') : t('None yet'), suppBody)}
     ${section('version', t('Version and updates'), t('Version {v}', { v: APP_VERSION }), version)}
     ${section('reset', t('Reset'), t('Clear my log, or factory reset'), reset)}

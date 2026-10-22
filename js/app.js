@@ -5,15 +5,15 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, progressReview, foodValues, cleanItems, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, progressReview, foodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf } from './backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -36,14 +36,50 @@ export async function writePlans(list, active) {
   S.rev++;
   return record;
 }
-// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo that
-// no picture refers to any more is deleted
+// Every change to the plan pictures goes through here: only meal ids that a stored plan holds are kept, and a photo
+// that no picture refers to any more is deleted — but never a photo that a pantry product refers to: before each
+// deletion the record is read (a handful at most) and one carrying a `food` ref is the pantry's, whatever the plan
+// sweep thought.
 export async function setPlanPhotos(next) {
   const { planPhotos, gone } = sweepPlanPhotos(S.settings.planPhotos, next, S.plans || plansRecord(seedPlan, [], 'default'));
   const same = JSON.stringify(planPhotos) === JSON.stringify(S.settings.planPhotos);
   S.settings.planPhotos = planPhotos;
   if (!same) await saveSettings();
   for (const id of gone) {
+    const p = await db.get('photos', id);
+    if (p && p.food) continue; // a photo with a food ref is the pantry's, the plan sweep never deletes it
+    await db.del('photos', id);
+    const u = S.urls.get(id);
+    if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
+  }
+}
+// Every change to the pantry goes through here: the list is cleaned, stored and kept in state, and the photos that no
+// food refers to any more are deleted, over this device's photos and the extras together. extras are the photo refs a
+// caller has already read apart from the stored ones (a restore's incoming photos, read as they went in), so the sweep
+// can judge every photo against both sides of a merge without reading the whole photos store into memory at once.
+// A photo's `food` ref is written only by a backup import, which always arrives with the extras read as they went
+// in, while entry and plan photos get fresh ids and never carry one — so when nothing came in beside the stored
+// ones and the photo ids the foods point at are the same set before and after, no food-ownership line can have
+// changed: the per-record scan and the sweep are skipped entirely (the common edit and lastUsed writes).
+const foodPhotoIds = (fs) => new Set((Array.isArray(fs) ? fs : []).map((f) => f && f.photo).filter((p) => typeof p === 'string' && p));
+export async function setFoods(list, extras = []) {
+  const foods = cleanFoods(list);
+  const keep = !extras.length && (() => {
+    const prev = foodPhotoIds(S.foods);
+    const next = foodPhotoIds(foods);
+    return prev.size === next.size && [...prev].every((id) => next.has(id));
+  })();
+  await db.kvSet('foods', foods);
+  S.foods = foods;
+  if (keep) return;
+  const incomingIds = new Set(extras.map((p) => p && p.id));
+  const refs = [];
+  for (const id of await db.keys('photos')) {
+    if (incomingIds.has(id)) continue;
+    const p = await db.get('photos', id);
+    if (p) refs.push({ id: p.id, food: p.food });
+  }
+  for (const id of sweepFoodPhotos(refs, extras, foods)) {
     await db.del('photos', id);
     const u = S.urls.get(id);
     if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -471,7 +507,7 @@ async function runCheck() {
   render();
   try {
     const { data, usage, model } = await check({
-      cfg: aiCfg(), blobs, brief: checkBrief(note),
+      cfg: aiCfg(), blobs, brief: checkBrief(note), note, // note: the digest always keeps the products it names
       onRetry: (...a) => { c.status = retryNote(...a); render(); },
     });
     await addUsage(model, usage);
@@ -544,12 +580,14 @@ function zoomFrame(z) {
   const r = document.getElementById('frame-zoom');
   if (r && Math.abs(Number(r.value) - frame.zoom) > 0.005) r.value = String(frame.zoom);
 }
-async function openFrame(mealId, file) {
-  if (!mealById(mealId)) return;
+async function openFrame(target, file) {
+  const meal = mealById(target);
+  const food = meal ? null : S.foods.find((x) => x.id === target); // a pantry product is framed like a meal
+  if (!meal && !food) return;
   let src;
   try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
-  frame = { id: mealId, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
-  openSheet(renderFrameSheet(mealId), { type: 'plan-frame', id: mealId });
+  frame = { id: target, food: food ? food.id : undefined, src, zoom: 1, cx: src.width / 2, cy: src.height / 2 };
+  openSheet(renderFrameSheet(target), { type: meal ? 'plan-frame' : 'pantry-frame', id: target });
   paintFrame();
   const c = frameCanvas();
   const pts = new Map();
@@ -574,21 +612,48 @@ async function openFrame(mealId, file) {
 async function saveFrame() {
   if (!frame) return;
   const f = frame;
-  const { id, src, zoom, cx, cy } = f;
   frame = null; // a second tap while this one is saving does nothing
-  try {
-    await storePlanPhoto(id, await picture.render(src, zoom, cx, cy), picture.PICTURE_SIZE, picture.PICTURE_SIZE);
-  } catch (err) {
-    frame = f;
-    return toast(t('Could not save the picture'));
+  const food = f.food && S.foods.some((x) => x.id === f.food) ? f.food : null;
+  let blob;
+  try { blob = await picture.render(f.src, f.zoom, f.cx, f.cy); }
+  catch (err) { frame = f; return toast(t('Could not save the picture')); }
+  if (!food) {
+    try { await storePlanPhoto(f.id, blob, picture.PICTURE_SIZE, picture.PICTURE_SIZE); }
+    catch (err) { frame = f; return toast(t('Could not save the picture')); }
+    openSheet(renderPlanSheet(f.id), { type: 'plan', id: f.id });
+    render();
+    toast(t('Picture saved'));
+    return;
   }
-  openSheet(renderPlanSheet(id), { type: 'plan', id });
+  const d = S.foodDraft;
+  if (d && !d.id) { // a product that is not saved yet holds the square in its draft, so nothing is written for a save that never happens
+    if (d.newPhoto) URL.revokeObjectURL(d.newPhoto.url);
+    d.newPhoto = { blob, url: URL.createObjectURL(blob) };
+    return openPantryEditor();
+  }
+  try { await storeFoodPhoto(food, blob); }
+  catch (err) { frame = f; return toast(t('Could not save the picture')); }
+  openSheet(renderPantrySheet(food), { type: 'pantry', id: food });
   render();
   toast(t('Picture saved'));
 }
 function cancelFrame() {
-  const id = frame ? frame.id : S.sheet && S.sheet.id;
+  const f = frame;
   frame = null;
+  if (f && f.food && S.foods.some((x) => x.id === f.food)) { // a pantry product's picture: back to its record sheet
+    openSheet(renderPantrySheet(f.food), { type: 'pantry', id: f.food });
+    hydratePhotos();
+    return;
+  }
+  // A save in progress has already cleared frame (saveFrame does first); when the open sheet is that save's
+  // pantry frame sheet, the product it belongs to is known only there — back to its record sheet, not to the
+  // plan fallback, which would carry a food id no meal holds.
+  if (!f && S.sheet && S.sheet.type === 'pantry-frame' && S.foods.some((x) => x.id === S.sheet.id)) {
+    openSheet(renderPantrySheet(S.sheet.id), { type: 'pantry', id: S.sheet.id });
+    hydratePhotos();
+    return;
+  }
+  const id = f ? f.id : S.sheet && S.sheet.id;
   if (id) openSheet(renderPlanSheet(id), { type: 'plan', id }); else closeSheet();
   hydratePhotos();
 }
@@ -597,6 +662,103 @@ async function removePlanPhoto(mealId) {
   const { [mealId]: gone, ...rest } = S.settings.planPhotos;
   await setPlanPhotos(rest);
   render();
+}
+
+// ——— The Pantry (S.foodDraft): the record sheet and the editor over it ———
+const PANTRY_PICK = '__pantry_pick'; // marks the photo picker as opened from the pantry editor's fill
+const openPantryEditor = (focusSel, keepFocus) => openSheet(renderPantryEditor(), { type: 'pantry-edit' }, focusSel, keepFocus);
+// Ids like the other record's, matched by isId: a cheap prefix plus db.uid()
+const newFoodId = () => 'f' + db.uid();
+// The ingredients text as a save keeps it (cleanFood squeezes and caps it): the same here, so a save passes unchanged
+const cleanIng = (ing) => squeeze(ing, 400);
+// A draft holds the editor's fields and one working photo (pick: the unframed copy the fill reads, never stored) and,
+// for a product that is not saved yet, the framed square (newPhoto), which only a save writes.
+function startPantry(id) {
+  const food = id ? S.foods.find((x) => x.id === id) : null;
+  S.foodDraft = { id: id || '', name: food ? food.name : '', v: food ? [...food.v] : ['', '', '', '', ''], ing: food ? (food.ing || '') : '', pick: null, newPhoto: null, busy: false, err: '', note: '', status: '' };
+}
+// What the editor's fields hold, into the draft (the values stay as typed until a save reads them)
+function syncPantry() {
+  const d = S.foodDraft;
+  const name = $('#pf-name');
+  if (!d || !name) return;
+  d.name = name.value;
+  d.v = d.v.map((x, i) => $(`#pf-v-${i}`).value);
+  const ing = $('#pf-ing');
+  if (ing) d.ing = ing.value;
+}
+// After typing: the marks on wrong fields, Save and the AI button, without redrawing the fields
+function checkPantry() {
+  syncPantry();
+  const d = S.foodDraft;
+  const r = readFood(d);
+  mark($('#pf-name'), r.bad.name);
+  r.bad.v.forEach((b, i) => mark($(`#pf-v-${i}`), b));
+  const save = document.querySelector('[data-act="pantry-save"]');
+  if (save) save.disabled = !r.valid || d.busy;
+  const ai = $('#pf-ai');
+  if (ai) ai.disabled = d.busy || !(d.pick || d.name.trim());
+}
+// The draft's photos go: nothing else does (a Cancel and a Close write nothing)
+function dropPantry() {
+  const d = S.foodDraft;
+  S.foodDraft = null;
+  if (d) for (const p of [d.pick, d.newPhoto]) if (p && p.url) URL.revokeObjectURL(p.url);
+}
+const canvasBlob = (canvas) => new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.86));
+// The working photo for the fill: the unframed copy picture.prepare makes, held in memory only (one at a time — a new
+// pick drops the old one and any framed square with it). The stored picture comes only from framing.
+async function addPantryPick(file) {
+  const d = S.foodDraft;
+  if (!d || d.busy) return;
+  let src;
+  try { src = await picture.prepare(file); } catch (err) { return toast(t('Could not open that photo')); }
+  if (!S.foodDraft || S.foodDraft !== d) return;
+  const blob = await canvasBlob(src);
+  if (!blob || !S.foodDraft || S.foodDraft !== d) return;
+  if (d.pick && d.pick.url) URL.revokeObjectURL(d.pick.url);
+  if (d.newPhoto) { URL.revokeObjectURL(d.newPhoto.url); d.newPhoto = null; }
+  d.pick = { src, blob, url: URL.createObjectURL(blob) };
+  syncPantry();
+  openPantryEditor('#pf-ai');
+}
+// Fill in with AI, like the food form over the meal editor; the blobs are the pick's alone
+async function runPantryFood() {
+  const d = S.foodDraft;
+  if (!d || d.busy) return;
+  syncPantry();
+  const name = readFood(d).food.name;
+  if (!hasKey()) return openPantryEditor();
+  if (!name && !d.pick) return;
+  if (navigator.onLine === false) { d.err = modelFailure({ code: 'offline' }, 'values'); d.note = ''; return openPantryEditor('#pf-ai'); }
+  const live = () => S.foodDraft === d;
+  d.busy = true; d.err = ''; d.note = ''; d.status = '';
+  openPantryEditor();
+  try {
+    const { data, usage, model } = await foodValues({
+      cfg: aiCfg(), name, blobs: d.pick ? [d.pick.blob] : [],
+      onRetry: (...a) => { if (live()) { d.status = retryNote(...a); syncPantry(); openPantryEditor(null, true); } },
+    });
+    await addUsage(model, usage);
+    if (!live()) { d.busy = false; return; }
+    d.v = [data.kcal, data.p, data.c, data.f, data.fib];
+    if (!name && data.name) d.name = data.name;
+    if (data.ing) d.ing = data.ing; // the reply's ingredients text fills the field too
+    d.note = t('Filled in by AI. Check the values.');
+  } catch (err) {
+    if (!live()) { d.busy = false; return; }
+    d.err = err.code === 'empty' ? t('Couldn’t read values. Try the nutrition label, or type them.') : modelFailure(err, 'values');
+  }
+  d.busy = false; d.status = '';
+  openPantryEditor('#pf-ai');
+}
+// The framed square of a stored product: it is written under its own photo id first and the food then points at it,
+// so the sweep that setFoods runs can never delete its own new picture; the one the food replaced goes.
+async function storeFoodPhoto(foodId, blob) {
+  const pid = db.uid();
+  await db.put('photos', { id: pid, buf: await blob.arrayBuffer(), type: 'image/jpeg', w: picture.PICTURE_SIZE, h: picture.PICTURE_SIZE, food: foodId });
+  await setFoods(S.foods.map((f) => (f.id === foodId ? { ...f, photo: pid } : f)));
+  return pid;
 }
 
 async function photoBlob(pid) {
@@ -650,7 +812,12 @@ async function analyzeEntry(id, opts = {}) {
         }
       } else {
         delete e.tk; // the title now comes from the model
-        const items = cleanItems(data.items, ITEM_CAPS_ANALYSIS);
+        // A pantry id beside the planId flow: an item that links to a stored product (a resolvable id and grams
+        // above 0) takes the product's exact values at its grams through the analysis caps and its stored name;
+        // a bad id or no grams leaves the estimate's numbers untouched. The id itself is transient: the matched
+        // items come back without it, so cleanItems cannot store it on the entry.
+        const match = pantryMatch(data.items, S.foods);
+        const items = cleanItems(match ? match.items : data.items, ITEM_CAPS_ANALYSIS);
         const sumMacros = (k) => items.reduce((a, i) => a + (i[k] || 0), 0); // an absent per-item macro is 0 for arithmetic, not NaN
         const sumKcal = sumMacros('kcal');
         Object.assign(e, {
@@ -660,6 +827,12 @@ async function analyzeEntry(id, opts = {}) {
           c: cap(cap(data.c, 800) || sumMacros('c'), 800), f: cap(cap(data.f, 500) || sumMacros('f'), 500), fib: cap(cap(data.fib, 150) || sumMacros('fib'), 150),
           tier: ['plan', 'flex', 'off'].includes(data.tier) ? data.tier : 'plan',
         });
+        // A matched product was really used in this estimate: bump its lastUsed and write the pantry once here,
+        // not once per item — a failing or aborted analysis never reaches this (its throw or early return is above)
+        if (match) {
+          const now = Date.now();
+          await setFoods(S.foods.map((f) => (match.used.includes(f.id) ? { ...f, lastUsed: now } : f)));
+        }
       }
       Object.assign(e, {
         kind: 'meal', status: 'ok',
@@ -731,14 +904,15 @@ async function exportBackup(withPhotos) {
   const { apiKey, oaKey, ...settingsNoKeys } = S.settings;
   // The user plan travels with the backup; Default is the app's own and never does
   const plans = { active: S.plans.active, list: S.plans.list.filter((p) => p.id !== 'default') };
-  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans, progress: S.progressReview };
-  // The plan's pictures always travel with the backup; photos of logged meals only when asked for.
-  // They are read one at a time, so the photos that are left out are never loaded.
+  const data = { app: APP_ID, v: SCHEMA_VERSION, at: new Date().toISOString(), settings: settingsNoKeys, entries: S.entries, days: Object.values(S.days), checks: S.checks, badges: S.badges, plans, progress: S.progressReview, foods: S.foods };
+  // The plan's pictures and the pantry's photos always travel with the backup; photos of logged meals only when asked
+  // for. They are read one at a time, so the photos that are left out are never loaded.
   const planIds = new Set(Object.values(S.settings.planPhotos || {}));
+  const foodIds = new Set(S.foods.map((f) => f.photo));
   const content = [JSON.stringify(data).slice(0, -1) + ',"photos":['];
-  for (const id of (await db.keys('photos')).filter((k) => withPhotos || planIds.has(k))) {
+  for (const id of (await db.keys('photos')).filter((k) => withPhotos || planIds.has(k) || foodIds.has(k))) {
     const p = await db.get('photos', id);
-    if (p) content.push((content.length > 1 ? ',' : '') + JSON.stringify({ id: p.id, type: p.type, w: p.w, h: p.h, plan: p.plan, b64: b64FromBuf(p.buf) }));
+    if (p) content.push((content.length > 1 ? ',' : '') + JSON.stringify({ id: p.id, type: p.type, w: p.w, h: p.h, plan: p.plan, food: p.food, b64: b64FromBuf(p.buf) }));
   }
   content.push(']}');
   const done = await deliverFile(`pickle-backup-${today()}.json`, content, 'application/json');
@@ -751,7 +925,7 @@ async function exportBackup(withPhotos) {
 
 // For analysis elsewhere: a .sql file that builds the tables in any SQLite database
 async function exportSql() {
-  const { sql, counts } = buildSql({ settings: S.settings, entries: S.entries, days: Object.values(S.days), badges: S.badges && S.badges.got, appVersion: APP_VERSION });
+  const { sql, counts } = buildSql({ settings: S.settings, entries: S.entries, days: Object.values(S.days), badges: S.badges && S.badges.got, foods: S.foods, appVersion: APP_VERSION });
   const done = await deliverFile(exportName(), sql, 'text/plain');
   if (done) toast(t('Exported {days} and {meals}', { days: tn('{n} day|{n} days', counts.days), meals: tn('{n} meal|{n} meals', counts.meals) }));
 }
@@ -767,9 +941,10 @@ async function importBackup(file) {
   let skipped = 0;
   const gotBefore = S.badges ? S.badges.got : {};
   try {
+    const newPhotos = []; // the incoming photos' food refs (never their bytes), kept for the pantry's sweep below
     for (const p of Array.isArray(data.photos) ? data.photos : []) {
       const photo = cleanPhoto(p); // photos go in one at a time: a damaged one is skipped, and the others are not held in memory together
-      if (photo) await db.put('photos', photo); else skipped += 1;
+      if (photo) { await db.put('photos', photo); newPhotos.push({ id: photo.id, food: photo.food }); } else skipped += 1;
     }
     const entries = data.entries.map(cleanEntry).filter(Boolean);
     skipped += data.entries.length - entries.length;
@@ -792,6 +967,13 @@ async function importBackup(file) {
     }
     // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
     await setPlanPhotos(pictures);
+    // Then the pantry: an old backup has no foods key and leaves this device's list alone. A backup with one (even an
+    // empty one) is merged in by id — the backup's values win, a food only this device has stays, lastUsed is the later
+    // of the two — and its photos are then swept over this device's photos and the incoming ones together, so a photo
+    // whose food is on either side stays and one whose food is on neither side goes.
+    if (Array.isArray(data.foods)) {
+      await setFoods(restoreFoods(S.foods, cleanFoods(data.foods)), newPhotos);
+    }
     if (Array.isArray(data.checks)) {
       const have = new Set(S.checks.map((c) => c.id));
       const added = data.checks.map(cleanCheck).filter((c) => c && !have.has(c.id));
@@ -808,6 +990,7 @@ async function importBackup(file) {
     return render();
   }
   dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
+  dropPantry(); // and so does a pantry editor: the restored list is what stands
   await load();
   badgesMode = 'restore';
   restoredFrom = gotBefore;
@@ -839,6 +1022,7 @@ async function load() {
   S.entries = await db.all('entries');
   S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
   S.checks = await db.kvGet('checks', []);
+  S.foods = await db.kvGet('foods', []);
   S.progressReview = readProgress(await db.kvGet('progressReview', null));
   const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
   S.badges = badges ? cleanBadges(badges) : null;
@@ -1088,6 +1272,7 @@ function closeSheet() {
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
   dropDraft(); // and so is a meal being edited (with its food form's photos): nothing is written
+  dropPantry(); // nor a pantry editor (a Cancel writes nothing); its pick or held square goes
   $('#app').inert = false;
   document.body.classList.remove('sheet-open');
   // A render may have replaced the button that opened the sheet: find it again by its id
@@ -1106,9 +1291,17 @@ function dismissSheet() {
     S.suppEdit = '';
     return openFood(hasKey() ? null : '[data-act="settings"]');
   }
+  if (S.sheet && S.sheet.type === 'settings' && S.foodDraft) {
+    S.suppEdit = '';
+    return openPantryEditor(hasKey() ? null : '[data-act="settings"]'); // Settings from the pantry editor's Add key goes back to it
+  }
   if (S.sheet && S.sheet.type === 'food' && S.draft && S.draft.foodForm) {
     if (foodFormChanged(S.draft.foodForm) && !window.confirm(t('Discard your changes?'))) return; // the form stays open
     return closeFood(-1);
+  }
+  if (S.sheet && (S.sheet.type === 'pantry' || S.sheet.type === 'pantry-edit')) { // the Pantry rides Settings: back at its section
+    dropPantry();
+    return openSettings('foods');
   }
   if (draftChanged() && !window.confirm(t('Discard your changes?'))) return; // the sheet stays open
   closeSheet();
@@ -1256,7 +1449,7 @@ async function runFood() {
 // ——— Actions ———
 const ACT = {
   'tab': (el) => go(el.dataset.tab),
-  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); return openSettings(el && el.dataset.sec); }, // the food form's typing is kept for the way back
+  'settings': (el) => { if (S.sheet && S.sheet.type === 'food') syncFood(); if (S.sheet && S.sheet.type === 'pantry-edit') syncPantry(); return openSettings(el && el.dataset.sec); }, // the food form's and pantry editor's typing is kept for the way back
   'close-sheet': () => dismissSheet(),
   'week-prev': () => { S.viewDay = addDays(S.viewDay, -7); render(); },
   'week-next': () => { const d = addDays(S.viewDay, 7); S.viewDay = d > today() ? today() : d; render(); },
@@ -1375,6 +1568,75 @@ const ACT = {
   'plan-photo-remove': (el) => removePlanPhoto(el.dataset.id),
   'frame-save': () => saveFrame(),
   'frame-cancel': () => cancelFrame(),
+  // The Pantry: one product at a time, from Settings; every write goes through setFoods (or storeFoodPhoto over it)
+  'pantry-add': () => {
+    if (S.foods.length >= FOODS_MAX) return toast(t('At most {n} products', { n: FOODS_MAX }));
+    startPantry('');
+    openPantryEditor('#pf-name');
+  },
+  'pantry-open': (el) => { const f = S.foods.find((x) => x.id === el.dataset.id); if (!f) return; startPantry(f.id); openSheet(renderPantrySheet(f.id), { type: 'pantry', id: f.id }); },
+  'pantry-edit': (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f) return;
+    if (!(S.foodDraft && S.foodDraft.id === f.id)) startPantry(f.id); // the record sheet opened with its draft
+    openPantryEditor();
+  },
+  'pantry-save': async (el) => {
+    const d = S.foodDraft;
+    if (!d || d.busy) return;
+    syncPantry();
+    const r = readFood(d);
+    if (!r.valid) return;
+    if (!d.id && S.foods.length >= FOODS_MAX) return toast(t('At most {n} products', { n: FOODS_MAX }));
+    el.disabled = true; // no second save while this one is written (typing enables it again)
+    const sq = d.newPhoto && d.newPhoto.blob;
+    const ing = cleanIng(d.ing);
+    if (d.id) {
+      const id = d.id;
+      if (!S.foods.some((f) => f.id === id)) { // the product went while it was edited (a restore, another device): nothing to write over
+        dropPantry();
+        await openSettings('foods');
+        render();
+        return toast(t('The product changed while you were editing. Open it again.'));
+      }
+      await setFoods(S.foods.map((f) => (f.id === id ? { ...f, name: r.food.name, v: r.food.v, ing } : f)));
+      if (sq) await storeFoodPhoto(id, sq); // only reachable for a stored product, so a held square has its food now
+      dropPantry();
+      openSheet(renderPantrySheet(id), { type: 'pantry', id });
+      render();
+      toast(t('{title} saved', { title: td(r.food.name) }));
+      return;
+    }
+    const food = { id: newFoodId(), name: r.food.name, v: r.food.v, ing };
+    await setFoods([...S.foods, food]);
+    dropPantry();
+    if (sq) await storeFoodPhoto(food.id, sq); // the food is in the list first, so the sweep keeps its picture
+    openSheet(renderPantrySheet(food.id), { type: 'pantry', id: food.id });
+    render();
+    toast(t('{title} saved', { title: td(food.name) }));
+  },
+  'pantry-remove': async (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f) return;
+    if (!window.confirm(t('Remove {name}? Its photo is deleted too.', { name: td(f.name) }))) return;
+    await setFoods(S.foods.filter((x) => x.id !== f.id));
+    dropPantry();
+    render();
+    return openSettings('foods');
+  },
+  'pantry-close': () => { dropPantry(); return openSettings('foods'); },
+  'pantry-cancel': () => { dropPantry(); return openSettings('foods'); },
+  'pantry-photo-cam': (el) => { photoTarget = el.dataset.id; $('#f-cam').click(); },
+  'pantry-photo-lib': (el) => { photoTarget = el.dataset.id; $('#f-lib').click(); },
+  'pantry-photo-remove': async (el) => {
+    const f = S.foods.find((x) => x.id === el.dataset.id);
+    if (!f || !f.photo) return;
+    await setFoods(S.foods.map((x) => (x.id === f.id ? { ...x, photo: null } : x))); // setFoods sweeps the picture
+    openSheet(renderPantrySheet(f.id), { type: 'pantry', id: f.id });
+  },
+  'pantry-pick-cam': () => { photoTarget = PANTRY_PICK; $('#f-cam').click(); },
+  'pantry-pick-lib': () => { photoTarget = PANTRY_PICK; $('#f-lib').click(); },
+  'pantry-ai': () => runPantryFood(),
   'log-plan-today': (el) => { closeSheet(); return logMeal(mealById(el.dataset.id), 'plan', today()); },
   'hint': (el) => {
     const inp = $('#composer-input');
@@ -1667,11 +1929,15 @@ const ACT = {
   },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures, pantry foods with their photos and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
+    const foodIds = new Set(S.foods.map((f) => f.id));
+    for (const f of S.foods) if (f.photo) keep.add(f.photo); // the pantry's foods and their photos stay too
     await db.clear('entries'); await db.clear('days'); await db.kvSet('checks', []); await db.kvSet('progressReview', null);
     for (const id of await db.keys('photos')) {
       if (keep.has(id)) continue;
+      const p = await db.get('photos', id);
+      if (p && p.food && foodIds.has(p.food)) continue; // a photo a pantry food names stays, even if no record points at it by id
       await db.del('photos', id);
       const u = S.urls.get(id);
       if (u) { URL.revokeObjectURL(u); S.urls.delete(id); }
@@ -1690,7 +1956,7 @@ const ACT = {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
     const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
+    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
     if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -1706,11 +1972,12 @@ const ACT = {
     await saveSettings();
     await writePlans([], 'default'); // the plans start again from the seed
     clearTimeout(announceTimer);
-    S.entries = []; S.days = {}; S.checks = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
+    S.entries = []; S.days = {}; S.checks = []; S.foods = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
     autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
+    dropPantry();
     closeSheet();
     go('today');
     toast(keepKey ? t('Factory reset done. Your API key is kept') : t('Factory reset done'));
@@ -1744,6 +2011,7 @@ document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
+  if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -1762,12 +2030,13 @@ document.addEventListener('change', (ev) => guard(async () => {
     photoTarget = null;
     if (target === CHECK_PHOTOS) { if (files.length) await addCheckPhotos(files); return; }
     if (target === FOOD_PHOTOS) { if (files.length) await addFoodPhotos(files); return; }
+    if (target === PANTRY_PICK) { if (files.length) await addPantryPick(files[0]); return; }
     if (target) { if (files.length) await openFrame(target, files[0]); return; }
     const note = $('#composer-input').value.trim();
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {

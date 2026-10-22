@@ -1,7 +1,7 @@
 // Everything read from a backup file is checked before it is stored or shown (js/backup.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, readProgress, b64FromBuf } from '../js/backup.js';
+import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanBadges, restoreBadges, readProgress, b64FromBuf, cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, PLAN_CAPS, squeeze } from '../js/backup.js';
 import { SCHEMA_VERSION } from '../js/core.js';
 
 const good = {
@@ -112,6 +112,8 @@ test('a photo is always stored as JPEG, and damaged base64 is skipped', () => {
   assert.equal(cleanPhoto({ id: 'p1', b64: '!!!not base64!!!' }), null);
   assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), plan: 'X-1' }).plan, 'X-1'); // any well-formed meal id: plans are the person's own
   assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), plan: '"><x' }).plan, undefined);
+  assert.equal(cleanPhoto({ id: 'p1', b64: btoa('abc'), food: 'f1' }).food, 'f1'); // a pantry ref too, checked by shape alone
+  assert.equal('food' in cleanPhoto({ id: 'p1', b64: btoa('abc'), food: '"><x' }), false);
   const bytes = [0, 1, 2, 250, 251, 255];
   const back = cleanPhoto({ id: 'p', b64: b64FromBuf(new Uint8Array(bytes).buffer) }).buf;
   assert.deepEqual([...new Uint8Array(back)], bytes);
@@ -208,4 +210,155 @@ test('a backup with or without a progress key is accepted (older backups have no
   assert.equal(backupProblem(ok), '');
   assert.equal(backupProblem({ ...ok, progress: null }), '');
   assert.equal(backupProblem({ ...ok, progress: { junk: 1 } }), '');
+});
+
+// ——— The pantry (js/backup.js: cleanFood, cleanFoods, restoreFoods, sweepFoodPhotos) and the shared squeeze ———
+const food = { id: 'f1', name: 'Eker Skyr natural', v: [59, 10.5, 4, 0.5, 0], ing: 'Pasteurised milk, cultures', photo: 'fp1', lastUsed: 1759300000000 };
+
+test('squeeze: control characters to spaces, runs collapsed, trimmed, capped at max, a non-string gives nothing — all idempotent', () => {
+  assert.equal(squeeze('a\u0000x\tto\u007fb\nnow', 400), 'a x to b now'); // control characters including a newline become plain spaces
+  assert.equal(squeeze('   many\tspaces\n\n\nin a   row ', 400), 'many spaces in a row'); // runs collapse, both ends trimmed
+  assert.equal(squeeze(' ab ', 400), 'ab');
+  assert.equal(squeeze('no cap here', 400), 'no cap here');
+  assert.equal(squeeze('a'.repeat(500), 400), 'a'.repeat(400)); // the 400 cap
+  assert.equal(squeeze('abc', 2), 'ab'); // the cap is the caller's choice (the ing field passes 400, clean1 is uncapped by hand)
+  for (const bad of [null, undefined, 5, {}, [], true]) assert.equal(squeeze(bad, 400), '');
+  for (const s of ['a\u0000x \u000b y', '  a\t\tb\n\n c  ', 'a b c']) assert.equal(squeeze(squeeze(s, 400), 400), squeeze(s, 400)); // a clean string passes through unchanged
+});
+
+test('a pantry food: a good record keeps its shape and round-trips', () => {
+  assert.deepEqual(cleanFood(food), food);
+  assert.deepEqual(cleanFood(JSON.parse(JSON.stringify(cleanFood(food)))), food);
+  assert.deepEqual(cleanFood({ id: 'f1', name: 'Bare', v: [1, 2, 3, 4, 5], extra: 'gone' }), { id: 'f1', name: 'Bare', v: [1, 2, 3, 4, 5] });
+});
+
+test('a pantry food: the caps clamp, unusable text clears lastUsed, and junk in one value drops the record', () => {
+  const c = cleanFood({ id: 'f1', name: 'x'.repeat(80) + '\n\t x', v: [1500, -3, 0.5, 1e9, 90], ing: 'a\u0000x to\u007fb ', lastUsed: 'lately' });
+  assert.deepEqual(c, { id: 'f1', name: 'x'.repeat(PLAN_CAPS.name), v: [1000, 0, 0.5, 100, 90], ing: 'a x to b' });
+  assert.equal(cleanFood({ ...food, lastUsed: -1 }).lastUsed, undefined);
+  assert.equal(cleanFood({ ...food, lastUsed: 1e14 }).lastUsed, 1e14);
+  assert.equal(cleanFood({ ...food, lastUsed: 1e14 + 1 }).lastUsed, undefined);
+  for (const bad of [null, 5, 'x', [], { id: 'f1' }, { id: '"><x>', name: 'x', v: [1, 2, 3, 4, 5] }, { id: 'f1', name: '\n', v: [1, 2, 3, 4, 5] },
+    { id: 'f1', name: 'x' }, { id: 'f1', name: 'x', v: [1, 2, 3] }, { id: 'f1', name: 'x', v: [1, 2, 3, 4, 5, 6] }, { id: 'f1', name: 'x', v: [1, 'x', 3, 4, 5] }, { id: 'f1', name: 'x', v: '12345' }]) {
+    assert.equal(cleanFood(bad), null, String(JSON.stringify(bad)));
+  }
+});
+
+test('cleanFoods: junk and duplicate ids dropped, the cap holds with the first ones winning, and cleaning twice gives one list', () => {
+  const dup = { id: 'f1', name: ' Draft', v: [9, 9, 9, 9, 9] };
+  const list = [food, null, 'junk', 7, dup, { id: 'f2', name: 'B', v: [1, 1, 1, 1, 1] }];
+  const clean = cleanFoods(list);
+  assert.deepEqual(clean, [food, { id: 'f2', name: 'B', v: [1, 1, 1, 1, 1] }]); // the first record keeps the id
+  assert.deepEqual(cleanFoods(clean), clean);
+  assert.deepEqual(cleanFoods('nope'), []);
+  const cap = Array.from({ length: FOODS_MAX + 5 }, (_, i) => ({ id: `f${i}`, name: `F${i}`, v: [1, 1, 1, 1, 1] }));
+  const capped = cleanFoods(cap);
+  assert.equal(capped.length, FOODS_MAX);
+  assert.deepEqual(capped, cleanFoods(cap.concat({ id: 'f0', name: 'again', v: [2, 2, 2, 2, 2] }))); // the cap with the first ones winning is stable
+});
+
+test('restoreFoods: merged by id, the backup wins on the fields, lastUsed is the later, a device-only food stays', () => {
+  const mine = [
+    { id: 'f1', name: 'Old name', v: [1, 1, 1, 1, 1], photo: 'fp9', lastUsed: 200 },
+    { id: 'f2', name: 'Only here', v: [2, 2, 2, 2, 2], lastUsed: 50 },
+    { id: 'f4', name: 'Later here', v: [4, 4, 4, 4, 4] },
+    { id: 'f5', name: 'Never used here', v: [5, 5, 5, 5, 5] },
+  ];
+  const back = [
+    { id: 'f1', name: 'Backup name', v: [3, 3, 3, 3, 3], ing: 'Milk' },
+    { id: 'f2', name: 'Also there', v: [2, 2, 2, 2, 2], lastUsed: 60 },
+    { id: 'f3', name: 'Only there', v: [1, 1, 1, 1, 1], lastUsed: 100 },
+    { id: 'f5', name: 'Used there', v: [5, 5, 5, 5, 5], lastUsed: 300 },
+  ];
+  // the stored side keeps its list in place (the backup's values winning on the shared ids, lastUsed the later in
+  // both directions), the backup's own foods are added after it
+  assert.deepEqual(restoreFoods(mine, back), [
+    { id: 'f1', name: 'Backup name', v: [3, 3, 3, 3, 3], photo: 'fp9', ing: 'Milk', lastUsed: 200 },
+    { id: 'f2', name: 'Also there', v: [2, 2, 2, 2, 2], lastUsed: 60 },
+    { id: 'f4', name: 'Later here', v: [4, 4, 4, 4, 4] },
+    { id: 'f5', name: 'Used there', v: [5, 5, 5, 5, 5], lastUsed: 300 },
+    { id: 'f3', name: 'Only there', v: [1, 1, 1, 1, 1], lastUsed: 100 },
+  ]);
+  assert.deepEqual(restoreFoods(mine, []), mine);
+  assert.deepEqual(restoreFoods(mine, 'junk'), mine);
+  assert.deepEqual(restoreFoods(null, back.slice(0, 1)), back.slice(0, 1));
+  assert.deepEqual(restoreFoods(null, 'nope'), []);
+  assert.deepEqual(restoreFoods([{ id: 'f1', name: 'x', v: [1, 1, 1, 1, 1] }], [{ id: 'f1', name: 'y', v: [2, 2, 2, 2, 2] }]), [{ id: 'f1', name: 'y', v: [2, 2, 2, 2, 2] }]); // no lastUsed on either side, none kept
+});
+
+test('restoreFoods: over the cap, the device keeps every food and only the backup-only tail is cut (no photo sweep loss)', () => {
+  const device = Array.from({ length: FOODS_MAX }, (_, i) => ({ id: `d${i}`, name: `D${i}`, v: [1, 1, 1, 1, 1], photo: `pd${i}`, lastUsed: 100 + i }));
+  const back = [
+    ...Array.from({ length: 50 }, (_, i) => ({ id: `d${i}`, name: `Backup D${i}`, v: [2, 2, 2, 2, 2], lastUsed: i < 25 ? 500 + i : 1 })),
+    ...Array.from({ length: 60 }, (_, i) => ({ id: `b${i}`, name: `B${i}`, v: [3, 3, 3, 3, 3] })),
+  ];
+  const merged = cleanFoods(restoreFoods(device, back)); // the same pass the stored write does
+  assert.equal(merged.length, FOODS_MAX);
+  for (let i = 0; i < FOODS_MAX; i++) assert.equal(merged[i].id, `d${i}`, `device food ${i}`); // every device food stays, in its place
+  assert.deepEqual(merged[0], { id: 'd0', name: 'Backup D0', v: [2, 2, 2, 2, 2], photo: 'pd0', lastUsed: 500 });
+  assert.deepEqual(merged[24], { id: 'd24', name: 'Backup D24', v: [2, 2, 2, 2, 2], photo: 'pd24', lastUsed: 524 });
+  assert.deepEqual(merged[25], { id: 'd25', name: 'Backup D25', v: [2, 2, 2, 2, 2], photo: 'pd25', lastUsed: 125 });
+  assert.deepEqual(merged[50], device[50]);
+  assert.equal(merged.some((f) => f.id[0] === 'b'), false); // not a single backup-only food got in: there was no room at all
+  assert.deepEqual(sweepFoodPhotos(device, [], merged), []); // so nothing of the device's is swept away either
+});
+
+test('restoreFoods: the backup-only foods fill the room the device list leaves, in order, and the rest goes', () => {
+  const device = Array.from({ length: FOODS_MAX - 10 }, (_, i) => ({ id: `d${i}`, name: `D${i}`, v: [1, 1, 1, 1, 1], lastUsed: 100 + i }));
+  const back = [
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, name: `Backup D${i}`, v: [2, 2, 2, 2, 2], lastUsed: 500 + i })),
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `b${i}`, name: `B${i}`, v: [3, 3, 3, 3, 3] })),
+  ];
+  const merged = restoreFoods(device, back);
+  assert.equal(merged.length, FOODS_MAX);
+  for (let i = 0; i < 90; i++) assert.equal(merged[i].id, `d${i}`, `device food ${i}`);
+  for (let i = 0; i < 10; i++) assert.equal(merged[90 + i].id, `b${i}`, `backup-only food ${i}`); // the first ten in, in order
+  assert.equal(merged.some((f) => f.id === `b${FOODS_MAX - 90}`), false); // the rest of the backup's new foods are cut, never a device's
+});
+
+test('restoreFoods: restoring the same backup to its own merged list is stable, capped or not', () => {
+  const mine = [
+    { id: 'f1', name: 'Old name', v: [1, 1, 1, 1, 1], photo: 'fp9', lastUsed: 200 },
+    { id: 'f2', name: 'Only here', v: [2, 2, 2, 2, 2], lastUsed: 50 },
+  ];
+  const back = [
+    { id: 'f1', name: 'Backup name', v: [3, 3, 3, 3, 3], ing: 'Milk' },
+    { id: 'f2', name: 'Also there', v: [2, 2, 2, 2, 2], lastUsed: 60 },
+    { id: 'f3', name: 'Only there', v: [1, 1, 1, 1, 1], lastUsed: 100 },
+  ];
+  const once = restoreFoods(mine, back);
+  assert.deepEqual(restoreFoods(once, back), once);
+  assert.deepEqual(restoreFoods(cleanFoods(once), back), cleanFoods(once)); // and after the pass the stored write does
+  // the same holds where the cap truncated the backup-only tail: the cut foods stay cut (the capped list is
+  // exactly FOODS_MAX, so no room ever reopens for them), and no device food comes or goes
+  const device = Array.from({ length: FOODS_MAX - 10 }, (_, i) => ({ id: `d${i}`, name: `D${i}`, v: [1, 1, 1, 1, 1] }));
+  const full = [
+    { id: 'd0', name: 'Backup D0', v: [2, 2, 2, 2, 2], lastUsed: 500 },
+    { id: 'f1', name: 'Only there', v: [1, 1, 1, 1, 1], lastUsed: 100 },
+    ...Array.from({ length: FOODS_MAX + 1 }, (_, i) => ({ id: `b${i}`, name: `B${i}`, v: [3, 3, 3, 3, 3] })),
+  ];
+  const capped = restoreFoods(device, full);
+  assert.equal(capped.length, FOODS_MAX);
+  assert.deepEqual(capped[0], { id: 'd0', name: 'Backup D0', v: [2, 2, 2, 2, 2], lastUsed: 500 });
+  for (let i = 1; i < 90; i++) assert.equal(capped[i].id, `d${i}`, `device food ${i}`);
+  assert.deepEqual(capped.slice(90, 100), [full[1], ...full.slice(2, 11)]); // the room the device list leaves, the backup fills
+  assert.deepEqual(restoreFoods(capped, full), capped); // and restoring the same backup again gives the same list back
+});
+
+test('sweepFoodPhotos: a photo shared by two foods stays, a replaced one goes, and entry or plan photos are never listed', () => {
+  const stored = [
+    { id: 'sp1', food: 'f1' }, // shared by f1 and f2 below: stays while either keeps it
+    { id: 'fp2', food: 'f2' },
+    { id: 'dead', food: 'f-gone' },
+    { id: 'e1' }, // an entry photo: no food ref, never the pantry's to judge
+    { id: 'e2', plan: 'M-1' },
+    'junk', null,
+  ];
+  assert.deepEqual(sweepFoodPhotos(stored, [], [{ id: 'f1', photo: 'sp1' }, { id: 'f2', photo: 'sp1' }, { id: 'f3', photo: 'fp2' }]), ['dead']);
+  assert.deepEqual(sweepFoodPhotos(stored, [], [{ id: 'f1', photo: 'sp1' }, { id: 'f2', photo: 'sp2' }, { id: 'f3' }]), ['fp2', 'dead']); // the replaced photo and the foodless one go
+  // On a restore the merge keeps what either side points at (both photos of a device-only and a backup-only food
+  // survive), and a backup photo whose food is on neither side goes.
+  const merged = [{ id: 'f-dev', photo: 'p-dev' }, { id: 'f-new', photo: 'p-new' }];
+  assert.deepEqual(sweepFoodPhotos([{ id: 'p-dev', food: 'f-dev' }], [{ id: 'p-new', food: 'f-new' }, { id: 'p-lost', food: 'nowhere' }], merged), ['p-lost']);
+  assert.deepEqual(sweepFoodPhotos([], [{ id: 'p-dead', food: 'nowhere' }, { id: 'p-dup', food: 'gone1' }, { id: 'p-dup', food: 'gone1' }], [{ id: 'f1', photo: 'p-dead2' }]), ['p-dead', 'p-dup']); // deduplicated
 });

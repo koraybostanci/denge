@@ -88,9 +88,29 @@ test('badges: one row per earned step, and none without any', () => {
   assert.deepEqual(rows(db, 'SELECT id, threshold, day FROM weightplan_badges ORDER BY id, threshold').map((r) => ({ ...r })), [
     { id: 'days_on', threshold: 7, day: '2026-10-12' }, { id: 'days_on', threshold: 30, day: '2026-11-05' }, { id: 'first_meal', threshold: 1, day: '2026-10-06' },
   ]);
-  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '5');
+  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '6');
   const none = new DatabaseSync(':memory:');
   load(none);
   load(none);
   assert.equal(rows(none, 'SELECT COUNT(*) AS n FROM weightplan_badges')[0].n, 0);
+});
+
+test('the pantry: per 100 g values, the ingredients and a photo flag export and round-trip; no photo bytes', () => {
+  const db = new DatabaseSync(':memory:');
+  const foods = [
+    { id: 'f1', name: "Eker Skyr natural; it's plain", v: [59, 10.5, 4, 0.5, 0], ing: 'Pasteurised milk, cultures', photo: 'fp1', lastUsed: new Date(2026, 9, 6, 12, 0, 0).getTime() },
+    { id: 'f2', name: 'Rolled oats', v: [380, 13.2, 60.1, 7.5, 10] },
+  ];
+  const sql = buildSql({ settings, entries, days, foods, appVersion: 'test' }).sql;
+  db.exec(sql);
+  db.exec(sql); // loading again replaces the table
+  assert.deepEqual(rows(db, 'SELECT name, kcal, protein_g, carbs_g, fat_g, fibre_g, ingredients, last_used, has_photo FROM weightplan_foods ORDER BY id').map((r) => ({ ...r })), [
+    { name: "Eker Skyr natural; it's plain", kcal: 59, protein_g: 10.5, carbs_g: 4, fat_g: 0.5, fibre_g: 0, ingredients: 'Pasteurised milk, cultures', last_used: '2026-10-06 12:00:00', has_photo: 1 },
+    { name: 'Rolled oats', kcal: 380, protein_g: 13.2, carbs_g: 60.1, fat_g: 7.5, fibre_g: 10, ingredients: null, last_used: null, has_photo: 0 },
+  ]);
+  assert.ok(!sql.includes('fp1') && !sql.includes('b64') && !sql.includes('data:image'), 'the photo travels only as a flag');
+  const none = new DatabaseSync(':memory:');
+  none.exec(buildSql({ settings, entries, days, foods: 'junk', appVersion: 'test' }).sql); // junk input exports no rows and no error
+  none.exec(buildSql({ settings, entries, days, appVersion: 'test' }).sql); // none when nothing was given either
+  assert.equal(rows(none, 'SELECT COUNT(*) AS n FROM weightplan_foods')[0].n, 0);
 });
