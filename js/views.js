@@ -6,7 +6,8 @@ import {
   progressGate, progressState, progressRatingHint, progressSig, REST_KCAL, REST_MACROS, itemRests,
 } from './core.js';
 import { progressBrief } from './briefs.js';
-import { readMeal, readFood, PLAN_CAPS, FOODS_MAX } from './backup.js';
+import { readMeal, readFood, PLAN_CAPS, FOODS_MAX, RANGES } from './backup.js';
+import { NAME_MAX, AGE_RANGE, KCAL_FLOOR, PROTEIN_MIN } from './onboarding.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
@@ -1757,8 +1758,8 @@ export function renderSettings() {
       <h3>${t('Factory reset')}</h3>
       <p class="note">${t('Back to how the app was on its first launch.')}</p>
       <dl class="reset-diff">
-        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The getting-started steps come back.')}</dd></div>
-        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Nothing, except your API key and provider if the box is ticked.')}</dd></div>
+        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The app returns to the setup screen.')}</dd></div>
+        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Only the install id, the language, and your API key and provider if the box is ticked.')}</dd></div>
       </dl>
       <label class="check"><input type="checkbox" id="keep-key" checked> ${t('Keep my API key and provider')}</label>
       <div class="actions"><button type="button" class="btn btn-danger btn-danger-solid" data-act="wipe-all">${t('Factory reset')}</button></div>
@@ -1789,6 +1790,113 @@ export function renderSettings() {
     ${section('reset', t('Reset'), t('Clear my log, or factory reset'), reset)}
   </div>
   <footer class="brand"><img src="icons/icon.svg" width="44" height="44" alt=""><p><b>Pickle <small>v${APP_VERSION}</small></b><span>${t('Good things take time. A cucumber becomes a pickle through time and steady conditions, not one big effort, and that is what the app asks of you: a steady average along your line, day after day.')}</span><span>${t('Entries, photos and settings are stored on this device. Photos and text you send for analysis go to the provider you chose.')}</span></p></footer>`;
+}
+
+// ——— First-run setup ———
+// The form in the order it is read; the first field with an error takes the focus
+const OB_ORDER = ['name', 'age', 'gender', 'weight', 'targetKg', 'targetDate', 'kcalRest', 'kcalTrain', 'protein', 'plan']; // i18n-ok: field names
+const OB_ID = {  name: 'ob-name', age: 'ob-age', gender: 'ob-gender', weight: 'ob-weight', targetKg: 'ob-target', targetDate: 'ob-date', kcalRest: 'ob-rest', kcalTrain: 'ob-train', protein: 'ob-protein', plan: 'ob-plan-blank' }; // i18n-ok: field names and element ids
+export const ONBOARD_IDS = OB_ID;
+export const onboardFocusId = (errors) => {
+  const first = OB_ORDER.find((f) => (errors || []).some((e) => e.field === f));
+  return first ? OB_ID[first] : '';
+};
+// The words for a failed check of validateOnboarding (js/onboarding.js), or the missing choice of plan, which the app adds
+function onboardError(field, code) {
+  const n = (x) => fmtInt(x);
+  if (code === 'required') return field === 'plan' ? t('Choose how to start') : field === 'targetDate' ? t('Pick a date') : t('Fill this in'); // i18n-ok: field names
+  if (code === 'range') {
+    if (field === 'weight' || field === 'targetKg') return t('Enter a weight between {min} and {max} kg', { min: n(RANGES.startKg[0]), max: n(RANGES.startKg[1]) }); // i18n-ok: field names
+    if (field === 'protein') return t('Enter grams between {min} and {max}', { min: n(PROTEIN_MIN), max: n(RANGES.protein[1]) });
+    if (field === 'age') return t('Enter an age between {min} and {max}', { min: AGE_RANGE[0], max: AGE_RANGE[1] });
+    return t('Enter calories between {min} and {max}', { min: n(KCAL_FLOOR), max: n(RANGES.kcalRest[1]) });
+  }
+  if (code === 'not_below_weight') return t('The goal weight must be below your current weight');
+  if (code === 'not_after_today') return t('Pick a date after today');
+  if (code === 'below_floor') return t('Enter at least {kcal} kcal', { kcal: n(KCAL_FLOOR) });
+  if (code === 'below_rest') return t('A workout day needs at least the rest-day calories');
+  if (code === 'below_min') return t('Enter at least {g} g', { g: n(PROTEIN_MIN) });
+  if (code === 'too_long') return t('Use at most {n} characters', { n: NAME_MAX });
+  return field === 'targetDate' ? t('Pick a valid date') : t('Check this value'); // i18n-ok: field names
+}
+
+// The setup screen: one form. What was typed lives in S.onboard ({ name, age, gender, weight, targetKg, targetDate, kcalRest, kcalTrain, protein, plan: '' | 'blank' | 'default', errors: [{ field, code }] }), so drawing it again keeps it.
+export function renderOnboarding() {
+  const d = S.onboard || {};
+  const errs = {};
+  for (const e of d.errors || []) if (!errs[e.field]) errs[e.field] = onboardError(e.field, e.code);
+  const lang = getLang() === 'tr' ? 'tr' : 'en';
+  const input = (f, label, extra = '') => {
+    const id = OB_ID[f];
+    const bad = errs[f] ? ` aria-invalid="true" aria-describedby="${id}-err"` : ''; // i18n-ok: attribute names
+    const type = f === 'targetDate' ? 'date' : 'text'; // i18n-ok: input types
+    return `<div class="ob-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" ${extra} value="${esc(d[f] == null ? '' : d[f])}"${bad}>${errs[f] ? `<p class="note is-error" id="${id}-err">${esc(errs[f])}</p>` : ''}</div>`; // i18n-ok: markup
+  };
+  const genders = [['female', t('Female')], ['male', t('Male')], ['other', t('Other')], ['none', t('Prefer not to say')]]; // i18n-ok: stored values
+  const gender = `<div class="ob-field"><label for="ob-gender">${t('Gender')}</label><select id="ob-gender"${errs.gender ? ' aria-invalid="true" aria-describedby="ob-gender-err"' : ''}><option value=""${d.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${d.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${errs.gender ? `<p class="note is-error" id="ob-gender-err">${esc(errs.gender)}</p>` : ''}</div>`; // i18n-ok: markup
+  const choice = (v, label, id) => `<button type="button" role="radio" id="${id}" data-act="onboard-plan" data-plan="${v}" aria-checked="${d.plan === v}">${label}</button>`; // i18n-ok: markup
+  const C = { blank: choice('blank', t('Start blank'), 'ob-plan-blank'), other: choice('default', t('Use the default plan'), 'ob-plan-default') }; // i18n-ok: plan values and ids
+  const F = {};
+  F.name = input('name', t('Name'), 'autocomplete="off"'); // i18n-ok: field names
+  F.age = input('age', t('Age'), 'inputmode="numeric" autocomplete="off"'); // i18n-ok: field names
+  F.weight = input('weight', t('Current weight (kg)'), 'inputmode="decimal" autocomplete="off"'); // i18n-ok: field names
+  F.targetKg = input('targetKg', t('Goal weight (kg)'), 'inputmode="decimal" autocomplete="off"'); // i18n-ok: field names
+  F.targetDate = input('targetDate', t('Goal date'), `min="${esc(addDays(today(), 1))}"`); // i18n-ok: field names
+  F.kcalRest = input('kcalRest', t('Rest-day kcal'), 'inputmode="numeric" autocomplete="off"'); // i18n-ok: field names
+  F.kcalTrain = input('kcalTrain', t('Workout-day kcal'), 'inputmode="numeric" autocomplete="off"'); // i18n-ok: field names
+  F.protein = input('protein', t('Protein (g)'), 'inputmode="numeric" autocomplete="off"'); // i18n-ok: field names
+  return `
+  <header class="top">
+    <div>
+      <h1>${t('Welcome to Pickle')}</h1>
+      <p class="sub">${t('Good things take time. A few answers set the app up for you; everything stays on this device.')}</p>
+    </div>
+  </header>
+  <section class="ob-lang">
+    <div class="seg" role="group" aria-label="${t('Language')}">
+      <button type="button" lang="en" data-act="lang" data-lang="en" aria-pressed="${lang === 'en'}">English</button>
+      <button type="button" lang="tr" data-act="lang" data-lang="tr" aria-pressed="${lang === 'tr'}">Türkçe</button>
+    </div>
+  </section>
+  <section class="ob-section" aria-labelledby="ob-h-you">
+    <h2 id="ob-h-you">${t('About you')}</h2>
+    <p class="note">${t('All optional.')}</p>
+    <div class="field-grid">
+      ${F.name}
+      ${F.age}
+      ${gender}
+    </div>
+  </section>
+  <section class="ob-section" aria-labelledby="ob-h-goals">
+    <h2 id="ob-h-goals">${t('Goals')}</h2>
+    <p class="note">${t('Pickle is built for losing weight at a steady pace. Enter where you are, where you want to be and by when.')}</p>
+    <div class="field-grid">
+      ${F.weight}
+      ${F.targetKg}
+      ${F.targetDate}
+      ${F.kcalRest}
+      ${F.kcalTrain}
+      ${F.protein}
+    </div>
+    <p class="note">${t('You can change these later in Settings.')}</p>
+  </section>
+  <section class="ob-section" aria-labelledby="ob-h-plan">
+    <h2 id="ob-h-plan">${t('Meal plan')}</h2>
+    <div class="seg" role="radiogroup" aria-labelledby="ob-h-plan"${errs.plan ? ' aria-invalid="true" aria-describedby="ob-plan-err"' : ''}>
+      ${C.blank}
+      ${C.other}
+    </div>
+    ${errs.plan ? `<p class="note is-error" id="ob-plan-err">${esc(errs.plan)}</p>` : ''}
+    <p class="note">${t('A blank plan is empty and yours to fill. The default plan is a ready-made set of meals you can edit.')}</p>
+  </section>
+  <div class="actions ob-actions">
+    <button type="button" class="btn btn-primary btn-wide" data-act="onboard-finish">${t('Start', { $id: 'onboard.start' })}</button>
+  </div>
+  <section class="ob-section">
+    <p class="note">${t('Already used Pickle? Bring your data back from a backup file.')}</p>
+    <div class="actions"><button type="button" class="btn" data-act="import">${t('Restore from a backup')}</button></div>
+    <input id="set-import" type="file" accept="application/json,.json" hidden>
+  </section>`;
 }
 
 // The toast for new badge steps ([[id, threshold, day], ...]): one badge shows its mark, name and finish; several collapse into one line with their names.

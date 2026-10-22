@@ -142,6 +142,20 @@ button:disabled { opacity: .35; cursor: default; }
   padding: calc(var(--sat) + 14px) calc(16px + var(--sar)) calc(var(--tabs-h) + var(--sab) + 28px) calc(16px + var(--sal));
   outline: none;
 }
+/* The setup screen has no tab bar and no composer */
+#view[data-view="onboarding"] { padding-bottom: calc(var(--sab) + 36px); }
+.ob-lang { margin-top: 18px; }
+.ob-section { margin-top: 28px; }
+.ob-section h2 { margin-bottom: 2px; }
+.ob-section .seg { margin-top: 12px; }
+.ob-field { display: grid; gap: 4px; align-content: start; }
+.ob-field label { font-size: 13px; color: var(--ink2); }
+.ob-field .note { margin-top: 0; font-size: 13px; }
+.ob-section .field-grid { align-items: start; }
+.ob-actions { margin-top: 28px; }
+.seg [role="radio"] { min-height: 44px; border-radius: var(--r-ctl); font-size: 14px; color: var(--ink2); padding: 0 10px; }
+.seg [role="radio"][aria-checked="true"] { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
+.seg[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--over); }
 body.has-composer #view { padding-bottom: calc(var(--tabs-h) + var(--composer-h) + var(--sab) + 36px); }
 #view[data-view="log"] { padding-bottom: calc(var(--tabs-h) + var(--composer-h) + var(--sab) + 84px); }
 #view > section, #view > .notice { margin-top: 28px; }

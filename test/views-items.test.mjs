@@ -12,9 +12,10 @@ const { S, freshSettings, REST_KCAL, REST_MACROS } = core;
 
 assert.equal(REST_KCAL, 5);
 assert.equal(REST_MACROS, 2);
+const GOALS = { startDate: '2026-10-05', startKg: 87, targetDate: '2026-12-31', targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 };
 S.tab = 'today';
 S.sheet = null;
-S.settings = freshSettings();
+S.settings = { ...freshSettings(), ...GOALS };
 S.plans = { active: 'default', list: [seedPlan] };
 S.plan = buildPlan(seedPlan);
 S.entries = [];

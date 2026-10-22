@@ -10,9 +10,10 @@ const { default: seedPlan } = await import('../js/default-plan.js');
 const { buildPlan } = await import('../js/plan.js');
 const { S, freshSettings } = core;
 
+const GOALS = { startDate: '2026-10-05', startKg: 87, targetDate: '2026-12-31', targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 };
 S.tab = 'check';
 S.sheet = null;
-S.settings = freshSettings();
+S.settings = { ...freshSettings(), ...GOALS };
 S.plans = { active: 'default', list: [seedPlan] };
 S.plan = buildPlan(seedPlan);
 S.entries = [];

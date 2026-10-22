@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newClientId, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
+import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
 
 const TODAY = '2026-10-23';
@@ -111,7 +112,7 @@ test('needsOnboarding only for an install with no goals and no data', () => {
 });
 
 test('upgradeSettings fills missing goals, keeps the rest, assigns an id once', () => {
-  const d = freshSettings();
+  const d = DEFAULTS;
   const up = upgradeSettings({ startKg: 95, targetKg: NaN, kcalRest: 1400, lang: 'tr', protein: null }, 'new-id');
   assert.equal(up.startKg, 95);
   assert.equal(up.kcalRest, 1400);

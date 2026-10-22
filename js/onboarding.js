@@ -2,7 +2,6 @@
 // people: a failed check is a { field, code } the screen turns into words. `node --test`
 import { T } from './i18n.js';
 import { RANGES, GENDERS } from './backup.js';
-import { freshSettings } from './core.js';
 import { DEFAULTS } from './plan.js';
 
 export const NAME_MAX = 40;
@@ -114,7 +113,7 @@ const GOAL_KEYS = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest',
 // Settings kept from before setup existed: goals that are missing take the defaults, and the install gets an id
 export function upgradeSettings(stored, clientId) {
   const out = { ...(stored && typeof stored === 'object' ? stored : {}) };
-  const base = freshSettings();
+  const base = DEFAULTS;
   for (const k of GOAL_KEYS) {
     const ok = typeof base[k] === 'number' ? Number.isFinite(out[k]) : typeof out[k] === 'string' && out[k] !== '';
     if (!ok) out[k] = base[k];

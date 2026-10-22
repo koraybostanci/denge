@@ -11,8 +11,10 @@ export const APP_ID = 'weightplan';
 
 // ——— State ———
 // The settings of an app that has just been installed (new objects each time, so a reset never shares them)
+// Personal goals (dates, weights, calories, protein) are not part of it: setup asks for them, or a restore or an older install brings them
+const PERSONAL = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin'];
 export const freshSettings = () => ({
-  ...DEFAULTS, schema: SCHEMA_VERSION,
+  ...Object.fromEntries(Object.entries(DEFAULTS).filter(([k]) => !PERSONAL.includes(k))), schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
   name: '', age: 0, gender: '', clientId: '', onboarded: false,
   useLocation: false, places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
@@ -53,6 +55,7 @@ export const S = {
   openSetting: '', // expanded section in Settings
   plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
+  onboard: null, // the setup form while it is shown: what was typed, the choice of plan and the errors of the last try (js/views.js renderOnboarding); null otherwise
   draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal, food?, foodForm? }; nothing is stored until it is saved
 };
 let progressGen = 0; // moves when the log is wiped, so a progress review that lands after it is dropped
