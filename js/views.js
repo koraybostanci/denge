@@ -10,7 +10,7 @@ import { readMeal, readFood, PLAN_CAPS, FOODS_MAX } from './backup.js';
 import { MODELS, PRESETS, ZEN_FREE } from './ai.js';
 import { BY_ID, GROUP_NAME, FINISH_NAME, PART_NAME, SLOT_TITLE, cachedContext, cellOf, collection, stepRows, unlockSummary, wornAv, avatarChoices } from './badges.js';
 import { badgeSvg, avatarSvg } from './badge-art.js';
-import { dateFmt, td, t, tn, T, lc, getLang } from './i18n.js';
+import { dateFmt, td, t, tn, T, lc, getLang, foldKey } from './i18n.js';
 import { SLOTS, SLOT_NAME, FLEX, RULES, LOCALE, processRules, parseDay, addDays, diffDays, targetAt, dayKey, hhmm, buildPlan } from './plan.js';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -801,12 +801,37 @@ function checkOption(rec, o, i, rem) {
   </li>`;
 }
 
+// The pantry line under a verdict is derived here, at render time, from the stored verdict and the stored
+// products: the verdict keeps its shape and nothing of this is persisted with it. A stored product matches an
+// option when, folded (foldKey in js/i18n.js), one name contains the other and the shorter name is still at
+// least 4 characters, so a name that short cannot ride inside another word. The line only names the products: it
+// never says which numbers the verdict used (a label on the photo outranks the stored values) and never claims provenance.
+const pantryNames = (options) => {
+  const opts = (Array.isArray(options) ? options : []).map((o) => foldKey(o && o.name)).filter(Boolean);
+  const out = [];
+  const shown = new Set();
+  for (const f of Array.isArray(S.foods) ? S.foods : []) {
+    if (!f || typeof f.name !== 'string' || !f.name.trim()) continue; // junk in state, as everywhere
+    const name = foldKey(f.name);
+    if (shown.has(name)) continue;
+    if (!opts.some((o) => Math.min(o.length, name.length) >= 4 && (o.includes(name) || name.includes(o)))) continue;
+    shown.add(name);
+    out.push(f.name); // the product's name as it is stored, verbatim
+  }
+  return out;
+};
+
 function checkResult(rec, rem) {
   const sameDay = dayKey(new Date(rec.ts)) === today();
+  const pantry = pantryNames(rec.options);
+  const pantryNote = pantry.length
+    ? `<p class="note"><button type="button" class="link link-inline" data-act="settings" data-sec="foods">${t('From your pantry: {names}', { names: pantry.map(esc).join(', ') })}</button></p>`
+    : '';
   return `<section class="verdict" id="check-result" aria-label="${t('Verdict')}">
     <header><h2>${esc(rec.title || kindLabel(rec.kind) || t('Verdict'))}</h2><p>${kindLabel(rec.kind) || t('Check')}, ${checkWhen(rec.ts)}</p></header>
     <p class="verdict-answer">${esc(rec.answer)}</p>
     ${rec.note ? `<p class="note">${t('Your note: {note}', { note: esc(rec.note) })}</p>` : ''}
+    ${pantryNote}
     <ol class="options">${rec.options.map((o, i) => checkOption(rec, o, i, sameDay ? rem : null)).join('')}</ol>
     <p class="review-foot">${rec.photos ? tn('From {n} photo; the photos were not kept. Numbers are estimates.|From {n} photos; the photos were not kept. Numbers are estimates.', Number(rec.photos)) : t('From your note; the photos were not kept. Numbers are estimates.')} <button type="button" class="link" data-act="check-remove" data-id="${esc(rec.id)}">${t('Remove this check')}</button></p>
   </section>`;

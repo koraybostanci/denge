@@ -27,7 +27,7 @@ No backend, no account. Your data stays on your device.
 | **Log** | Every entry, newest first, with a short review of each day |
 | **Progress** | Weight against your line, projected arrival date, runs of days on plan, a consistency calendar, and the badges you have earned |
 | **Plan** | Your meal options with ingredients, and the rules. Change a meal or add one, and it is saved as My plan |
-| **Check** | Photograph a menu, a dish or a product before you order or buy, and get a verdict against your plan |
+| **Check** | Photograph a menu, a dish or a product before you order or buy, and get a verdict against your plan, using your usual products from the Pantry |
 | **Your pickle** | The avatar in the header: its growth, face and accessory are unlocked by badges |
 
 Weight, steps, water, coffee, workouts and planned meals need no model and no key. Type `85.4`,

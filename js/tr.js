@@ -755,6 +755,7 @@ export default {
   'The photo is sent for the fill and never kept. The product’s picture is stored only when you frame it and save.': 'Fotoğraf doldurmak için gönderilir, asla saklanmaz. Ürünün resmi, yalnızca çerçeveleyip kaydettiğinde saklanır.',
   'Pantry: {n}': 'Dolap: {n}',
   'Open the Pantry': 'Dolabı aç',
+  'From your pantry: {names}': 'Dolabından: {names}',
 
   // ——— js/views.js: Settings ———
   'No backup yet': 'Henüz yedek yok',

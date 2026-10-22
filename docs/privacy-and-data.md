@@ -12,7 +12,9 @@
 - The day's review and the quick note on Today send text only: that day's meals with their numbers, steps, water, weigh-in,
   your goals, the weight schedule and where you stand against it. No photos. These requests, and the
   check, also carry the meals and foods of the plan in use (names, amounts, calories), so anything you
-  typed into My plan is sent too.
+  typed into My plan is sent too. The Pantry's products travel the same way, as one line each: the
+  name and the values per 100 g, and on a check also up to 60 characters of the ingredients text.
+  Photos are never sent.
 - The progress review on Progress, sent only when you tap it, is text only too: a summary of the whole
   log since the start (meals as numbers, weigh-ins, steps, water, coffee, workout days, day verdicts,
   flex used), your goals and where you stand against the schedule. Supplements go as counts taken, never
@@ -20,7 +22,8 @@
   kept to about 3,500 characters; the goal line and a few closing lines stay whole even past that.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
-- A photo taken to fill in a food's values is sent with no other data and is not stored.
+- A photo taken to fill in a food's values is sent with no other data and is not stored. The
+  ingredients text the fill can read is stored with the product, as text.
 - The API key is stored on the device only, unencrypted like the rest of the app's data, and is
   never written to a backup file.
 - Photo location is off by default. When on, it is read on the device and matched to places you
@@ -31,15 +34,15 @@
   change of goals does not move them). Nothing about badges is sent anywhere, and the model never sees them.
 - There is no sync. Back up from Settings → "Backup and export"; the backup is a JSON file you can
   restore on the same or another device. It holds your entries, goals, favourites, My plan (the
-  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. Photos of
+  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. It also holds your Pantry products with their values (name, per-100 g values, and the ingredients text where one is stored, and when each was last used) and their pictures. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
-  entries, days, checks, badges and plan pictures to what is on the device (an entry or day that is in
-  both takes the backup's version); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
+  entries, days, checks, badges, plan pictures and Pantry products to what is on the device (an entry or day that is in
+  both takes the backup's version; a Pantry product that is in both takes the backup's values); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
   weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review, checks) and keeps every setting, your plans, the plan's
-  pictures, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
-  goals, favourites, saved places, My plan, the plan's pictures, the badges and the usage totals; the API key and provider
+  pictures, your Pantry products with their photos, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
+  goals, favourites, saved places, My plan, the plan's pictures, your Pantry products with their photos, the badges and the usage totals; the API key and provider
   stay unless you untick the box. It asks you to type DELETE. Both refuse while something is being
   analysed. Neither can be undone, so save a backup first.
 
