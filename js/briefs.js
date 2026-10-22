@@ -135,6 +135,9 @@ function progressBriefText() {
     lines.push(total > 0
       ? `${goalHead}, which needs about ${f2(rate.kg)} kg a day. Day ${Math.max(0, h.days)} of ${total}. Never go below ${kcalMinDay()} kcal a day.`
       : `${goalHead}, with no planned days between its start and its end. Never go below ${kcalMinDay()} kcal a day.`);
+    // The person: only what is set, and never the name; a fixed line like the goal
+    const person = [s.age > 0 ? `${s.age} years old` : '', s.gender === 'female' || s.gender === 'male' ? s.gender : ''].filter(Boolean);
+    if (person.length) lines.push(`Person: ${person.join(', ')}`);
     // 2. All-time aggregates
     lines.push(`All time: meals logged on ${mealDays} days; ${h.onPlan} days on plan; best run ${h.best} days on plan; ${h.perfect} perfect days; `
       + `flex used: ${small} beer or small dessert, ${dinners} flexible dinner; ${off} off-plan entries; ${workouts} workout days.`);

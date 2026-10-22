@@ -38,7 +38,7 @@ Weight, steps, water, coffee, workouts and planned meals need no model and no ke
 1. Fork this repo and serve it over HTTPS from any static host (GitHub Pages: Settings → Pages →
    `main` / `(root)`).
 2. Open the address on your phone and add it to the Home Screen. Pickle only runs as an installed app.
-3. Open Settings → Goals and enter your dates, weights and daily calories.
+3. On first start Pickle asks for your weights, goal date, daily calories and protein, and whether to start with a blank plan or the Default one. Change them later under Settings → Goals.
 4. Optional: add an API key under Settings → "Photo and text analysis" to log by photo.
 
 Built for and used on an iPhone. Other modern mobile browsers should work.

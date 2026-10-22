@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '54'; // bump together with VERSION in sw.js
+export const APP_VERSION = '55'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -626,6 +626,7 @@ export function progressSig() {
   return djb2(JSON.stringify([
     ['startDate', 'targetDate', 'startKg', 'targetKg', 'kcalRest', 'kcalTrain', 'kcalMinDay', 'protein', 'fiber', 'steps', 'water'].map((k) => s[k]),
     planDigest(S.plan), last ? weekStart(last.day) : '', w.length, last ? Math.round(last.kg * 10) / 10 : '', Math.floor(mealDays / 5), verdictDays,
+    ...(s.age > 0 || s.gender ? [[s.age > 0 ? s.age : 0, s.gender || '']] : []), // age and gender are context for the review; an unset profile keeps the old hash
   ]));
 }
 

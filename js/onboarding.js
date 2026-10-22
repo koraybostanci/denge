@@ -30,6 +30,36 @@ const read = (v) => {
   return Number(v.trim().replace(',', '.'));
 };
 
+// The optional profile fields (name, age, gender), checked the same way in setup and in Settings: reports through bad(field, code), writes value
+function readProfile(input, bad, value) {
+  const rawName = input.name == null ? '' : input.name;
+  if (typeof rawName !== 'string') bad('name', 'invalid');
+  else {
+    const name = rawName.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
+    if (name.length > NAME_MAX) bad('name', 'too_long');
+    else value.name = name;
+  }
+  const rawAge = input.age == null ? '' : input.age;
+  if (typeof rawAge === 'string' && !rawAge.trim()) value.age = 0;
+  else {
+    const age = typeof rawAge === 'number' ? rawAge : typeof rawAge === 'string' && /^\d+$/.test(rawAge.trim()) ? Number(rawAge.trim()) : NaN;
+    if (!Number.isInteger(age) || age < AGE_RANGE[0] || age > AGE_RANGE[1]) bad('age', 'range');
+    else value.age = age;
+  }
+  const gender = input.gender == null ? '' : input.gender;
+  if (gender === '' || GENDERS.includes(gender)) value.gender = gender;
+  else bad('gender', 'invalid');
+}
+
+// The profile saved from Settings: { name, age, gender } as typed; gives { ok, errors: [{ field, code }], value }
+export function validateProfile(input) {
+  input = input && typeof input === 'object' ? input : {};
+  const errors = [];
+  const value = {};
+  readProfile(input, (field, code) => errors.push({ field, code }), value);
+  return { ok: errors.length === 0, errors, value };
+}
+
 // input: { weight, targetKg, targetDate, kcalRest, kcalTrain, protein, name?, age?, gender? }, today: 'YYYY-MM-DD'
 // Gives { ok, errors: [{ field, code }], value }; value holds the cleaned fields when ok
 export function validateOnboarding(input, today) {
@@ -70,23 +100,7 @@ export function validateOnboarding(input, today) {
   else if (protein > RANGES.protein[1]) bad('protein', 'range');
   else value.protein = protein;
 
-  const rawName = input.name == null ? '' : input.name;
-  if (typeof rawName !== 'string') bad('name', 'invalid');
-  else {
-    const name = rawName.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
-    if (name.length > NAME_MAX) bad('name', 'too_long');
-    else value.name = name;
-  }
-  const rawAge = input.age == null ? '' : input.age;
-  if (typeof rawAge === 'string' && !rawAge.trim()) value.age = 0;
-  else {
-    const age = typeof rawAge === 'number' ? rawAge : typeof rawAge === 'string' && /^\d+$/.test(rawAge.trim()) ? Number(rawAge.trim()) : NaN;
-    if (!Number.isInteger(age) || age < AGE_RANGE[0] || age > AGE_RANGE[1]) bad('age', 'range');
-    else value.age = age;
-  }
-  const gender = input.gender == null ? '' : input.gender;
-  if (gender === '' || GENDERS.includes(gender)) value.gender = gender;
-  else bad('gender', 'invalid');
+  readProfile(input, bad, value);
   return { ok: errors.length === 0, errors, value };
 }
 

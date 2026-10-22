@@ -593,6 +593,24 @@ test('progressSig is the same on every call and moves only with goals, plan, wei
   for (const f of changed) { reset(); wi(-3, 85); meal(day(-1), 1500, 130); S.plan = SEED; f(); assert.notEqual(progressSig(), base); }
   S.plan = SEED;
 });
+test('progressSig: an unset profile keeps the hash, age or gender change it', () => {
+  reset(); wi(-3, 85); meal(day(-1), 1500, 130);
+  const base = progressSig();
+  S.settings.age = 0; S.settings.gender = '';
+  assert.equal(progressSig(), base);
+  S.settings.name = 'Ayşe'; S.settings.clientId = 'abc';
+  assert.equal(progressSig(), base); // the name and the id are not part of it
+  S.settings.age = 34;
+  const withAge = progressSig();
+  assert.notEqual(withAge, base);
+  S.settings.gender = 'female';
+  const withBoth = progressSig();
+  assert.notEqual(withBoth, withAge);
+  S.settings.age = 35;
+  assert.notEqual(progressSig(), withBoth);
+  S.settings.age = 0; S.settings.gender = 'none';
+  assert.notEqual(progressSig(), base);
+});
 test('progressSig ignores water, coffee and supplement ticks, an entry edit that changes no meal day, and S.rev', () => {
   reset(); wi(-3, 85); meal(day(-1), 1500, 130);
   const base = progressSig();

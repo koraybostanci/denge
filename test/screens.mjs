@@ -94,6 +94,16 @@ export function screens() {
   add('progress-picked-week', views.renderProgress);
   S.calPick = null;
   add('settings', views.renderSettings);
+  // A profile: the greeting on Today and the Profile section opened in Settings
+  Object.assign(S.settings, { name: 'Ayşe <b>', age: 34, gender: 'female' });
+  S.openSetting = 'profile';
+  add('settings-profile', views.renderSettings);
+  S.openSetting = null;
+  const tab = S.tab;
+  S.tab = 'today';
+  add('today-named', views.renderToday);
+  S.tab = tab;
+  Object.assign(S.settings, { name: '', age: 0, gender: '' });
   S.settings.provider = 'anthropic';
   S.settings.apiKey = 'k';
   add('settings-anthropic', views.renderSettings);

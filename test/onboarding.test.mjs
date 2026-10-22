@@ -1,7 +1,7 @@
 // First-run setup: validation, the settings it produces and the upgrade of old settings (js/onboarding.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newClientId, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
+import { newClientId, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
 import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
@@ -134,4 +134,16 @@ test('settingsFromOnboarding keeps the daily floor at or below the budget', () =
   assert.equal(settingsFromOnboarding({ ...base, kcalRest: 1800 }, '2026-01-01', 'c').kcalMinDay, 1500);
   const s = settingsFromOnboarding({ ...base, kcalRest: 1200 }, '2026-01-01', 'c');
   assert.equal(cleanSettings({ ...freshSettings(), ...s }).kcalMinDay, 1200);
+});
+
+test('validateProfile: the same checks as the setup, for Settings', () => {
+  const codes2 = (input) => validateProfile(input).errors.map((e) => `${e.field}:${e.code}`);
+  assert.deepEqual(validateProfile({ name: ' Ayşe\n', age: '34', gender: 'female' }), { ok: true, errors: [], value: { name: 'Ayşe', age: 34, gender: 'female' } });
+  assert.deepEqual(validateProfile({}).value, { name: '', age: 0, gender: '' });
+  assert.deepEqual(validateProfile(null).value, { name: '', age: 0, gender: '' });
+  assert.deepEqual(codes2({ name: 'x'.repeat(41) }), ['name:too_long']);
+  assert.deepEqual(codes2({ age: '17' }), ['age:range']);
+  assert.deepEqual(codes2({ age: 'abc' }), ['age:range']);
+  assert.deepEqual(codes2({ gender: 'x' }), ['gender:invalid']);
+  assert.deepEqual(codes2({ name: 'x'.repeat(41), age: '1', gender: 'x' }), ['name:too_long', 'age:range', 'gender:invalid']);
 });

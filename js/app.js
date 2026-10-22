@@ -13,8 +13,8 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId } from './onboarding.js';
-import { renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId } from './onboarding.js';
+import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -1977,6 +1977,14 @@ const ACT = {
     await saveSettings();
     render();
     toast(t('Goals saved'));
+  },
+  'save-profile': async () => {
+    const r = validateProfile({ name: $('#set-name').value, age: $('#set-age').value, gender: $('#set-gender').value });
+    if (!r.ok) return toast(onboardError(r.errors[0].field, r.errors[0].code));
+    S.settings = { ...S.settings, name: r.value.name, age: r.value.age, gender: r.value.gender };
+    await saveSettings();
+    render();
+    toast(t('Profile saved'));
   },
   'loc-toggle': async (el) => { S.settings.useLocation = el.checked; await saveSettings(); openSettings(); },
   'review-toggle': async (el) => { S.settings.autoReview = el.checked; await saveSettings(); },

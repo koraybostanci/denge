@@ -6,8 +6,9 @@ workout days, 135 g of protein, lunch at 12:00, two snacks, dinner at 18:00.
 - **Goals** (dates, weights, calories, protein) are changed in the app under Settings → Goals.
   Daily calories below the minimum (`KCAL_MIN_DAY`, 1,500 by default, set there as Minimum kcal) are refused, and a
   day under it does not count as on plan. The goals for
-  steps, water and fibre come from `DEFAULTS` in `js/plan.js` and apply only before the app is first
-  opened on a device.
+  steps, water and fibre come from `DEFAULTS` in `js/plan.js`. Calories, weights, dates and protein are
+  not preset: they are entered on the setup screen at first start, which also asks you to start with a blank
+  My plan ("Start blank") or with the Default plan ("Use the default plan").
 - **Meals** are changed in the app, on the Plan tab. The plan that comes with the app is called
   Default and is read-only. Tap a meal and then Edit meal, or + Add meal on a slot. The first save
   ("Save to My plan") creates My plan with that change and makes it the active plan; Cancel creates
@@ -32,7 +33,7 @@ workout days, 135 g of protein, lunch at 12:00, two snacks, dinner at 18:00.
   - `SLOTS`: the meals of the day and their times.
   - `FLEX`: one-tap weekly extras (a beer, a small dessert) that count against the weekly allowance.
   - `RULES`: the text shown on the Plan tab.
-  - `DEFAULTS`: goals used before anything is saved in Settings.
+  - `DEFAULTS`: the numbers the text in `RULES` is worked out from, and the steps, water and fibre goals. A new install does not start with them: its goals are entered at first start.
 
   The numbers in `RULES` come from `DEFAULTS` and `SMALL_TREAT_KCAL`, not from what you saved in
   Settings → Goals, so keep them in step. The meal slots are also named in `SLOT_NAME`,

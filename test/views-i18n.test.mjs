@@ -122,7 +122,7 @@ async function pseudoOn() {
 // What is allowed to stay as it is in the pseudo-locale, and why:
 const EXCEPT = {
   // Text the person typed, or the model wrote, in the fixtures (shown as written; user data is never translated)
-  data: ['Oats with yoghurt', 'Jumbo oats', 'Greek yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Language / Dil', PRESETS[0].model],
+  data: ['Oats with yoghurt', 'Jumbo oats', 'Greek yoghurt', 'Overnight oats', 'Chicken and rice', 'Pizza night', 'Salmon and salad', 'Weight', 'Is it fried?', 'Good day', 'Skyr was the best', 'Cut the sauce', 'Dinner out', 'Burger', 'Ordered a small one', 'Lunch menu', 'Fresh and light', 'Fish and salad', 'Almond milk', 'Magnesium', 'Vitamin D', 'Fits well', 'one plate', 'one', '8,200 steps', 'Home', 'home', 'Ayşe', 'Language / Dil', PRESETS[0].model],
   // Names from ai.js that are not marked with T() yet (the models and providers of the Settings sheet): brand names with a few English words
   models: [...Object.values(MODELS).map((m) => m.name), ...PRESETS.map((p) => p.name), ...Object.values(MODELS).map((m) => m.name.split(' (')[0]), ...PRESETS.map((p) => p.name.split(' (')[0])],
   // Words that are not English text: units, brand names, the two language names, and the host part of a placeholder
@@ -252,6 +252,28 @@ test('Settings: the language control is the first section', () => {
   const html = views.renderSettings();
   assert.equal(html.includes('data-act="lang"'), true);
   assert.ok(html.indexOf('data-sec="language"') > -1 && html.indexOf('data-sec="language"') < html.indexOf('data-sec="analysis"'));
+});
+
+test('Today: the greeting shows with a name (escaped) and not without', () => {
+  fixture();
+  assert.doesNotMatch(views.renderToday(), /Hello,/);
+  S.settings.name = 'Ayşe <b>';
+  const html = views.renderToday();
+  assert.match(html, /<p class="sub">Hello, Ayşe &lt;b&gt;<\/p>/);
+  assert.doesNotMatch(html, /Ayşe <b>/);
+  S.viewDay = day(-1);
+  assert.doesNotMatch(views.renderToday(), /Hello,/); // a past day has no greeting
+});
+
+test('Settings: the Profile section follows the language section and holds the three fields', () => {
+  fixture();
+  S.settings.name = 'Ayşe'; S.settings.age = 34; S.settings.gender = 'male';
+  const html = views.renderSettings();
+  assert.ok(html.indexOf('data-sec="language"') < html.indexOf('data-sec="profile"') && html.indexOf('data-sec="profile"') < html.indexOf('data-sec="analysis"'));
+  assert.match(html, /id="set-name"[^>]*value="Ayşe"/);
+  assert.match(html, /id="set-age"[^>]*value="34"/);
+  assert.match(html, /<option value="male" selected>Male<\/option>/);
+  assert.match(html, /data-act="save-profile"/);
 });
 
 test('Settings: the control is a labelled group of two buttons with the language names, the chosen one pressed', async () => {

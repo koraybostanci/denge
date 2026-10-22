@@ -523,7 +523,7 @@ export function renderToday() {
   <header class="top">
     <div>
       <h1>${isToday ? t('Today') : esc(dWeekday.format(parseDay(day)))}</h1>
-      <p class="sub">${isToday ? (day >= S.settings.startDate ? t('{date} · day {n}', { date: esc(dLong.format(parseDay(day))), n: diffDays(S.settings.startDate, day) + 1 }) : esc(dLong.format(parseDay(day)))) : `${esc(dShort.format(parseDay(day)))}. <button type="button" class="link link-inline" data-act="day-today">${t('Back to today')}</button>`}</p>
+      <p class="sub">${isToday ? (day >= S.settings.startDate ? t('{date} · day {n}', { date: esc(dLong.format(parseDay(day))), n: diffDays(S.settings.startDate, day) + 1 }) : esc(dLong.format(parseDay(day)))) : `${esc(dShort.format(parseDay(day)))}. <button type="button" class="link link-inline" data-act="day-today">${t('Back to today')}</button>`}</p>${isToday && S.settings.name ? `\n      <p class="sub">${t('Hello, {name}', { name: esc(S.settings.name) })}</p>` : ''}
     </div>
     <div class="top-actions">${avatarButton()}${settingsButton()}</div>
   </header>
@@ -1694,6 +1694,16 @@ export function renderSettings() {
     </div>
     <div class="actions"><button type="button" class="btn btn-primary" data-act="save-targets">${t('Save goals')}</button></div>`;
 
+  const genders = [['female', t('Female')], ['male', t('Male')], ['other', t('Other')], ['none', t('Prefer not to say')]]; // i18n-ok: stored values
+  const profile = `
+    <p class="note">${t('All optional. Your name stays on this device. Age and gender are sent only with the progress review, as context.')}</p>
+    <div class="field-grid">
+      <label for="set-name">${t('Name')}<input id="set-name" type="text" autocomplete="off" value="${esc(s.name || '')}"></label>
+      <label for="set-age">${t('Age')}<input id="set-age" type="text" inputmode="numeric" autocomplete="off" value="${s.age ? esc(s.age) : ''}"></label>
+      <label for="set-gender">${t('Gender')}<select id="set-gender"><option value=""${s.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${s.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+    </div>
+    <div class="actions"><button type="button" class="btn btn-primary" data-act="save-profile">${t('Save profile')}</button></div>`; // i18n-ok: markup
+
   const location = `
     <label class="check"><input type="checkbox" data-act="loc-toggle"${s.useLocation ? ' checked' : ''}> ${t('Use the photo’s location')}</label>
     <p class="note">${t('Location is read on the device and matched to your saved places here. The model only gets the word “Home”, “Office” or “out”; coordinates are never sent to the model (they are in your backup file). When you choose from the library, location only comes through if Location is switched on under Options in the picker.')}</p>
@@ -1776,10 +1786,12 @@ export function renderSettings() {
     <p class="note">${t('The change applies at once. Your entries are not changed.')}</p>`;
   const langSection = section('language', 'Language / Dil', lang === 'tr' ? 'Türkçe' : 'English', langBody) + '\n    '; // i18n-ok: the heading names both languages
 
+  const profileSection = section('profile', t('Profile'), s.name || t('None yet'), profile); // i18n-ok: the section id
   return `
   <header class="sheet-top"><h2 id="sheet-title">${t('Settings')}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
   <div class="settings">
-    ${langSection}${section('analysis', t('Photo and text analysis'), analysisStatus, analysis)}
+    ${langSection}${profileSection}
+    ${section('analysis', t('Photo and text analysis'), analysisStatus, analysis)}
     ${section('targets', t('Goals'), t('{start} kg to {end} kg by {date}', { start: n1(s.startKg), end: n1(s.targetKg), date: dShort.format(parseDay(s.targetDate)) }), targets)}
     ${section('backup', t('Backup and export'), backupStatus, backup)}
     ${section('location', t('Location'), s.useLocation ? (places.length ? t('On: {names}', { names: places.map((p) => p.name).join(', ') }) : t('On, no saved places')) : t('Off'), location)}
@@ -1802,7 +1814,7 @@ export const onboardFocusId = (errors) => {
   return first ? OB_ID[first] : '';
 };
 // The words for a failed check of validateOnboarding (js/onboarding.js), or the missing choice of plan, which the app adds
-function onboardError(field, code) {
+export function onboardError(field, code) {
   const n = (x) => fmtInt(x);
   if (code === 'required') return field === 'plan' ? t('Choose how to start') : field === 'targetDate' ? t('Pick a date') : t('Fill this in'); // i18n-ok: field names
   if (code === 'range') {
