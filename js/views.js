@@ -1460,7 +1460,7 @@ export function renderPlan() {
     ${group(t('The week’s extras'), list(RULES.weekly))}
     ${group(t('Off for the whole period'), list(RULES.off))}
     ${group(t('Training and movement'), list(RULES.training))}
-    ${group(t('Process'), list(processRules(kcalMinDay())))}
+    ${group(t('Process'), list(processRules(kcalMinDay(), S.settings.targetKg)))}
   </section>`;
 }
 

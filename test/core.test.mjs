@@ -315,6 +315,10 @@ test('fresh settings are those of a new install, as new objects each time', () =
   assert.equal(a.apiKey, '');
   assert.equal(a.hideStart, false);
   assert.deepEqual(a.places, []);
+  assert.deepEqual([a.name, a.age, a.gender, a.clientId, a.onboarded], ['', 0, '', '', false]);
+  assert.equal(a.startKg, DEFAULTS.startKg); // the defaults stay
+  a.name = 'x'; a.clientId = 'c'; a.onboarded = true;
+  assert.deepEqual([b.name, b.clientId, b.onboarded], ['', '', false]);
   a.places.push({ name: 'x' }); a.favorites.push({ id: 'f' }); a.usage.calls = 9;
   assert.deepEqual([b.places, b.favorites, b.usage.calls], [[], [], 0]); // nothing shared between resets
   const c = freshCheck();

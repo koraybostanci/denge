@@ -159,7 +159,8 @@ function cleanFavorite(f) {
 // Settings that travel with a backup: the targets, favourites, saved places and the plan's pictures.
 // What the app talks to (provider, address, model, keys) and its running totals stay as they are on this device,
 // so a backup can never point the stored key at another server.
-const RANGES = { startKg: [30, 300], targetKg: [30, 300], kcalRest: [500, 6000], kcalTrain: [500, 6000], kcalMinDay: [500, 6000], protein: [20, 400], proteinMin: [20, 400], fiber: [0, 200], steps: [0, 100000], water: [0, 10000] };
+export const GENDERS = ['female', 'male', 'other', 'none'];
+export const RANGES = { startKg: [30, 300], targetKg: [30, 300], kcalRest: [500, 6000], kcalTrain: [500, 6000], kcalMinDay: [500, 6000], protein: [20, 400], proteinMin: [20, 400], fiber: [0, 200], steps: [0, 100000], water: [0, 10000] };
 export function cleanSettings(s) {
   s = s && typeof s === 'object' ? s : {};
   const out = {};
@@ -167,6 +168,9 @@ export function cleanSettings(s) {
   for (const [k, [lo, hi]] of Object.entries(RANGES)) if (isNum(s[k]) && s[k] >= lo && s[k] <= hi) out[k] = s[k];
   if (out.kcalMinDay > out.kcalRest) delete out.kcalMinDay; // a minimum above the budget would leave no day on plan
   for (const k of ['useLocation', 'hideStart', 'autoReview']) if (typeof s[k] === 'boolean') out[k] = s[k];
+  if (typeof s.name === 'string') { const n = squeeze(s.name, 40); if (n) out.name = n; }
+  if (Number.isInteger(s.age) && s.age >= 18 && s.age <= 120) out.age = s.age;
+  if (GENDERS.includes(s.gender)) out.gender = s.gender;
   if (s.lang === 'en' || s.lang === 'tr') out.lang = s.lang;
   if (Array.isArray(s.places)) {
     out.places = s.places.filter((p) => p && typeof p.name === 'string' && isNum(p.lat) && isNum(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180)

@@ -188,6 +188,11 @@ test('a backup with or without badges can be restored (old backups have none)', 
 
 test('settings: the minimum kcal is kept when sane, and dropped when it is above the budget', () => {
   assert.equal(cleanSettings({ kcalRest: 1550, kcalMinDay: 1200 }).kcalMinDay, 1200);
+  assert.deepEqual(cleanSettings({ name: '  Ayşe\n ', age: 34, gender: 'female', clientId: 'c', onboarded: true }), { name: 'Ayşe', age: 34, gender: 'female' });
+  assert.deepEqual(cleanSettings({ name: 'x'.repeat(60), age: 17, gender: 'x' }), { name: 'x'.repeat(40) });
+  assert.deepEqual(cleanSettings({ name: '  ', age: '34', gender: 5 }), {});
+  assert.deepEqual(cleanSettings({ age: 34.5 }), {});
+  assert.deepEqual(cleanSettings({ age: 121 }), {});
   assert.equal('kcalMinDay' in cleanSettings({ kcalRest: 1550, kcalMinDay: 2000 }), false);
   assert.equal('kcalMinDay' in cleanSettings({ kcalMinDay: 10 }), false);
 });
