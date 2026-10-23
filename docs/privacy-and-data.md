@@ -26,8 +26,11 @@
 - The app creates an install id on first start, with the browser's random generator (Web Crypto), if it has one; with none, the install has no id. It stays on this device, is mirrored in the browser's local storage on this device, and is not in a backup file or the SQL export or sent in any request. A factory reset keeps it. It changes only when the browser clears this site's data (for example clearing website data in the browser settings) or when the app is installed on another device. There is no control in the app to change it.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
-- A photo taken to fill in a food's values is sent with no other data and is not stored. The
-  ingredients text the fill can read is stored with the product, as text.
+- A photo chosen to fill in a food's values is shrunk to 1280 px, held in memory only, and sent with
+  the name and no other data, and only when you tap "Fill in with AI". It is never stored. The fill
+  replaces the values it reads (Undo brings yours back), and its numbers are estimates. The
+  ingredients text the fill can read is stored with the product, as text. Products no longer take a
+  picture of their own; a picture stored before that is kept until you remove it.
 - The API key is stored on the device only, unencrypted like the rest of the app's data, and is
   never written to a backup file.
 - Photo location is off by default. When on, it is read on the device and matched to places you
