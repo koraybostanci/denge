@@ -25,15 +25,15 @@ function workoutNote(plan) {
 // prompt with no products stays byte-identical). The note is the person's text of this entry: foods they name are
 // always in the digest, whatever the caps.
 const SYSTEM = (note = '') => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
-Input: photo(s) and/or a short text in any language, plus local time and place.
+Input: photo(s) and/or a short text in any language, plus the person's local time and place. Weights are in grams (g), energy in kcal, water in litres.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
-For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
+For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks. Precedence for each amount: the person's note or correction first, then what is visible, and only where neither shows it the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal, and 4·p + 4·c + 9·f comes within about 15% of kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
 slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
-tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = sugary drinks, fried food, crisps, salted nuts, pastries (simit, börek, poğaça, croissant, pretzel), white bread or toast.
+tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = anything on the plan's off list: ${inEnglish(() => RULES.off.join(' '))}
 flags: add "alcohol" for any alcohol.
-conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
+conf: how sure you are of the kcal total, 0–1: 0.8–1 when every item is visible and its amount is clear, about 0.5 when amounts or hidden fats are guessed, 0.2 or less when the food itself is unclear or there is no photo. q: ask only when a factor you cannot see (cooking method, fat content, a count, hidden oil or sugar) could move kcal by more than 10%, in one short line, else "". Never ask about what the note already settles.
 Plan meals:
 ${planOut(S.plan)}${pantryDigest(note)}`;
 
@@ -686,6 +686,27 @@ export function cleanItems(items, caps) {
       }
       return item;
     });
+}
+
+// Consistency of a meal reply after cleanItems. The item list explains the total, so an entry's kcal is the sum of its items'
+// kcal whenever they carry any (app.js does that); this check never changes a number. Items are never rewritten here, so a
+// value the person corrected or a pantry product supplied stays as it is. What it can do is doubt: the confidence is capped
+// at 0.5 when the entry's 4·p + 4·c + 9·f misses its kcal by more than 15% (at least 25 kcal, so small portions are not
+// flagged for rounding), or when an item's macros miss its kcal the same way (an item is checked only when it has both c
+// and f). The entry's numbers are the stored ones, so a pantry product's exact values are used as they are saved. An
+// alcohol entry is not checked at all: its alcohol energy (7 kcal a gram) is not in the macro sum. Fibre is left out of the sum: whether
+// the label's carbohydrate includes it varies, and the tolerance covers that. A plan meal passes items null and keeps its
+// confidence as the model gave it: its numbers come from the plan, not from this reply's items.
+const near = (a, b, pct, floor) => Math.abs(a - b) <= Math.max(pct * Math.max(Math.abs(a), Math.abs(b)), floor);
+const atwater = (kcal, p, c, f) => near(kcal, 4 * p + 4 * c + 9 * f, 0.15, 25);
+export function reconcileConf(data, items) {
+  const conf = Math.max(0, Math.min(1, +data.conf || 0));
+  if (!items || (data.flags || []).includes('alcohol')) return conf;
+  const num = (v) => (v == null || v === '' || typeof v === 'object' ? NaN : +v);
+  const kcal = num(data.kcal), p = num(data.p), c = num(data.c), f = num(data.f);
+  const total = [kcal, p, c, f].every(Number.isFinite) && !atwater(kcal, p, c, f);
+  const item = items.some((i) => i.c !== undefined && i.f !== undefined && !atwater(i.kcal, i.p, i.c, i.f));
+  return total || item ? Math.min(conf, 0.5) : conf;
 }
 
 // The `pantry` ids of a reply's items, applied beside js/app.js's planId flow: an item whose optional pantry id

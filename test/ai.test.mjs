@@ -2,12 +2,12 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, pantryMatch, sanitizeOut, placeWord, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, reconcileConf, pantryMatch, sanitizeOut, placeWord, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
 import { reviewBrief } from '../js/briefs.js';
 import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
 import { S, today } from '../js/core.js';
-import { buildPlan, planDigest, planFoods } from '../js/plan.js';
+import { buildPlan, planDigest, planFoods, RULES } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
 
 const sonnet = { provider: 'anthropic', key: 'sk-ant-secretsecret', model: 'claude-sonnet-5-5' };
@@ -168,6 +168,43 @@ test('cleanItems: the item caps stay pinned to MACRO_CAPS, ITEM_MACRO_CAPS and P
   for (const k of ['c', 'f', 'fib']) assert.equal(ITEM_CAPS_ANALYSIS[k], ITEM_MACRO_CAPS[k], `ITEM_CAPS_ANALYSIS.${k} drifts from ITEM_MACRO_CAPS`);
   // the analysis handler keeps its tighter kcal/p caps inside the write range; c, f and fib are the same
   for (const k of ['g', 'kcal', 'p', 'c', 'f', 'fib']) assert.ok(ITEM_CAPS_ANALYSIS[k] <= ITEM_CAPS_WRITE[k], `ITEM_CAPS_ANALYSIS.${k} exceeds ITEM_CAPS_WRITE.${k}`);
+});
+
+test('reconcileConf: a reply that adds up keeps its confidence and is clamped as before', () => {
+  const items = cleanItems([{ n: 'Rice', g: 200, kcal: 260, p: 5, c: 57, f: 0.5 }, { n: 'Chicken', g: 150, kcal: 250, p: 45, c: 0, f: 5 }], ITEM_CAPS_ANALYSIS);
+  const good = { conf: 0.9, kcal: 510, p: 50, c: 57, f: 5.5 }; // items sum to 510; 4·50 + 4·57 + 9·5.5 = 477.5, within 15%
+  assert.equal(reconcileConf(good, items), 0.9);
+  assert.equal(reconcileConf({ ...good, conf: 1.7 }, items), 1);
+  assert.equal(reconcileConf({ ...good, conf: 'x' }, items), 0);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 500, p: 1 }, [cleanItems([{ n: 'x', g: 1, kcal: 500, p: 1 }], ITEM_CAPS_ANALYSIS)[0]]), 0.9); // no c or f: no macro check
+});
+
+test('reconcileConf: a total that differs from the sum of the items, or macros that miss kcal, cap the confidence at 0.5', () => {
+  const items = cleanItems([{ n: 'Rice', g: 200, kcal: 260, p: 5, c: 57, f: 0.5 }, { n: 'Chicken', g: 150, kcal: 250, p: 45, c: 0, f: 5 }], ITEM_CAPS_ANALYSIS);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 800, p: 50, c: 57, f: 5.5 }, items), 0.5); // 800 against 478 from the macros
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 510, p: 20, c: 20, f: 5 }, items), 0.5); // 205 from the macros against 510
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 510, p: 50, c: 57, f: 5.5, flags: ['alcohol'] }, items), 0.9); // an alcohol entry is not checked against the macros
+  const off = cleanItems([{ n: 'Egg', g: 50, kcal: 100, p: 0, c: 0, f: 0 }, { n: 'Cheese', g: 30, kcal: 100, p: 50, c: 0, f: 0 }], ITEM_CAPS_ANALYSIS);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 200, p: 50, c: 0, f: 0 }, off), 0.5); // each item's macros are checked, not only the entry's
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 5, p: 0, c: 1, f: 0 }, cleanItems([{ n: 'Tea', g: 0, kcal: 5, p: 0, c: 1, f: 0 }], ITEM_CAPS_ANALYSIS)), 0.9); // 25 kcal floor for small portions
+});
+
+test('reconcileConf: a plan meal keeps its confidence, the items of a plan are not checked', () => {
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 9999, p: 1, c: 1, f: 1 }, null), 0.9);
+});
+
+test('the analysis prompt: one precedence order, a defined confidence and question trigger, metric units, and the off tier from the plan', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  const sys = calls[0].body.system;
+  assert.match(sys, /Precedence for each amount: the person's note or correction first, then what is visible, and only where neither shows it the larger plausible portion\./);
+  assert.doesNotMatch(sys, /when unsure pick the larger plausible portion/);
+  assert.match(sys, /conf: how sure you are of the kcal total, 0–1: 0\.8–1/);
+  assert.match(sys, /q: ask only when a factor you cannot see/);
+  assert.match(sys, /the person's local time/);
+  assert.match(sys, /Weights are in grams \(g\)/);
+  for (const line of RULES.off) assert.ok(sys.includes(line), `off list line missing: ${line}`);
+  assert.doesNotMatch(sys, /sugary drinks, fried food/); // the tier is no longer a hardcoded second list
 });
 
 test('a review whose list is a plain string is accepted', async () => {
@@ -697,4 +734,9 @@ test('sanitizeOut redacts Turkish-letter e-mails and domains whole, not from the
   assert.equal(sanitizeOut('Ahmet Çelik, çağla@hotmail.com'), 'Ahmet Çelik, [redacted]');
   assert.equal(sanitizeOut('ad@şirket.com.tr'), '[redacted]');
   assert.equal(sanitizeOut('Şirket.com sipariş'), '[redacted] sipariş');
+});
+
+test('app.js wires the confidence check to the saved numbers, the items of a meal and its alcohol flag', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /conf: reconcileConf\(\{ conf: data\.conf, kcal: e\.kcal, p: e\.p, c: e\.c, f: e\.f, flags: data\.flags \}, e\.planId \? null : e\.items\)/);
 });
