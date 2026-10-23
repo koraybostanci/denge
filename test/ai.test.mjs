@@ -2,10 +2,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, pantryMatch, sanitizeOut, placeWord, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { reviewBrief } from '../js/briefs.js';
 import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
-import { S } from '../js/core.js';
+import { S, today } from '../js/core.js';
 import { buildPlan, planDigest, planFoods } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
 
@@ -628,4 +629,72 @@ test('app.js wires the flow: the match beside planId, one lastUsed write, the ch
   assert.match(src, /lastUsed: now/); // the foods actually applied, one setFoods per analysis
   assert.match(src, /brief: checkBrief\(note\), note/);
   assert.match(src, /if \(data\.ing\) d\.ing = data\.ing;/); // the pantry editor's field filled from the reply
+});
+
+test('sanitizeOut redacts e-mails, links, phone numbers and street addresses, and leaves food text alone', () => {
+  assert.equal(sanitizeOut('mail me at a.b@example.com now'), 'mail me at [redacted] now');
+  assert.equal(sanitizeOut('see https://x.test/a?b=1 or www.shop.test'), 'see [redacted] or [redacted]');
+  assert.equal(sanitizeOut('call +90 532 123 45 67 later'), 'call [redacted] later');
+  assert.equal(sanitizeOut('phone 02125551234'), 'phone [redacted]');
+  assert.equal(sanitizeOut("Mum's flat, 12 Elm Street"), "Mum's flat, [redacted]");
+  assert.equal(sanitizeOut('Bağdat Caddesi 45 sk'), 'Bağdat Caddesi [redacted]');
+  for (const food of ['200 g rice, 2 eggs', '2 x 150 g chicken', 'Bread 7-11 cut', '1.5 l water', '3 eggs and 2 slices of toast', '1200 kcal dinner', '10 - 20 - 30 g nuts']) {
+    assert.equal(sanitizeOut(food), food, food);
+  }
+  assert.equal(sanitizeOut('  two\n\nlines\t here '), 'two lines here'); // squeezed like the other pantry text
+  assert.equal(sanitizeOut(undefined), '');
+});
+
+test('sanitizeOut is idempotent', () => {
+  const once = sanitizeOut('Mum\'s flat, 12 Elm Street, a.b@c.io, +90 532 123 45 67, https://x.test');
+  assert.equal(sanitizeOut(once), once);
+});
+
+test('a saved place is named only by Home, Office or out; any other name becomes a generic label', () => {
+  assert.equal(placeWord('out'), 'out');
+  assert.equal(placeWord('Home'), 'home');
+  assert.equal(placeWord('office'), 'office');
+  assert.equal(placeWord("Mum's flat, 12 Elm Street"), 'a saved place');
+});
+
+test('a place name never reaches the analysis request body', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await analyze({ cfg: sonnet, when: new Date(), text: 'lentil soup', place: "Mum's flat, 12 Elm Street", blobs: [] });
+  const body = JSON.stringify(calls[0].body);
+  assert.ok(!body.includes('Elm'), 'street kept out of the body');
+  assert.ok(!body.includes("Mum's flat"), 'place name kept out of the body');
+  assert.ok(body.includes('place: a saved place'));
+});
+
+test('a place name and a note with contact details never reach the review request body', async () => {
+  const saved = S.entries;
+  const savedSettings = { ...S.settings }, savedPlan = S.plan;
+  const day = today();
+  S.plan = buildPlan(seedPlan);
+  Object.assign(S.settings, { startDate: day, startKg: 86.4, targetDate: day, targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 });
+  S.entries = [{ id: 'e1', day, ts: Date.now(), kind: 'meal', status: 'ok', slot: 'lunch', title: 'Soup at 12 Elm Street, a.b@c.io', tier: 'plan', flags: [], mult: 1,
+    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], place: "Mum's flat, 12 Elm Street", photoIds: [], planId: '' }];
+  try {
+    const brief = reviewBrief(day);
+    assert.ok(!brief.includes('Elm') && !brief.includes('a.b@c.io') && !brief.includes("Mum's flat"), brief);
+    assert.ok(brief.includes('200 g'), 'food quantities survive');
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ head: 'h', good: [], cut: [], next: 'n' }))));
+    await review({ cfg: sonnet, brief });
+    assert.ok(!JSON.stringify(calls[0].body).includes('Elm'));
+  } finally { S.entries = saved; Object.assign(S.settings, savedSettings); S.plan = savedPlan; }
+});
+
+test('a typed food name with contact details is redacted before it reaches the food-values request', async () => {
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'Skyr', kcal: 60, p: 10, c: 4, f: 0, fib: 0 }))));
+  await foodValues({ cfg: sonnet, name: 'Skyr from a.b@c.io, +90 532 123 45 67', blobs: [] });
+  const body = JSON.stringify(calls[0].body);
+  assert.ok(!body.includes('a.b@c.io') && !body.includes('532 123'), body);
+  assert.ok(body.includes('Food: Skyr from [redacted], [redacted]'));
+});
+
+test('sanitizeOut redacts Turkish-letter e-mails and domains whole, not from the first ASCII letter', () => {
+  assert.equal(sanitizeOut('ayşe.yılmaz@gmail.com'), '[redacted]');
+  assert.equal(sanitizeOut('Ahmet Çelik, çağla@hotmail.com'), 'Ahmet Çelik, [redacted]');
+  assert.equal(sanitizeOut('ad@şirket.com.tr'), '[redacted]');
+  assert.equal(sanitizeOut('Şirket.com sipariş'), '[redacted] sipariş');
 });

@@ -1,6 +1,7 @@
 // What the model reads: the day, the coach note and the check, in plain English lines. Text only, a few hundred tokens each.
 // Always English, whatever the interface language is (inEnglish), and no DOM, so the tests build them too.
 import { inEnglish } from './i18n.js';
+import { sanitizeOut, placeWord } from './ai.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
 import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';
@@ -26,9 +27,9 @@ function reviewBriefText(day) {
     const x = eff(e);
     const m = e.mult || 1;
     const kind = e.planId ? 'plan meal' : e.tier === 'off' ? 'off plan' : e.tier === 'flex' ? 'weekly flex' : 'fits the plan';
-    const items = e.planId ? '' : (e.items || []).slice(0, 6).map((i) => `${i.n}${i.g ? ` ${r(i.g * m)} g` : ''} ${r((i.kcal || 0) * m)} kcal`).join('; ');
-    lines.push(`- ${hhmm(e.ts)} ${(SLOT_NAME[e.slot] || '').toLowerCase()}: ${e.title}, ${r(x.kcal)} kcal, ${r(x.p)} g protein, ${kind}`
-      + `${(e.flags || []).includes('alcohol') ? ', alcohol' : ''}${e.place ? `, ${e.place === 'out' ? 'eaten out' : `at ${e.place}`}` : ''}${items ? ` [${items}]` : ''}`);
+    const items = e.planId ? '' : (e.items || []).slice(0, 6).map((i) => `${sanitizeOut(i.n)}${i.g ? ` ${r(i.g * m)} g` : ''} ${r((i.kcal || 0) * m)} kcal`).join('; ');
+    lines.push(`- ${hhmm(e.ts)} ${(SLOT_NAME[e.slot] || '').toLowerCase()}: ${sanitizeOut(e.title)}, ${r(x.kcal)} kcal, ${r(x.p)} g protein, ${kind}`
+      + `${(e.flags || []).includes('alcohol') ? ', alcohol' : ''}${e.place ? `, ${e.place === 'out' ? 'eaten out' : `at ${placeWord(e.place)}`}` : ''}${items ? ` [${items}]` : ''}`);
   }
   const open = openSlots(day).map((x) => x.name.toLowerCase());
   if (open.length) lines.push(`${v.live ? 'Not eaten yet' : 'Nothing logged for'}: ${open.join(', ')}.`);
@@ -87,7 +88,7 @@ function checkBriefText(note) {
     goal += ` 7-day average ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
   }
   lines.push(goal);
-  lines.push(note ? `Note from the person: ${note}` : 'No note from the person.');
+  lines.push(note ? `Note from the person: ${sanitizeOut(note)}` : 'No note from the person.');
   return lines.join('\n');
 }
 

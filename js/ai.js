@@ -35,7 +35,7 @@ tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a smal
 flags: add "alcohol" for any alcohol.
 conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
 Plan meals:
-${planDigest(S.plan)}${pantryDigest(note)}`;
+${planOut(S.plan)}${pantryDigest(note)}`;
 
 // The prompts are English and built at each request from the active plan, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
@@ -49,6 +49,23 @@ export const langLine = (kind = 'text') => (getUiLang() === 'tr' ? TURKISH[kind]
 // Text that came from outside (the pantry's records, a model reply): the squeeze of cleanFood in js/backup.js and
 // cleanIng in js/app.js, mirrored here — one plain line, no control characters, so no text can forge a line's shape
 const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
+
+// Free text the person wrote (a note, a title, a food or ingredient name) leaves the device only after this: an e-mail, a link, a phone number
+// or a street address is redacted, so contact details and saved places never reach the model. Conservative on purpose: a food quantity such as
+// "200 g rice" or "2 x 150 g" matches none of them, and the output has no digits or separators left for a second pass to match (idempotent).
+const REDACTED = '[redacted]';
+const REDACT = [
+  [/[\p{L}\p{N}_.+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu, REDACTED],
+  [/\b(?:https?:\/\/|www\.)\S+/gi, REDACTED],
+  [/(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+\.(?:com|net|org|io|tr|uk|co)(?![\p{L}\p{N}])\/?\S*/giu, REDACTED],
+  [/\b\d{1,5}\s+(?:[\p{L}'.]+\s+){0,2}(?:street|st|avenue|ave|road|rd|lane|drive|dr|boulevard|blvd|cd|cad|caddesi|sk|sok|sokak|mah|mahallesi)\b\.?/giu, REDACTED],
+  [/\+?\d[\d\s().-]*\d/g, (m) => (m.replace(/\D/g, '').length >= 7 ? REDACTED : m)], // 7 or more digits: a phone number
+];
+export const sanitizeOut = (v) => REDACT.reduce((s, [re, rep]) => s.replace(re, rep), sq(v));
+// A saved place is named by the person: only the two words the app suggests (Home, Office) and "out" go to the model as they are
+export const placeWord = (p) => (p === 'out' ? 'out' : /^(home|office)$/i.test(sq(p)) ? sq(p).toLowerCase() : 'a saved place');
+// The plan digest, line by line through sanitizeOut (the digest keeps its line breaks)
+const planOut = (plan) => planDigest(plan).split('\n').map(sanitizeOut).join('\n');
 
 // ——— The pantry digest, in the analysis and check SYSTEM texts ———
 // One line per stored food (S.foods, values per 100 g), the person's usual products, so the estimate leans on
@@ -67,8 +84,8 @@ const PANTRY_ING = 60; // the ingredients snippet of a check line, at most
 const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
 // One line: `id: name, X kcal Xp Xc Xf Xfib per 100 g`; the check adds `; ingredients: …` (snippet only)
 const foodLine = (f, ing) => {
-  const base = `${f.id}: ${sq(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
-  return ing && f.ing ? `${base}; ingredients: ${sq(f.ing).slice(0, PANTRY_ING)}` : base;
+  const base = `${f.id}: ${sanitizeOut(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
+  return ing && f.ing ? `${base}; ingredients: ${sanitizeOut(f.ing).slice(0, PANTRY_ING)}` : base;
 };
 // The digest text, or '' when the pantry is empty (the prompts then stay exactly as they ever were)
 function pantryDigest(note = '', ingredients = false) {
@@ -335,9 +352,9 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
  * @returns {Promise<{data:object, usage:{in:number,out:number}, model:string}>}
  */
 export async function analyze(o) {
-  const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
-  if (o.text) lines.push(`Note: ${o.text}`);
-  if (o.hint) lines.push(o.hint);
+  const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${placeWord(o.place)}` : '')];
+  if (o.text) lines.push(`Note: ${sanitizeOut(o.text)}`);
+  if (o.hint) lines.push(sanitizeOut(o.hint));
   const req = { system: SYSTEM(o.text) + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
@@ -383,7 +400,7 @@ cut: up to 2 things that cost the most and what would have reduced them, with th
 next: one concrete thing to do tomorrow; for a day still in progress, for the rest of today.
 Every string at most 22 words.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}`);
 const REVIEW_SHAPE = '\nReturn exactly one JSON object with these keys: {"head":"","good":[""],"cut":[""],"next":""}';
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -437,7 +454,7 @@ change: up to 2 small changes that would help most. Empty if none are needed.
 adjust: "" unless a plan-level change (a different budget or rate) may be worth considering, then ONE sentence. You may agree with the adjustment the app shows, but never change or re-derive its numbers.
 Every string at most 30 words.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}`);
 const PROGRESS_SHAPE = '\nReturn exactly one JSON object with these keys: {"rating":"great|on-track|a-bit-behind|stuck|too-early","head":"","good":[""],"change":[""],"adjust":""}';
 const PROGRESS_SCHEMA = {
   type: 'object',
@@ -489,7 +506,7 @@ Off plan: ${RULES.off.join(' ')}
 note: two or three short sentences, at most 45 words in all. Say how the day is going so far, then what is left of the budget and which macros (protein first, then fibre) are still worth adding, with a concrete food or meal from the plan for the rest of the day. Warm and encouraging, never scolding; if the day is already above budget, be kind and say what to do next without skipping meals.
 The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}`);
 const COACH_SHAPE = '\nReturn exactly one JSON object with this key: {"note":""}';
 const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string' } } };
 
@@ -509,9 +526,9 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 // ——— Check before ordering or buying: photos of a menu, a dish or a product, judged against the plan ———
 // The prompts are always English, whatever the interface language is
 const CHECK_SYSTEM = (note = '') => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
-The plan is built from: ${planFoods(S.plan)}.
+The plan is built from: ${sanitizeOut(planFoods(S.plan))}.
 Plan meals:
-${planDigest(S.plan)}
+${planOut(S.plan)}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 kind: "menu", "product" (one or several packaged products), "dish" (prepared food in front of them), or "none" when there is nothing to judge or the text is too small or blurred to read.
@@ -607,7 +624,7 @@ const FOOD_SCHEMA = {
  * @returns {Promise<{data:{name:string,kcal:number,p:number,c:number,f:number,fib:number}, usage:{in:number,out:number}, model:string}>}
  */
 export async function foodValues(o) {
-  const name = clean(o.name, 60);
+  const name = clean(sanitizeOut(o.name), 60);
   const req = { system: FOOD_SYSTEM(), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   return { ...r, data: cleanFoodValues(r.data) };
