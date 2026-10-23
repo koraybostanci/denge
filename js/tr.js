@@ -981,6 +981,7 @@ export default {
   'Factory reset done': 'Fabrika ayarlarına dönüldü',
   'This backup has no goals. Enter yours to finish setting up.': 'Bu yedekte hedef yok. Kurulumu bitirmek için kendi hedeflerini gir.',
   'Could not save: {reason}': 'Kaydedilemedi: {reason}',
+  'Could not save: {reason}. The setup may still count as finished; reload and check.': 'Kaydedilemedi: {reason}. Kurulum yine de tamamlanmış sayılabilir; sayfayı yenileyip kontrol et.',
   'storage error': 'depolama hatası',
   'Enter a value between 50 and 160 kg. Example: 85.4': 'Kilonu 50 ile 160 kg arasında gir. Örnek: 85,4',
   'Enter the step count in digits. Example: 8200': 'Adım sayısını rakamla gir. Örnek: 8200',

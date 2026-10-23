@@ -13,7 +13,7 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, currentWeight, latestWeight, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { bootDecision } from './boot.js';
+import { bootDecision, commitSetup, newSetupJournal, setupHadPlans } from './boot.js';
 import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
@@ -189,8 +189,9 @@ async function removeEntry(id, silent) {
   if (!silent) toast(t('Entry deleted'));
 }
 
-async function noteEntry(kind, titled, extra, day = today()) {
+async function noteEntry(kind, titled, extra, day = today(), onId) {
   const e = { id: db.uid(), ts: Date.now(), day, createdAt: Date.now(), kind, status: 'ok', src: 'text', ...titled, photoIds: [], timeSrc: 'now', ...extra };
+  if (onId) onId(e.id); // the caller knows the id before the write is awaited
   await saveEntry(e);
   return e;
 }
@@ -976,6 +977,7 @@ async function importBackup(file) {
     if (Array.isArray(data.plans) || (data.plans && typeof data.plans === 'object' && Array.isArray(data.plans.list))) { // anything else (null, a string, an object with no list) is a missing key
       const plans = cleanPlans(data.plans, data.settings && data.settings.activePlan);
       await writePlans(plans.list, plans.active);
+      if (!S.settings.onboarded) { S.settings.setupRestorePlans = true; await saveSettings(); } // setup may still show: a finish keeps these plans (load clears the marker when it does not)
     }
     // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
     await setPlanPhotos(pictures);
@@ -999,12 +1001,14 @@ async function importBackup(file) {
   } catch (err) {
     toast(t('The backup could not be restored completely'));
     await load();
+    if (S.onboard) delete S.onboard.journal; // a run begun before the restore is stale
     return render();
   }
   S.profileDraft = null; // a stale draft never overrides the restored profile
   dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
   dropPantry(); // and so does a pantry editor: the restored list is what stands
   await load();
+  if (S.onboard) delete S.onboard.journal; // a setup run begun before the restore is stale
   badgesMode = 'restore';
   restoredFrom = gotBefore;
   checkBadges(); // silently: the restored log may earn more than the backup recorded
@@ -1576,44 +1580,35 @@ const ACT = {
     el = $('[data-act="onboard-finish"]') || el; // the form was drawn again: the button is new and takes the focus back
     el.disabled = true;
     el.focus({ preventScroll: true });
-    const before = { settings: S.settings, hadDay: !!S.days[day] };
-    const entriesBefore = S.entries.length;
-    let wrotePlans = false;
+    let failed = null;
     try {
-      const hadPlans = (await db.kvGet('plans', null)) !== null; // restored plans stay as they are
-      // The settings first (they end the setup and hold the real goals), then the plan, the first weigh-in last
-      S.settings = { ...S.settings, ...settingsFromOnboarding(res.value, day, S.settings.clientId || mirroredClientId() || newClientId()) };
-      await saveSettings();
-      if (!hadPlans) {
-        wrotePlans = true;
-        if (d.plan === 'blank') { const mine = blankPlan(db.uid()); await writePlans([mine], mine.id); } else await writePlans([], 'default');
-      }
-      const kg = res.value.weight;
-      await saveDay(day, { kg });
-      await noteEntry('weight', titleFor('weight', { kg }), { kg }, day);
+      if (!d.journal) d.journal = newSetupJournal({ hadPlans: setupHadPlans((await db.kvGet('plans', null)) !== null, S.settings), hadDay: !!S.days[day] }); // the first attempt only; a retry never re-reads the plans
+      const dayBefore = S.days[day];
+      const store = {
+        writeSettings: async (s) => { S.settings = s; await saveSettings(); },
+        writePlans: ({ list, active }) => writePlans(list, active),
+        deletePlans: () => db.del('kv', 'plans'),
+        writeDay: (dy, kg) => saveDay(dy, { kg }),
+        deleteDay: async (dy) => { if (!dayBefore) delete S.days[dy]; S.rev++; await db.del('days', dy); },
+        addWeightEntry: (dy, kg, onId) => noteEntry('weight', titleFor('weight', { kg }), { kg }, dy, onId),
+        deleteEntry: async (id) => { const i = S.entries.findIndex((x) => x.id === id); if (i >= 0) S.entries.splice(i, 1); S.rev++; await db.del('entries', id); },
+        uid: () => db.uid(),
+      };
+      const res2 = await commitSetup({ store, journal: d.journal, value: res.value, today: day, clientId: S.settings.clientId || mirroredClientId() || newClientId(), settings: S.settings, plan: d.plan });
+      if (!res2.ok) failed = res2;
     } catch (err) {
-      S.settings = { ...before.settings, onboarded: false };
-      if (S.onboard) S.onboard.saving = false;
-      if (!before.hadDay) delete S.days[day];
-      const written = S.entries.slice(entriesBefore).map((e) => e.id);
-      S.entries.length = entriesBefore;
-      S.rev++;
-      // Each cleanup stands alone (entries, the plans record, the day); the settings go last, so a failure there skips nothing else
-      for (const id of written) { try { await db.del('entries', id); } catch { /* best effort */ } }
-      if (wrotePlans) { try { await db.del('kv', 'plans'); } catch { /* best effort */ } }
-      if (!before.hadDay) { try { await db.del('days', day); } catch { /* best effort */ } }
-      try { await saveSettings(); } catch { /* the form stays and can be sent again */ }
-      if (wrotePlans) seedInMemory();
-      toast(t('Could not save: {reason}', { reason: (err && err.message) || t('storage error') }));
+      failed = { error: err, wrotePlans: false, rollbackFailed: false }; // the journal could not even be started
+    }
+    onboarding = false;
+    if (S.onboard) S.onboard.saving = false;
+    if (failed) {
+      if (failed.wrotePlans) seedInMemory(); // writePlans already set S.plans/S.plan, whether or not the record could be removed
+      const reason = (failed.error && failed.error.message) || t('storage error');
+      toast(failed.rollbackFailed ? t('Could not save: {reason}. The setup may still count as finished; reload and check.', { reason }) : t('Could not save: {reason}', { reason }));
       render();
       const again = $('[data-act="onboard-finish"]');
-      if (again) again.focus({ preventScroll: true });
+      if (again) { again.disabled = false; again.focus({ preventScroll: true }); }
       return;
-    } finally {
-      onboarding = false;
-      if (S.onboard) S.onboard.saving = false;
-      const btn = $('[data-act="onboard-finish"]'); // the form was drawn again: the old button is gone
-      if (btn) btn.disabled = false;
     }
     S.onboard = null;
     S.tab = 'today';
