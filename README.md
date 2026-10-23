@@ -13,7 +13,8 @@ No backend, no account. Your data stays on your device.
 <br clear="left">
 
 <p>
-  <img src="docs/today.png" width="240" alt="Today: the day's calorie budget, protein, and the week">
+  <img src="docs/setup.png" width="240" alt="Setup: name, goal weights, goal date, calories and protein, and a choice of plan">
+  <img src="docs/today.png" width="240" alt="Today: a greeting by name, the day's calorie budget, protein, and the week">
   <img src="docs/log.png" width="240" alt="Log: meals with a review of each day">
   <img src="docs/progress.png" width="240" alt="Progress: the beam, streaks and the weight chart">
   <img src="docs/badges.png" width="240" alt="Badges: earned badges in bronze, silver and gold, and the ones still locked">
@@ -55,4 +56,5 @@ Built for and used on an iPhone. Other modern mobile browsers should work.
 - One user, one device. No sync; to move devices, restore a backup.
 - Browsers can evict web data when storage runs low. Back up regularly.
 - Photo estimates are rough. Correct the portion when it is off.
+- Weight loss only: the goal weight must be below your current weight at setup (below the start weight in Settings). Maintenance and gain goals are not supported.
 - A tracking tool, not medical or dietary advice. The example plan was written for one person.

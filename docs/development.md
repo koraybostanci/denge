@@ -18,8 +18,9 @@ node --test
 ```
 
 They cover the calculations (`js/core.js`), the checks on backup files (`js/backup.js`), the model
-layer against a mocked `fetch` (`js/ai.js`) and the SQL export, which is loaded into Node's built-in
-SQLite and queried as in the section above. The IndexedDB code is not covered. The screens are
+layer against a mocked `fetch` (`js/ai.js`) the SQL export, which is loaded into Node's built-in
+SQLite and queried as in the section above, and the first-run setup and boot decision (`js/onboarding.js`,
+`js/boot.js`). The IndexedDB code is covered only by the browser smoke test below. The screens are
 rendered in Node from a fixed state (`test/screens.mjs`) for the English snapshot
 (`test/fixtures/en-snapshot.json`, regenerate it with `UPDATE_SNAPSHOT=1 node --test` after an
 intended English change) and for the language checks.
@@ -38,6 +39,11 @@ It prints `ok N checks` and exits 0, or names the failing step and exits 1. With
 prints `SKIP: no Chromium found` and exits 0. It lives under `tools/`, so `node --test` does not run
 it. It uses a throw-away profile (removed on exit), switches the service worker off and uses the
 real `js/db.js`. The browser helpers are in `tools/browser-lib.mjs`.
+
+`node tools/screenshots.mjs` regenerates the images in `docs/` (`setup.png`, `today.png`, `log.png`,
+`progress.png`, `badges.png`) the same way, from the fixed state of `test/screens.mjs` with the clock
+and time zone pinned (14 October 2026, UTC), so rerun it after a change to those screens and commit
+the new images.
 
 It covers: the setup screen's validation and focus; focus on the status line while saving; finishing
 setup with Default; an install from before setup existed being upgraded; the warning with Retry when
@@ -103,6 +109,7 @@ version is shown under Settings → "Version and updates".
 - `js/views.js`: the screens
 - `js/plan.js`: slots, goals, rules, and `buildPlan`, which works out a plan's meals from its food table
 - `js/default-plan.js`: the shipped plan (food table and meal templates); only `js/app.js` imports it, everything else reads `S.plan`
+- `js/boot.js`: the boot decision and the setup commit (what a start does with the stored settings and plans, and what finishing setup writes). No DOM and no storage; `js/app.js` runs it
 - `js/onboarding.js`: first-run setup: the checks on what the setup form collects (`validateOnboarding`, a `{ field, code }` per failure, with no text for people), the settings a finished setup writes, the empty plan and the test for whether a start needs setup. No DOM and no storage; `js/app.js` runs the flow and `renderOnboarding` in `js/views.js` draws it
 - `js/ai.js`: model calls (Claude and OpenAI-compatible), prompt and output schema
 - `js/badges.js`: the badge catalog and which badges the log has earned (no DOM, no storage). A weigh-in that is more than a kilo a day away from the last sane one (the first: from the start weight, with 3 kg of slack; never more than 15 kg) counts as a typo and moves no badge. `app.js` stores the result in kv `badges` (`{v:1, got, seen, told, av, base}`: `seen` is the highest step looked at per badge, which drives the New dot; `told` is set once the history on the device has been taken in, with its one "from your history" line; both are optional, so older records stay valid). The unlock toast comes after the first evaluation that follows a change (a save, or the clock or tab changing); the first evaluation after loading, a restore and the first run with a log are quiet. The "from your history" line is dropped if the person leaves Progress, or closes the app, without opening it (`told` is already set). Every write to the record goes through one queue (`serial()`), each from the latest `S.badges`. The screens measure badges through `badgeContext()` in `views.js`, cached on `S.rev`, which every save path moves. `av` is `{stage, face, acc}`, part ids from `PARTS` (`unlocked(part, got)` gates each against what is earned; stage 1, the plain face and no accessory are free). `wornAv` is what is shown (header and picker): an unearned or unknown part is its slot's default, and `cleanBadges` applies the same rule on load and restore. The header avatar button opens the picker sheet (`renderAvatarSheet`); a choice goes through `wear()` and the same badge queue, rolled back if the write fails. `avatarSvg` in `js/badge-art.js` draws the pickle from the `--pickle*` tokens.
@@ -116,6 +123,7 @@ version is shown under Settings → "Version and updates".
 - `js/tr.js`: the Turkish text, keyed by the English; `js/parse-tr.js`: the Turkish words the typed-entry parser accepts
 - `js/briefs.js`: what is sent to the model, always in English
 - `js/standalone.js`: the install screen shown in a browser tab (its two languages are inline)
+- `tools/`: dependency-free Chromium helpers: `browser-lib.mjs`, `browser-smoke.mjs` (the smoke test) and `screenshots.mjs` (the images in `docs/`). Not under `test/`, so `node --test` skips them
 - `test/`: `node --test` tests (`badges`, `badge-art`, `unlock` and `avatar` cover the badge system; `plans` covers stored plans, the meal editor and the food form); `extract.mjs` finds the strings, `screens.mjs` renders the screens
 - `sw.js`: offline cache and updates
 - `icons/`: `icon.svg` is the source; the PNG files are rendered from it for the Home Screen and
