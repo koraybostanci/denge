@@ -740,3 +740,120 @@ test('app.js wires the confidence check to the saved numbers, the items of a mea
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(src, /conf: reconcileConf\(\{ conf: data\.conf, kcal: e\.kcal, p: e\.p, c: e\.c, f: e\.f, flags: data\.flags \}, e\.planId \? null : e\.items\)/);
 });
+
+// ——— The person's own history in the prompts: favourites and corrected meals, the pantry by name, a stored product of the same name ———
+const HABITS = 'The meals the person corrected lately and their favourites';
+const STOCK = "The person's usual products, with values per 100 g:";
+const favOf = (id, name, kcal) => ({ id, name, slot: 'any', kcal, p: 1, c: 1, f: 1, fib: 0, tier: 'plan', flags: [], items: [] });
+const correctedOf = (id, title, ts, items, kcal, extra = { edited: true }) => ({ id, day: today(), ts, kind: 'meal', status: 'ok', slot: 'lunch', title, tier: 'plan', flags: [], mult: 1, kcal, p: 1, c: 1, f: 1, fib: 0, conf: 1, q: '', items, place: '', photoIds: [], planId: '', ...extra });
+const withHistory = async (favorites, entries, run) => {
+  const saved = { favorites: S.settings.favorites, entries: S.entries };
+  try {
+    S.settings.favorites = favorites;
+    S.entries = entries;
+    return await run();
+  } finally { S.settings.favorites = saved.favorites; S.entries = saved.entries; }
+};
+
+test('the analysis history: corrected meals newest first, then favourites, as name and kcal; no ids, a name once, unedited entries left out', async () => {
+  await withHistory([favOf('fav-SECRET', 'Ayran', 120), favOf('f9', 'ayran', 130)], [
+    correctedOf('c1', 'Lentil soup', 1000, [{ n: 'lentils', g: 200, kcal: 300 }, { n: 'bread', g: 60, kcal: 150 }], 450),
+    correctedOf('c2', 'Yogurt bowl', 2000, [{ n: 'yogurt', g: 170, kcal: 100 }], 100),
+    correctedOf('c3', 'Lentil soup', 500, [], 300), // the same name, older: listed once
+    correctedOf('c4', 'Plain toast', 3000, [], 90, { edited: false, conf: 1 }), // not a correction, though the model was sure of it
+  ], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[0].body.system;
+    const lines = sys.slice(sys.indexOf(HABITS)).split('\n');
+    assert.deepEqual(lines.slice(2), [
+      'Corrected: Yogurt bowl, 100 kcal',
+      'Corrected: Lentil soup, 450 kcal',
+      'Favourite: Ayran, 120 kcal',
+    ]);
+    const body = JSON.stringify(calls[0].body);
+    assert.ok(!body.includes('fav-SECRET') && !body.includes('"c1"') && !body.includes('Plain toast'));
+  });
+});
+
+test('the analysis history: at most 8 lines and 600 characters, whole lines only', async () => {
+  const favs = Array.from({ length: 12 }, (_, i) => favOf(`x${i}`, `Food ${i}`, 100 + i));
+  await withHistory(favs, [], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[0].body.system;
+    assert.equal(sys.slice(sys.indexOf(HABITS)).split('\n').length, 2 + 8); // header, how-to, eight lines
+  });
+  const long = Array.from({ length: 8 }, (_, i) => favOf(`y${i}`, `${i} ${'long name '.repeat(9)}`.trim(), 200));
+  await withHistory(long, [], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[1].body.system;
+    const block = sys.slice(sys.indexOf(HABITS));
+    assert.ok(block.length <= 600, `block is ${block.length} characters`);
+    assert.ok(block.split('\n').slice(2).length < 8, 'the characters cap cuts before the item cap');
+  });
+});
+
+test('the analysis history: a favourite name is sanitized, and no history means no block', async () => {
+  await withHistory([favOf('f1', 'Ayran a.b@c.io', 120)], [correctedOf('c9', 'Hidden', 1, [], 0, { edited: false, conf: 0.5 })], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    assert.ok(calls[0].body.system.includes('Favourite: Ayran [redacted], 120 kcal'));
+    assert.ok(!JSON.stringify(calls[0].body).includes('a.b@c.io'));
+  });
+  await withHistory([], [correctedOf('c9', 'Hidden', 1, [], 0, { edited: false, conf: 0.5 })], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    assert.ok(!calls[1].body.system.includes(HABITS));
+    assert.ok(calls[1].body.system.endsWith(planDigest(S.plan)));
+  });
+});
+
+test('the coach and the review name the pantry by name only: values per 100 g, no ids, at most 8 lines, sanitized; absent with an empty pantry', async () => {
+  const named = pf('f7', 'Skyr a.b@c.io', [63, 11, 4, 0.2, 0]);
+  await withFoods([named, oatRace, cola, egg], async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ head: 'h', good: [], cut: [], next: 'n' }))));
+    await review({ cfg: haiku, brief: 'b' });
+    for (const c of calls) {
+      const sys = c.body.system;
+      assert.ok(sys.includes(`${STOCK}\n`), 'the block is there');
+      assert.ok(sys.includes('Skyr [redacted], 63 kcal 11p 4c 0.2f 0fib per 100 g'));
+      assert.ok(sys.includes('Egg, 143 kcal 12.5p 0.7c 9.5f 0fib per 100 g'));
+      assert.ok(!/\bf[0-9]+: /.test(sys), 'no pantry ids');
+      assert.ok(!JSON.stringify(c.body).includes('a.b@c.io'));
+    }
+  });
+  const many = Array.from({ length: 20 }, (_, i) => pf(`g${i}`, `Product ${i}`, [100 + i, 5, 10, 4, 1]));
+  await withFoods(many, async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    const sys = calls[2].body.system;
+    assert.equal(sys.slice(sys.indexOf(STOCK)).split('\n').length, 2 + 8);
+  });
+  await withFoods([], async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    assert.ok(!calls[3].body.system.includes(STOCK));
+    assert.ok(calls[3].body.system.endsWith(planDigest(S.plan)));
+  });
+});
+
+test('food values: a stored product of the same name is the reference, with no id; another name or no name adds nothing', async () => {
+  await withFoods([oatRace, cola], async () => {
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, name: 'oat DRINK', blobs: [] });
+    const sys = calls[0].body.system;
+    assert.ok(sys.includes('A product the person already stores under this name, with values per 100 g:'));
+    assert.ok(sys.endsWith('Oat drink, 45 kcal 1p 6.5c 1.5f 0.8fib per 100 g'));
+    assert.ok(!sys.includes('f1: ') && !sys.includes('Diet cola'));
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, name: 'Skyr', blobs: [] });
+    assert.ok(!calls[1].body.system.includes('A product the person already stores'));
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, blobs: [] });
+    assert.ok(!calls[2].body.system.includes('A product the person already stores'));
+  });
+});
