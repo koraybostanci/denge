@@ -89,7 +89,7 @@ whole lines only, and is left out when there is nothing to show. No ids are sent
 Each meal estimate is checked for consistency. Its confidence is capped at 0.5 when the entry's
 calories miss 4 × protein + 4 × carbs + 9 × fat by more than 15% (at least 25 kcal, so small portions are
 not flagged for rounding), or when any one item's calories miss the same sum by that much (an item is
-checked only when it has both carbs and fat). The numbers are never changed by the check. Alcohol entries
+checked only when it has both carbs and fat and some kcal). The numbers are never changed by the check. Alcohol entries
 are not checked, since their alcohol energy is not in the sum, and plan meals are not checked: their
 numbers come from the plan.
 

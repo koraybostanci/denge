@@ -1708,7 +1708,7 @@ export function renderSettings() {
 
   const location = `
     <label class="check"><input type="checkbox" data-act="loc-toggle"${s.useLocation ? ' checked' : ''}> ${t('Use the photo’s location')}</label>
-    <p class="note">${t('Location is read on the device and matched to your saved places here. The model only gets the word “Home”, “Office” or “out”; coordinates are never sent to the model (they are in your backup file). When you choose from the library, location only comes through if Location is switched on under Options in the picker.')}</p>
+    <p class="note">${t('Location is read on the device and matched to your saved places here. The model only gets a generic label: “Home”, “Office”, “out” or “a saved place”; coordinates are never sent to the model (they are in your backup file). When you choose from the library, location only comes through if Location is switched on under Options in the picker.')}</p>
     <div class="actions">
       <button type="button" class="btn" data-act="loc-save" data-name="Home">${t('I am here: Home')}</button>
       <button type="button" class="btn" data-act="loc-save" data-name="Office">${t('I am here: Office')}</button>

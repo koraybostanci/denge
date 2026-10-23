@@ -37,7 +37,7 @@
   saved; the model only receives a generic label, "home", "office", "out" or "a saved place", never the
   name you gave the place, and never coordinates.
 - Free text you type (a note, a meal or food name, an ingredient name) is filtered before it is sent:
-  e-mail addresses, web links, phone numbers (7 or more digits) and street addresses are replaced with
+  e-mail addresses, web links, phone numbers (7 or more digits, but not dates, time ranges or lists of single digits) and street addresses are replaced with
   "[redacted]". Nothing else is filtered, so other details in your text go as you wrote them. Photo
   pixels are not redacted: a face, a document or a screen in a photo goes to the model as it is.
 - Exact dates, your start and target weights, and your weigh-ins are sent in the day's review, the quick

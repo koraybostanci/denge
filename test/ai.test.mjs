@@ -869,3 +869,20 @@ test('a correction hint keeps its lines apart in the analysis request', async ()
   const text = calls[0].body.messages[0].content.find((c) => c.type === 'text')?.text ?? JSON.stringify(calls[0].body.messages);
   assert.ok(text.includes('Your earlier estimate: 300 kcal\nCorrection from the person: 450 kcal'), text);
 });
+
+test('sanitizeOut: a street type after the name and the number is redacted, a short English abbreviation is not', () => {
+  assert.equal(sanitizeOut('Işıklar Sokak 12'), '[redacted]');
+  assert.equal(sanitizeOut('Atatürk Caddesi No:12 kapı'), '[redacted] kapı');
+  assert.equal(sanitizeOut('45 Bağdat sokağı'), '[redacted]');
+  assert.equal(sanitizeOut('Elm Street 12'), '[redacted]');
+  assert.equal(sanitizeOut('2 Dr Pepper'), '2 Dr Pepper');
+  assert.equal(sanitizeOut('Oats 1 st'), 'Oats 1 st');
+});
+
+test('sanitizeOut: a date, a kcal range and a list of single digits are not phone numbers', () => {
+  assert.equal(sanitizeOut('lunch 2026-10-24 13.30, 2 eggs'), 'lunch 2026-10-24 13.30, 2 eggs');
+  assert.equal(sanitizeOut('1200-1500 kcal dinner'), '1200-1500 kcal dinner');
+  assert.equal(sanitizeOut('1 2 3 4 5 6 7'), '1 2 3 4 5 6 7');
+  assert.equal(sanitizeOut('Lentil soup 07:30-08:00'), 'Lentil soup 07:30-08:00');
+  assert.equal(sanitizeOut('call 02125551234'), 'call [redacted]');
+});

@@ -1,7 +1,7 @@
 // What the model reads: the day, the coach note and the check, in plain English lines. Text only, a few hundred tokens each.
 // Always English, whatever the interface language is (inEnglish), and no DOM, so the tests build them too.
 import { inEnglish } from './i18n.js';
-import { sanitizeOut, placeWord } from './ai.js';
+import { sanitizeOut, placeWord } from './text.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
 import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';

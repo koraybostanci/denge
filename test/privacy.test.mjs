@@ -84,8 +84,11 @@ for (const [name, call] of Object.entries(CALLS)) {
         mockFetch(REPLY[name], route);
         await call(cfg);
         assert.equal(calls.length, 1);
+        // The body, the URL and the headers except the auth ones (the key travels there by design), in lower case so a case change cannot hide a value
+        const headers = Object.entries(calls[0].init.headers || {}).filter(([k]) => !/key|auth/i.test(k));
         const body = JSON.stringify(calls[0].body);
-        for (const s of FORBIDDEN) assert.ok(!body.includes(s), `"${s}" leaked into ${name} on ${route}`);
+        const sent = [body, calls[0].url, JSON.stringify(headers)].join('\n').toLowerCase();
+        for (const s of FORBIDDEN) assert.ok(!sent.includes(s.toLowerCase()), `"${s}" leaked into ${name} on ${route}`);
         if (name === 'progressReview') {
           // positive control: the known-present fields really are in this body, so the checks above are not vacuous
           assert.ok(body.includes('Person: 34 years old, female'), 'age and gender are sent by the progress review');

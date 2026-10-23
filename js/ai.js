@@ -46,24 +46,9 @@ const TURKISH = {
 };
 export const langLine = (kind = 'text') => (getUiLang() === 'tr' ? TURKISH[kind] : '');
 
-// Text that came from outside (the pantry's records, a model reply): the squeeze of cleanFood in js/backup.js and
-// cleanIng in js/app.js, mirrored here — one plain line, no control characters, so no text can forge a line's shape
-const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
-
-// Free text the person wrote (a note, a title, a food or ingredient name) leaves the device only after this: an e-mail, a link, a phone number
-// or a street address is redacted, so contact details and saved places never reach the model. Conservative on purpose: a food quantity such as
-// "200 g rice" or "2 x 150 g" matches none of them, and the output has no digits or separators left for a second pass to match (idempotent).
-const REDACTED = '[redacted]';
-const REDACT = [
-  [/[\p{L}\p{N}_.+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu, REDACTED],
-  [/\b(?:https?:\/\/|www\.)\S+/gi, REDACTED],
-  [/(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+\.(?:com|net|org|io|tr|uk|co)(?![\p{L}\p{N}])(?:\/\S*)?/giu, REDACTED],
-  [/\b\d{1,5}\s+(?:[\p{L}'.]+\s+){0,2}(?:street|st|avenue|ave|road|rd|lane|drive|dr|boulevard|blvd|cd|cad|caddesi|sk|sok|sokak|mah|mahallesi)\b\.?/giu, REDACTED],
-  [/\+?\d[\d\s().-]*\d/g, (m) => (m.replace(/\D/g, '').length >= 7 ? REDACTED : m)], // 7 or more digits: a phone number
-];
-export const sanitizeOut = (v) => REDACT.reduce((s, [re, rep]) => s.replace(re, rep), sq(v));
-// A saved place is named by the person: only the two words the app suggests (Home, Office) and "out" go to the model as they are
-export const placeWord = (p) => (p === 'out' ? 'out' : /^(home|office)$/i.test(sq(p)) ? sq(p).toLowerCase() : 'a saved place');
+// The redaction and the squeeze live in js/text.js (pure, so the briefs import them without the model module); re-exported here for the model's callers
+import { sq, sanitizeOut, placeWord } from './text.js';
+export { sanitizeOut, placeWord };
 // The plan digest, line by line through sanitizeOut (the digest keeps its line breaks)
 const planOut = (plan) => planDigest(plan).split('\n').map(sanitizeOut).join('\n');
 
@@ -81,7 +66,9 @@ const PANTRY_CHARS = 2000; // the whole digest at most, header and how-to includ
 const PANTRY_ING = 60; // the ingredients snippet of a check line, at most
 // The last-used foods first (newest first), the never-used or older ones in their stored place. Array#sort is
 // stable, so foods without lastUsed keep insertion order behind the used ones.
-const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+// The pantry's usual-products header, the same text in the analysis, the coach and the review
+const USUAL = "The person's usual products, with values per 100 g:";
+const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].filter(Boolean).sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
 // The name and the values per 100 g: `name, X kcal Xp Xc Xf Xfib per 100 g`
 const valuesText = (f) => `${sanitizeOut(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
 // One line: `id: name, X kcal Xp Xc Xf Xfib per 100 g`; the check adds `; ingredients: …` (snippet only)
@@ -100,7 +87,7 @@ function pantryDigest(note = '', ingredients = false) {
     return !!name && Math.min(text.length, name.length) >= 4 && text.includes(name);
   };
   const forced = new Set(foods.filter(says).map((f) => f.id)); // a food the note names is always in
-  const header = "The person's usual products, with values per 100 g:";
+  const header = USUAL;
   const how = ingredients
     ? 'Judge one of these products by its exact name here and its stored per-100 g values; where the photo shows a readable nutrition label, the label outranks the stored values. Never invent a product line.'
     : 'When an item clearly is one of these products, set that item\'s pantry to that line\'s id and give its kcal, p, c, f and fib as the product\'s per-100 g values at the grams you estimated; name the item as the product is listed here. Never invent a product line.';
@@ -163,7 +150,7 @@ function habitsDigest() {
 // The pantry by name for the coach and the review: values per 100 g, no ids. A suggestion may name one of these, never link it.
 function stockDigest() {
   return groundBlock(
-    "The person's usual products, with values per 100 g:",
+    USUAL,
     'When a suggestion fits one of these, name it as listed here; never invent a product.',
     storedFoods().map(valuesText),
   );
@@ -348,6 +335,8 @@ async function post(url, headers, payload, opts = {}) {
  */
 export async function callModel(cfg, { system, shape = '', text, blobs = [], schema = null, json = false, maxTokens = 600, maxImages = 3, retry = true, onRetry = null, timeout = TIMEOUT_MS }) {
   const retryOpts = { retry, onRetry, timeout };
+  // The text channel's last check: every line through sanitizeOut, so a call site that forgets it still sends no contact details
+  const safe = text == null ? text : String(text).split('\n').map(sanitizeOut).join('\n');
   if (!cfg || !cfg.key) throw new AiError('no_key', 'No API key set');
   const imgs = [];
   for (const b of blobs.slice(0, maxImages)) imgs.push(await toB64(b));
@@ -355,11 +344,11 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
   if (cfg.provider === 'openai') {
     if (!cfg.base || !cfg.model) throw new AiError('no_key', 'No address or model set');
     const content = imgs.map((d) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${d}` } }));
-    content.push({ type: 'text', text });
+    content.push({ type: 'text', text: safe });
     const body = {
       model: cfg.model,
       max_tokens: Math.max(maxTokens * 2, 1500), // thinking models spend part of the budget on reasoning
-      messages: [{ role: 'system', content: system + shape }, { role: 'user', content: imgs.length ? content : text }],
+      messages: [{ role: 'system', content: system + shape }, { role: 'user', content: imgs.length ? content : safe }],
     };
     if (json) body.response_format = { type: 'json_object' };
     const url = cfg.base.replace(/\/+$/, '') + '/chat/completions';
@@ -384,7 +373,7 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
   }
 
   const content = imgs.map((d) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d } }));
-  content.push({ type: 'text', text });
+  content.push({ type: 'text', text: safe });
   const body = { model: cfg.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] };
   // Sonnet 5.5 thinks before it answers unless told not to, and that thinking would eat the small token budget
   if (cfg.model === STRONG_MODEL) body.thinking = { type: 'between_tools' };
@@ -732,9 +721,10 @@ export const ITEM_CAPS_WRITE = {
 // claim "0 g carbs". Absence survives both storages: a spread of such an item never adds an undefined key, and a backup
 // round-trip restores through itemList in js/backup.js, which leaves the keys absent the same way. At most 12 items;
 // unknown junk is dropped. Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
+// The number a reply's field holds, NaN when it holds none: shared by cleanItems and reconcileConf
+const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
 export function cleanItems(items, caps) {
   const cap = (v, max) => Math.min(max, Math.max(0, +v || 0)); // NaN and undefined fall to 0
-  const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
   const macro = (v, max) => (Number.isFinite(num(v)) ? Math.min(max, Math.max(0, num(v))) : undefined); // absent when the source has no number
   return (Array.isArray(items) ? items : []).slice(0, 12)
     .map((i) => (i && typeof i === 'object' ? i : {}))
@@ -762,10 +752,10 @@ const atwater = (kcal, p, c, f) => near(kcal, 4 * p + 4 * c + 9 * f, 0.15, 25);
 export function reconcileConf(data, items) {
   const conf = Math.max(0, Math.min(1, +data.conf || 0));
   if (!items || (data.flags || []).includes('alcohol')) return conf;
-  const num = (v) => (v == null || v === '' || typeof v === 'object' ? NaN : +v);
   const kcal = num(data.kcal), p = num(data.p), c = num(data.c), f = num(data.f);
   const total = [kcal, p, c, f].every(Number.isFinite) && !atwater(kcal, p, c, f);
-  const item = items.some((i) => i.c !== undefined && i.f !== undefined && !atwater(i.kcal, i.p, i.c, i.f));
+  // An item with no kcal is not checked: cleanItems stores an absent kcal as 0, which is not a claim that the item has no energy
+  const item = items.some((i) => i.kcal > 0 && i.c !== undefined && i.f !== undefined && !atwater(i.kcal, i.p, i.c, i.f));
   return total || item ? Math.min(conf, 0.5) : conf;
 }
 
