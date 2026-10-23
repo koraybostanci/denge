@@ -25,13 +25,16 @@ export const meal = (d, h, slot, title, kcal, p, extra = {}) => ({ id: `m${n++}`
 export const MINE = { id: 'P-mine01', name: 'My plan', foods: seedPlan.foods,
   meals: [...seedPlan.meals.filter((m) => m.slot !== 'snack2'), { id: 'U-oats', slot: 'lunch', name: 'Overnight oats', ingredients: [['muesli', 50], ['skyr', 150]] }] };
 
+// Every goal is set here, since fresh settings carry none
+const GOALS = { startDate: '2026-10-05', startKg: 87, targetDate: '2026-12-31', targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 };
+
 export function fixture() {
   S.tab = 'today';
   S.viewDay = T;
   S.sheet = null;
   S.calPick = null;
   S.draft = null;
-  S.settings = core.freshSettings();
+  S.settings = { ...core.freshSettings(), ...GOALS };
   S.plans = { active: 'default', list: [seedPlan] };
   S.plan = buildPlan(seedPlan);
   Object.assign(S.settings, { startDate: day(-9), startKg: 87, targetDate: day(78), targetKg: 78, lastBackup: NOW - 3 * 86400000 });
@@ -91,6 +94,16 @@ export function screens() {
   add('progress-picked-week', views.renderProgress);
   S.calPick = null;
   add('settings', views.renderSettings);
+  // A profile: the greeting on Today and the Profile section opened in Settings
+  Object.assign(S.settings, { name: 'Ayşe <b>', age: 34, gender: 'female' });
+  S.openSetting = 'profile';
+  add('settings-profile', views.renderSettings);
+  S.openSetting = null;
+  const tab = S.tab;
+  S.tab = 'today';
+  add('today-named', views.renderToday);
+  S.tab = tab;
+  Object.assign(S.settings, { name: '', age: 0, gender: '' });
   S.settings.provider = 'anthropic';
   S.settings.apiKey = 'k';
   add('settings-anthropic', views.renderSettings);
@@ -165,5 +178,18 @@ export function screens() {
   add('progress-review-gated', views.renderProgress);
   [S.entries, S.days] = kept2;
   S.progressReview = rec;
+  // The setup screen: empty, then after a failed try (an error under each kind of field, and the plan not chosen)
+  S.onboard = null;
+  add('onboarding', views.renderOnboarding);
+  S.onboard = { name: 'Ayşe <b>', age: '12', gender: 'female', weight: '80', targetKg: '85', targetDate: day(-1), kcalRest: '400', kcalTrain: '300', protein: '30', plan: '', errors: [
+    { field: 'name', code: 'too_long' }, { field: 'age', code: 'range' }, { field: 'weight', code: 'range' }, { field: 'targetKg', code: 'not_below_weight' },
+    { field: 'targetDate', code: 'not_after_today' }, { field: 'kcalRest', code: 'below_floor' }, { field: 'kcalTrain', code: 'below_rest' }, { field: 'protein', code: 'below_min' }, { field: 'plan', code: 'required' },
+  ] };
+  add('onboarding-errors', views.renderOnboarding);
+  S.onboard = { weight: '', targetKg: '', targetDate: '', kcalRest: '', kcalTrain: '', protein: '', plan: 'blank', errors: [
+    { field: 'weight', code: 'required' }, { field: 'targetKg', code: 'required' }, { field: 'targetDate', code: 'required' }, { field: 'targetDate', code: 'invalid' }, { field: 'kcalRest', code: 'range' }, { field: 'protein', code: 'range' }, { field: 'gender', code: 'invalid' },
+  ] };
+  add('onboarding-required', views.renderOnboarding);
+  S.onboard = null;
   return out;
 }

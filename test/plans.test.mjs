@@ -235,7 +235,7 @@ test('editor: cancelling drops the draft and writes nothing', () => {
   assert.deepEqual(copy(seedPlan), SEED);
   // closeSheet, which every way of closing the sheet goes through, drops it
   const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(src, /function closeSheet\(\) \{[^}]*dropDraft\(\);/);
+  assert.match(src.match(/function closeSheet\(\) \{[^]*?\n\}/)[0], /dropDraft\(\);/);
   // and an open draft counts as half-typed for the update check
   assert.match(src, /const working = [^;]*\|\| S\.draft;/);
 });

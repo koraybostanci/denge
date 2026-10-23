@@ -20,6 +20,11 @@
   flex used), your goals and where you stand against the schedule. Supplements go as counts taken, never
   their names. No photos, and none of the model's earlier reviews. It is larger than a day's review but
   kept to about 3,500 characters; the goal line and a few closing lines stay whole even past that.
+- Your age and gender, if you entered them (Settings → Profile, or at setup), are sent in the progress review only, as one line
+  of context for a realistic pace and protein (only "female" or "male" is sent as a word; other choices send nothing). Your name is
+  never sent: it stays on the device and is used for the greeting on Today. Neither goes into any other request.
+- The app creates an install id on first start. It stays on this device, is not in a backup file or the SQL export, and is
+  not sent in any request. It is also mirrored in the browser's local storage on this device. A factory reset keeps it (best effort: a browser can clear a site's data, and then the app starts with a new one).
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
 - A photo taken to fill in a food's values is sent with no other data and is not stored. The
@@ -37,13 +42,13 @@
   Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. It also holds your Pantry products with their values (name, per-100 g values, and the ingredients text where one is stored, and when each was last used) and their pictures. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
   entries, days, checks, badges, plan pictures and Pantry products to what is on the device (an entry or day that is in
-  both takes the backup's version; a Pantry product that is in both takes the backup's values); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
+  both takes the backup's version; a Pantry product that is in both takes the backup's values); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). Your name, age and gender are part of the backup, but the install id of this device stays and the backup brings none. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
-  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review, checks) and keeps every setting, your plans, the plan's
-  pictures, your Pantry products with their photos, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch, including
-  goals, favourites, saved places, My plan, the plan's pictures, your Pantry products with their photos, the badges and the usage totals; the API key and provider
-  stay unless you untick the box. It asks you to type DELETE. Both refuse while something is being
+  weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review, checks) and keeps every setting (goals and profile included), your plans, the plan's
+  pictures, your Pantry products with their photos, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch and returns to the setup screen. It deletes the
+  goals, name, age and gender, favourites, saved places, My plan, the plan's pictures, your Pantry products with their photos, the badges and the usage totals; the API key and provider
+  stay unless you untick the box. The language and the install id stay too. It asks you to type DELETE. Both refuse while something is being
   analysed. Neither can be undone, so save a backup first.
 
 ## Export to SQLite

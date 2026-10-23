@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '54'; // bump together with VERSION in sw.js
+export const APP_VERSION = '55'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -11,9 +11,12 @@ export const APP_ID = 'weightplan';
 
 // ——— State ———
 // The settings of an app that has just been installed (new objects each time, so a reset never shares them)
+// Personal goals (dates, weights, calories, protein) are not part of it: setup asks for them, or a restore or an older install brings them
+export const PERSONAL = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin'];
 export const freshSettings = () => ({
-  ...DEFAULTS, schema: SCHEMA_VERSION,
+  ...Object.fromEntries(Object.entries(DEFAULTS).filter(([k]) => !PERSONAL.includes(k))), schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
+  name: '', age: 0, gender: '', clientId: '', onboarded: false,
   useLocation: false, places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
   usage: { in: 0, out: 0, calls: 0, usd: 0 }, lastBackup: 0,
 });
@@ -52,6 +55,7 @@ export const S = {
   openSetting: '', // expanded section in Settings
   plans: null, // the stored plans (kv `plans`: { active, list: [Default, My plan] }), set on load
   plan: buildPlan({ id: 'default', name: '', foods: {}, meals: [] }), // the active plan, built (js/app.js sets it on load)
+  onboard: null, // the setup form while it is shown: what was typed, the choice of plan and the errors of the last try (js/views.js renderOnboarding); null otherwise
   draft: null, // the meal being edited: { plan: a copy of the active stored plan, meal, food?, foodForm? }; nothing is stored until it is saved
 };
 let progressGen = 0; // moves when the log is wiped, so a progress review that lands after it is dropped
@@ -622,6 +626,7 @@ export function progressSig() {
   return djb2(JSON.stringify([
     ['startDate', 'targetDate', 'startKg', 'targetKg', 'kcalRest', 'kcalTrain', 'kcalMinDay', 'protein', 'fiber', 'steps', 'water'].map((k) => s[k]),
     planDigest(S.plan), last ? weekStart(last.day) : '', w.length, last ? Math.round(last.kg * 10) / 10 : '', Math.floor(mealDays / 5), verdictDays,
+    ...(s.age > 0 || s.gender === 'female' || s.gender === 'male' ? [[s.age > 0 ? s.age : 0, s.gender === 'female' || s.gender === 'male' ? s.gender : '']] : []), // only what the brief sends (age, female/male); an unset profile keeps the old hash
   ]));
 }
 

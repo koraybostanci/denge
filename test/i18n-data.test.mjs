@@ -66,6 +66,34 @@ test('the briefs and the plan digest are byte-identical in Turkish and English',
   assert.doesNotMatch(progressBrief(), /TR\[/);
 });
 
+test('the progress brief: a Person line only for what is set, never the name or the id, the same in Turkish', async () => {
+  setup();
+  const keep = { ...S.settings };
+  try {
+    Object.assign(S.settings, { name: 'Zeynep', clientId: 'cid-1234', age: 0, gender: '' });
+    assert.doesNotMatch(progressBrief(), /Person:/);
+    S.settings.gender = 'none';
+    assert.doesNotMatch(progressBrief(), /Person:/); // only female and male become words
+    S.settings.gender = 'other';
+    assert.doesNotMatch(progressBrief(), /Person:/);
+    S.settings.age = 41;
+    assert.match(progressBrief(), /\nPerson: 41 years old\n/);
+    S.settings.gender = 'female';
+    assert.match(progressBrief(), /\nPerson: 41 years old, female\n/);
+    S.settings.age = 0; S.settings.gender = 'male';
+    assert.match(progressBrief(), /\nPerson: male\n/);
+    S.settings.age = 41; S.settings.gender = 'female';
+    const en = progressBrief();
+    assert.ok(en.indexOf('\nPerson:') > en.indexOf('\nGoal:') && en.indexOf('\nPerson:') < en.indexOf('\nAll time:'));
+    assert.doesNotMatch(en, /Zeynep|cid-1234/);
+    leakTr();
+    await setLang('tr');
+    assert.equal(progressBrief(), en);
+  } finally {
+    Object.assign(S.settings, keep);
+  }
+});
+
 test('verdict and note text are whole sentences that a Turkish entry can replace', async () => {
   setup();
   const v = dayVerdict(day(-1));

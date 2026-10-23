@@ -87,12 +87,12 @@ export const DEFAULTS = {
 export const SMALL_TREAT_KCAL = 250; // a flex entry up to this size (or any alcohol) is a "small" treat, not the weekly flexible dinner
 const num = (x) => x.toLocaleString(LOCALE);
 
-// The process rules, with the calorie floor as set (the Plan tab passes the saved one; RULES.process uses the default)
-export const processRules = (kcalMinDay) => [
+// The process rules, with the calorie floor as set (the Plan tab passes the saved ones; RULES.process uses the default)
+export const processRules = (kcalMinDay, targetKg) => [
   t('Weigh in every morning under the same conditions. Read the 7-day average, not a single day.'),
   t('If the average sits more than 0.7 kg above the line two weeks in a row: cut 100 kcal or add 2,000 steps.'),
   t('Do not go below {kcal} kcal.', { kcal: num(kcalMinDay) }),
-  t('On reaching {kg} kg, raise calories to maintenance gradually over 2 to 3 weeks.', { kg: DEFAULTS.targetKg }),
+  t('On reaching {kg} kg, raise calories to maintenance gradually over 2 to 3 weeks.', { kg: targetKg }),
 ];
 
 // Each group is built when it is read, so the text and the numbers follow the language (and a prompt can ask for them in English)
@@ -132,7 +132,7 @@ export const RULES = {
     ];
   },
   get process() {
-    return processRules(DEFAULTS.kcalMinDay);
+    return processRules(DEFAULTS.kcalMinDay, DEFAULTS.targetKg);
   },
   get rotation() {
     return [
