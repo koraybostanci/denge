@@ -1695,12 +1695,13 @@ export function renderSettings() {
     <div class="actions"><button type="button" class="btn btn-primary" data-act="save-targets">${t('Save goals')}</button></div>`;
 
   const genders = [['female', t('Female')], ['male', t('Male')], ['other', t('Other')], ['none', t('Prefer not to say')]]; // i18n-ok: stored values
+  const pd = S.profileDraft || s; // typed but not saved fields win over the saved ones
   const profile = `
     <p class="note">${t('All optional. Your name stays on this device. Age and gender are sent only with the progress review, as context.')}</p>
     <div class="field-grid">
-      <label for="set-name">${t('Name')}<input id="set-name" type="text" autocomplete="off" value="${esc(s.name || '')}"></label>
-      <label for="set-age">${t('Age')}<input id="set-age" type="text" inputmode="numeric" autocomplete="off" value="${s.age ? esc(s.age) : ''}"></label>
-      <label for="set-gender">${t('Gender')}<select id="set-gender"><option value=""${s.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${s.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label for="set-name">${t('Name')}<input id="set-name" type="text" autocomplete="off" value="${esc(pd.name || '')}"></label>
+      <label for="set-age">${t('Age')}<input id="set-age" type="text" inputmode="numeric" autocomplete="off" value="${pd.age ? esc(pd.age) : ''}"></label>
+      <label for="set-gender">${t('Gender')}<select id="set-gender"><option value=""${pd.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${pd.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
     <div class="actions"><button type="button" class="btn btn-primary" data-act="save-profile">${t('Save profile')}</button></div>`; // i18n-ok: markup
 
@@ -1824,6 +1825,7 @@ export function onboardError(field, code) {
     return t('Enter calories between {min} and {max}', { min: n(KCAL_FLOOR), max: n(RANGES.kcalRest[1]) });
   }
   if (code === 'not_below_weight') return t('The goal weight must be below your current weight');
+  if (code === 'too_fast') return t('That is faster than a steady pace: pick a later date or a closer goal weight');
   if (code === 'not_after_today') return t('Pick a date after today');
   if (code === 'below_floor') return t('Enter at least {kcal} kcal', { kcal: n(KCAL_FLOOR) });
   if (code === 'below_rest') return t('A workout day needs at least the rest-day calories');

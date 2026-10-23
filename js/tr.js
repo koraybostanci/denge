@@ -1078,6 +1078,7 @@ export default {
   'Enter an age between {min} and {max}': '{min} ile {max} arasında bir yaş gir',
   'Enter calories between {min} and {max}': '{min} ile {max} arasında bir kalori değeri gir',
   'The goal weight must be below your current weight': 'Hedef kilo şimdiki kilondan düşük olmalı',
+  'That is faster than a steady pace: pick a later date or a closer goal weight': 'Bu, istikrarlı bir tempodan daha hızlı: daha geç bir tarih ya da daha yakın bir hedef kilo seç',
   'Pick a date after today': 'Bugünden sonraki bir tarih seç',
   'Enter at least {kcal} kcal': 'En az {kcal} kcal gir',
   'A workout day needs at least the rest-day calories': 'Antrenman günü en az dinlenme günü kalorisi kadar olmalı',

@@ -1,7 +1,7 @@
 // First-run setup: validation, the settings it produces and the upgrade of old settings (js/onboarding.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
+import { MAX_LOSS_PER_WEEK, newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
 import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
@@ -48,7 +48,7 @@ test('weights: required, 30 to 300, the goal below the start', () => {
   assert.deepEqual(codes({ targetKg: 90 }), ['targetKg:not_below_weight']);
   assert.deepEqual(codes({ targetKg: 95 }), ['targetKg:not_below_weight']);
   assert.deepEqual(codes({ weight: 30, targetKg: 30 }), ['targetKg:not_below_weight']);
-  assert.deepEqual(codes({ weight: 300, targetKg: 30 }), []);
+  assert.deepEqual(codes({ weight: 300, targetKg: 30, targetDate: '2030-01-01' }), []);
 });
 
 test('target date: a real day after today', () => {
@@ -58,7 +58,7 @@ test('target date: a real day after today', () => {
   assert.deepEqual(codes({ targetDate: '2027-13-45' }), ['targetDate:invalid']);
   assert.deepEqual(codes({ targetDate: TODAY }), ['targetDate:not_after_today']);
   assert.deepEqual(codes({ targetDate: '2026-10-22' }), ['targetDate:not_after_today']);
-  assert.deepEqual(codes({ targetDate: '2026-10-24' }), []);
+  assert.deepEqual(codes({ targetKg: 89.8, targetDate: '2026-10-24' }), []);
 });
 
 test('calories and protein: floor 500, training not below rest, protein from 50', () => {
@@ -193,4 +193,15 @@ test('validateOnboarding reports a bad today as an invalid targetDate', () => {
   for (const bad of [undefined, 'x', '2026-02-30']) {
     assert.deepEqual(validateOnboarding(ok, bad).errors, [{ field: 'targetDate', code: 'invalid' }]);
   }
+});
+
+test('pace: at most MAX_LOSS_PER_WEEK kg a week', () => {
+  assert.equal(MAX_LOSS_PER_WEEK, 2);
+  assert.deepEqual(codes({ weight: 90, targetKg: 76, targetDate: '2026-10-30' }), ['targetDate:too_fast']); // 14 kg in a week
+  assert.deepEqual(codes({ weight: 90, targetKg: 88, targetDate: '2026-10-30' }), []); // exactly 2 kg in 7 days
+  assert.deepEqual(codes({ weight: 90.3, targetKg: 88.3, targetDate: '2026-10-30' }), []); // 2.0000000000000142 before rounding
+  assert.deepEqual(codes({ weight: 90.3, targetKg: 88.2, targetDate: '2026-10-30' }), ['targetDate:too_fast']);
+  assert.deepEqual(codes({ weight: 90, targetKg: 87.9, targetDate: '2026-10-30' }), ['targetDate:too_fast']);
+  assert.deepEqual(codes({ weight: 90, targetKg: 75, targetDate: '2026-10-24' }), ['targetDate:too_fast']); // 15 kg by tomorrow
+  assert.deepEqual(codes({ weight: 90, targetKg: 95, targetDate: '2026-10-24' }), ['targetKg:not_below_weight']); // no pace error on top of another
 });

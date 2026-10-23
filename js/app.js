@@ -20,7 +20,10 @@ const $ = (s, r = document) => r.querySelector(s);
 
 
 // ——— Storage ———
-async function saveSettings() { S.rev++; rememberLang(S.settings.lang); await db.kvSet('settings', S.settings); }
+const CLIENT_ID_KEY = 'weightplan.clientId'; // a mirror of the install id, so a failed settings write does not give a new id at every start
+const mirroredClientId = () => { try { const v = localStorage.getItem(CLIENT_ID_KEY); return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : ''; } catch { return ''; } };
+const mirrorClientId = (id) => { try { if (id) localStorage.setItem(CLIENT_ID_KEY, id); } catch { /* no storage; the setting itself is kept */ } };
+async function saveSettings() { S.rev++; rememberLang(S.settings.lang); mirrorClientId(S.settings.clientId); await db.kvSet('settings', S.settings); }
 // Switches the interface language and says whether it worked. When the text cannot be loaded (offline before it was cached)
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
@@ -997,6 +1000,7 @@ async function importBackup(file) {
     await load();
     return render();
   }
+  S.profileDraft = null; // a stale draft never overrides the restored profile
   dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
   dropPantry(); // and so does a pantry editor: the restored list is what stands
   await load();
@@ -1006,8 +1010,9 @@ async function importBackup(file) {
   render();
   if (S.sheet && S.sheet.type === 'settings') await openSettings(); // the open sheet shows the restored language
   const back = tn('{n} entry restored|{n} entries restored', restored);
-  if (noGoals) return toast(t('{restored}; {noGoals}', { restored: back, noGoals: t('This backup has no goals. Enter yours to finish setting up.') }));
-  toast(skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back);
+  const head = skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back;
+  if (noGoals) return toast(t('{restored}; {noGoals}', { restored: head, noGoals: t('This backup has no goals. Enter yours to finish setting up.') }));
+  toast(head);
 }
 
 // ——— Loading and rendering ———
@@ -1045,7 +1050,8 @@ async function load() {
     S.settings = { ...S.settings, ...(stored || {}), usage, onboarded: false };
   } else {
     // An install from before setup existed, or one set up: goals that are missing take the defaults, and it gets its id once
-    S.settings = { ...freshSettings(), ...upgradeSettings(stored, newClientId()), usage };
+    S.settings = { ...freshSettings(), ...upgradeSettings(stored, mirroredClientId() || newClientId()), usage };
+    mirrorClientId(S.settings.clientId);
     const changed = !stored || stored.clientId !== S.settings.clientId || stored.onboarded !== true || GOAL_KEYS.some((k) => stored[k] !== S.settings[k]);
     if (changed) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
   }
@@ -1332,7 +1338,7 @@ function openSheet(html, state, focusSel, keepFocus) {
 }
 function closeSheet() {
   const was = S.sheet;
-  if (S.sheet && S.sheet.type === 'settings') S.suppEdit = '';
+  if (S.sheet && S.sheet.type === 'settings') { S.suppEdit = ''; S.profileDraft = null; }
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
@@ -1569,13 +1575,14 @@ const ACT = {
     if (errors.length) { d.errors = errors; d.focusErrors = true; return render(); }
     onboarding = true;
     if (el) el.disabled = true;
+    document.querySelectorAll('[data-act="lang"]').forEach((b) => { b.disabled = true; });
     const before = { settings: S.settings, hadDay: !!S.days[day] };
     const entriesBefore = S.entries.length;
     let wrotePlans = false;
     try {
       const hadPlans = (await db.kvGet('plans', null)) !== null; // restored plans stay as they are
       // The settings first (they end the setup and hold the real goals), then the plan, the first weigh-in last
-      S.settings = { ...S.settings, ...settingsFromOnboarding(res.value, day, S.settings.clientId || newClientId()) };
+      S.settings = { ...S.settings, ...settingsFromOnboarding(res.value, day, S.settings.clientId || mirroredClientId() || newClientId()) };
       await saveSettings();
       if (!hadPlans) {
         wrotePlans = true;
@@ -1598,7 +1605,7 @@ const ACT = {
       if (wrotePlans) seedInMemory();
       toast(t('Could not save: {reason}', { reason: (err && err.message) || t('storage error') }));
       return render();
-    } finally { onboarding = false; if (el) el.disabled = false; }
+    } finally { onboarding = false; if (el) el.disabled = false; document.querySelectorAll('[data-act="lang"]').forEach((b) => { b.disabled = false; }); }
     S.onboard = null;
     S.tab = 'today';
     S.viewDay = day;
@@ -1994,6 +2001,7 @@ const ACT = {
     if (!r.ok) return toast(onboardError(r.errors[0].field, r.errors[0].code));
     S.settings = { ...S.settings, name: r.value.name, age: r.value.age, gender: r.value.gender };
     await saveSettings();
+    S.profileDraft = null; // before render, so the rebuilt sheet shows the saved values even if render throws
     render();
     await openSettings('profile'); // the open sheet shows the saved name and the cleaned fields
     toast(t('Profile saved'));
@@ -2106,7 +2114,7 @@ const ACT = {
     seedInMemory(); // the plans start again from the seed; the record is written when setup is finished
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.foods = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
-    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = '';
+    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null;
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
     autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
@@ -2147,6 +2155,11 @@ document.addEventListener('input', (ev) => {
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
+  // Profile fields typed but not saved are kept, so a rebuilt Settings sheet does not lose them
+  if (ev.target.id === 'set-name' || ev.target.id === 'set-age') {
+    const n = $('#set-name'), a = $('#set-age'), g = $('#set-gender');
+    if (n && a && g) S.profileDraft = { name: n.value, age: a.value, gender: g.value };
+  }
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
     S.check.note = ev.target.value;
@@ -2157,6 +2170,10 @@ document.addEventListener('input', (ev) => {
 
 document.addEventListener('change', (ev) => guard(async () => {
   const el = ev.target;
+  if (el.id === 'set-gender') {
+    const n = $('#set-name'), a = $('#set-age');
+    if (n && a) S.profileDraft = { name: n.value, age: a.value, gender: el.value };
+  }
   if (el.id === 'f-cam' || el.id === 'f-lib') {
     const files = Array.from(el.files || []);
     el.value = '';

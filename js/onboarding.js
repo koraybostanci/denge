@@ -12,6 +12,7 @@ export const AGE_RANGE = [18, 120];
 export const KCAL_FLOOR = 500;
 export const PROTEIN_MIN = 50;
 export const PROTEIN_MIN_RATIO = 0.89; // the same ratio save-targets in app.js uses
+export const MAX_LOSS_PER_WEEK = 2; // kg per week: a goal that needs more is not a steady pace
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === d; };
@@ -21,7 +22,12 @@ export function newClientId() {
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
   const b = new Uint8Array(16);
   if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
-  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  else {
+    // no crypto: mix the clock into the random bytes so two installs at different times differ even with a poor RNG
+    let m = Date.now();
+    try { if (typeof performance !== 'undefined' && typeof performance.now === 'function') m += Math.floor(performance.now() * 1000); } catch { /* no timer */ }
+    for (let i = 0; i < 16; i++) { b[i] = (Math.floor(Math.random() * 256) ^ (m & 0xff)) & 0xff; m = Math.floor(m / 256) + i * 31; }
+  }
   b[6] = (b[6] & 0x0f) | 0x40; // version 4
   b[8] = (b[8] & 0x3f) | 0x80; // variant 10
   const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -102,6 +108,7 @@ export function validateOnboarding(input, today) {
   if (!td) bad('targetDate', 'required');
   else if (!DAY_RE.test(td) || !realDay(td) || !(typeof today === 'string' && DAY_RE.test(today) && realDay(today))) bad('targetDate', 'invalid');
   else if (!(td > today)) bad('targetDate', 'not_after_today');
+  else if (value.weight !== undefined && value.targetKg !== undefined && Math.round((value.weight - value.targetKg) * 10) / 10 / ((Date.parse(`${td}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5) * 7 > MAX_LOSS_PER_WEEK + 1e-9) bad('targetDate', 'too_fast');
   else value.targetDate = td;
   const kcalRest = rnd(read(input.kcalRest, true));
   if (kcalRest === null) bad('kcalRest', 'invalid');
