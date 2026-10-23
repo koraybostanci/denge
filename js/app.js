@@ -13,7 +13,8 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, currentWeight, latestWeight, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
+import { bootDecision } from './boot.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1042,18 +1043,13 @@ async function load() {
   S.progressReview = readProgress(progress);
   S.badges = badges ? cleanBadges(badges) : null;
   const hasData = S.entries.length > 0 || Object.keys(S.days).length > 0 || storedPlans !== null || badges !== null || storedFoods !== null || storedChecks !== null;
-  // A restore that brought no goals leaves onboarded:false stored with no start weight: setup is still to be done
-  const setup = needsOnboarding(stored, hasData) || (!!stored && stored.onboarded === false && !Number.isFinite(stored.startKg));
   const usage = { ...S.settings.usage, ...((stored && stored.usage) || {}) };
-  if (setup) {
-    // A new install: the settings stay fresh (a language chosen on the setup screen is kept) until setup is finished
-    S.settings = { ...S.settings, ...(stored || {}), usage, onboarded: false };
-  } else {
-    // An install from before setup existed, or one set up: goals that are missing take the defaults, and it gets its id once
-    S.settings = { ...freshSettings(), ...upgradeSettings(stored, mirroredClientId() || newClientId()), usage };
+  const boot = bootDecision({ stored, hasData, live: S.settings, fresh: freshSettings(), usage, fallbackId: mirroredClientId() || newClientId() });
+  const setup = boot.setup;
+  S.settings = boot.settings;
+  if (!setup) {
     mirrorClientId(S.settings.clientId);
-    const changed = !stored || stored.clientId !== S.settings.clientId || stored.onboarded !== true || GOAL_KEYS.some((k) => stored[k] !== S.settings[k]);
-    if (changed) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
+    if (boot.needsSave) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
   }
   // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
   // and a meal it no longer has loses its picture.
