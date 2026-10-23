@@ -886,3 +886,8 @@ test('sanitizeOut: a date, a kcal range and a list of single digits are not phon
   assert.equal(sanitizeOut('Lentil soup 07:30-08:00'), 'Lentil soup 07:30-08:00');
   assert.equal(sanitizeOut('call 02125551234'), 'call [redacted]');
 });
+
+test('sanitizeOut: a street after a lowercase name and a number is redacted, the quantities around it are not', () => {
+  assert.equal(sanitizeOut('bağdat sokağı 45'), '[redacted]');
+  assert.equal(sanitizeOut('200 g rice, 2 eggs'), '200 g rice, 2 eggs');
+});

@@ -16,7 +16,7 @@ const STREET = [...STREET_WORDS].sort((a, b) => b.length - a.length).flatMap((w)
 // A house number, then up to two words and a street type: "12 Elm Street", "45 Bağdat sokağı"
 const STREET_NUMBER = new RegExp(`\\b\\d{1,5}\\s+(?:[\\p{L}'.]+\\s+){0,2}(?:${STREET})(?!\\p{L})\\.?`, 'gu');
 // A name, then a street type and the number: "Işıklar Sokak 12", "Atatürk Caddesi No:12"
-const NAME_NUMBER = new RegExp(`\\p{Lu}[\\p{L}'-]*(?:\\s+\\p{Lu}[\\p{L}'-]*)?\\s+(?:${STREET})(?!\\p{L})\\.?\\s*(?:[Nn]o\\.?:?\\s*)?\\d{1,5}(?!\\d)`, 'gu');
+const NAME_NUMBER = new RegExp(`[\\p{L}'-]+(?:\\s+[\\p{L}'-]+)?\\s+(?:${STREET})(?!\\p{L})\\.?\\s*(?:[Nn]o\\.?:?\\s*)?\\d{1,5}(?!\\d)`, 'gu');
 // 7 or more digits make a phone number, except a date (2026-10-24), a range (1200-1500) and a list of single digits (1 2 3 4 5 6 7)
 const PHONE = /\+?\d[\d\s().-]*\d/g;
 const phone = (m) => {

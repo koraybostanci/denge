@@ -3,7 +3,7 @@
 // reach the request body, and only the progress review may carry the Person line. `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, review, progressReview, check, coach, foodValues } from '../js/ai.js';
+import { analyze, review, progressReview, check, coach, foodValues, listModels } from '../js/ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief } from '../js/briefs.js';
 import { addDays, buildPlan } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
@@ -102,3 +102,42 @@ for (const [name, call] of Object.entries(CALLS)) {
 
 // Not covered here: the EXIF strip. Photos are re-encoded on a canvas in shrink() (js/ai.js), which node --test has no
 // canvas for, so an Exif marker in a data URL cannot be asserted from these tests.
+
+// The retry and the two calls that the loop above does not cover: every request they send is scanned, not only the first
+const scanned = (c) => {
+  const headers = Object.entries(c.init.headers || {}).filter(([k]) => !/key|auth/i.test(k));
+  return [JSON.stringify(c.body), c.url, JSON.stringify(headers)].join('\n').toLowerCase();
+};
+const assertClean = (c, what) => { for (const s of FORBIDDEN) assert.ok(!scanned(c).includes(s.toLowerCase()), `"${s}" leaked into ${what}`); };
+
+test('a retried analysis request is scanned as well: a failed first try does not hide what the second sends', async () => {
+  calls = [];
+  const restore = seed();
+  let n = 0;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    n += 1;
+    if (n === 1) return { ok: false, status: 500, json: async () => ({ error: 'busy' }), text: async () => 'busy' };
+    return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: REPLY.analyze }], stop_reason: 'end_turn', usage: {} }) };
+  };
+  try {
+    await CALLS.analyze(ROUTES.anthropic);
+    assert.ok(calls.length >= 2, 'the request was retried');
+    for (const c of calls) assertClean(c, 'a retried analysis');
+  } finally { restore(); }
+});
+
+// probeVision draws a random number on a DOM canvas (not available under node --test) and sends only that image, so it is not run here
+test('listModels sends no name, coordinates, install id, supplement or place name', async () => {
+  for (const [name, run] of [['listModels', () => listModels(ROUTES.openai)]]) {
+    calls = [];
+    const restore = seed();
+    try {
+      // a GET has no body, so this stub records the call without parsing one
+      globalThis.fetch = async (url, init) => { calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null }); return { ok: true, status: 200, json: async () => ({ data: [] }) }; };
+      await run().catch(() => {}); // the reply need not parse: only what was sent matters
+      assert.ok(calls.length >= 1, `${name} sent a request`);
+      for (const c of calls) assertClean(c, name);
+    } finally { restore(); }
+  }
+});
