@@ -34,7 +34,14 @@
 - The API key is stored on the device only, unencrypted like the rest of the app's data, and is
   never written to a backup file.
 - Photo location is off by default. When on, it is read on the device and matched to places you
-  saved; the model only receives a label such as "Home" or "out", never coordinates.
+  saved; the model only receives a generic label, "home", "office", "out" or "a saved place", never the
+  name you gave the place, and never coordinates.
+- Free text you type (a note, a meal or food name, an ingredient name) is filtered before it is sent:
+  e-mail addresses, web links, phone numbers (7 or more digits) and street addresses are replaced with
+  "[redacted]". Nothing else is filtered, so other details in your text go as you wrote them. Photo
+  pixels are not redacted: a face, a document or a screen in a photo goes to the model as it is.
+- Exact dates, your start and target weights, and your weigh-ins are sent in the day's review, the quick
+  note and the progress review.
 - Badges are worked out on the device from your log and stored with it, in the same IndexedDB. The record holds, per badge, the
   steps you have earned and the day you earned each, the highest step you have looked at, whether the history on the device has
   been taken in, the parts of your pickle you wear, and your start and goal weights as they were when you first logged something (the weight badges are measured from them, so a later
