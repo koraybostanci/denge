@@ -1578,17 +1578,16 @@ export function renderFoodForm() {
 }
 
 // ——— The Pantry: one product at a time ———
-// One pantry food as a sheet: its picture (framing stores it), its values per 100 g, and the ways to change either
+// One pantry food as a sheet: its values per 100 g and the ways to change them. A picture stored before products lost
+// their photos is shown and can be removed; no new one is taken here.
 export function renderPantrySheet(id) {
   const f = (S.foods || []).find((x) => x.id === id);
   if (!f) return '';
   return `
   <header class="sheet-top"><h2 id="sheet-title">${esc(td(f.name))}</h2><button type="button" class="btn" data-act="pantry-close">${t('Close')}</button></header>
-  <div class="plan-photo">${foodPic(f, t('No photo of the product yet. Take one or choose one.'))}</div>
+  ${f.photo ? `<div class="plan-photo">${foodPic(f, '')}</div>` : ''}
   <div class="actions">
     <button type="button" class="btn" data-act="pantry-edit" data-id="${id}">${t('Edit')}</button>
-    <button type="button" class="btn" data-act="pantry-photo-cam" data-id="${id}">${f.photo ? t('Retake') : t('Take a photo')}</button>
-    <button type="button" class="btn" data-act="pantry-photo-lib" data-id="${id}">${t('Choose a photo')}</button>
     ${f.photo ? `<button type="button" class="link link-danger" data-act="pantry-photo-remove" data-id="${id}">${t('Remove photo')}</button>` : ''}
   </div>
   <p class="entry-value">${t('{n} kcal / 100 g', { n: n0(f.v[0]) })}<span>${t('{p} g protein, {c} g carbs, {f} g fat, {fib} g fibre', { p: n0(f.v[1]), c: n0(f.v[2]), f: n0(f.v[3]), fib: n0(f.v[4]) })}</span></p>
@@ -1596,7 +1595,8 @@ export function renderPantrySheet(id) {
 }
 
 // The pantry editor, drawn from S.foodDraft: a name, the five values per 100 g, an optional ingredients line, and the
-// AI fill, which reads the working photo (pick) and never keeps it. Mirrors the food form over the meal editor.
+// AI fill. The photo is only ever the fill's input: it is held in memory, sent on a tap of Fill in with AI, and never
+// stored. Without a key there is nothing to fill from, so no photo control is shown.
 export function renderPantryEditor() {
   const d = S.foodDraft;
   const r = readFood(d);
@@ -1605,28 +1605,29 @@ export function renderPantryEditor() {
   const inv = (bad) => (bad ? ' aria-invalid="true"' : '');
   const shown = (x) => (typeof x === 'number' && getLang() === 'tr' ? String(x).replace('.', ',') : String(x));
   const field = (i, label, mode) => `<label for="pf-v-${i}">${label}<input id="pf-v-${i}" type="text" inputmode="${mode}" autocomplete="off" value="${esc(shown(d.v[i]))}"${inv(r.bad.v[i])}${off}></label>`;
-  const photo = d.newPhoto || d.pick;
-  const ai = hasKey()
-    ? `<button type="button" class="btn btn-wide food-ai" id="pf-ai" data-act="pantry-ai"${!busy && (d.pick || d.name.trim()) ? '' : ' disabled'}>${busy ? `<span class="spin" aria-hidden="true"></span>${t('Reading…')}` : t('Fill in with AI')}</button>
-  ${d.err ? `<p class="note is-error" role="alert">${esc(d.err)}</p>` : `<p class="note" role="status">${busy && d.status ? esc(d.status) : d.note ? esc(d.note) : t('The photo is sent for the fill and never kept. The product’s picture is stored only when you frame it and save.')}</p>`}`
+  const photo = d.pick;
+  const fill = hasKey()
+    ? `<div class="pf-photos">
+    ${photo ? `<img class="pf-thumb" src="${photo.url}" alt="">` : ''}
+    <button type="button" class="btn" data-act="pantry-pick-cam"${off}>${ICON.camera}${t('Take a photo')}</button>
+    <button type="button" class="btn" data-act="pantry-pick-lib"${off}>${t('Choose a photo')}</button>
+    ${photo ? `<button type="button" class="link link-danger" data-act="pantry-pick-clear"${off}>${t('Remove photo')}</button>` : ''}
+  </div>
+  <button type="button" class="btn btn-wide food-ai" id="pf-ai" data-act="pantry-ai"${!busy && (d.pick || d.name.trim()) ? '' : ' disabled'}>${busy ? `<span class="spin" aria-hidden="true"></span>${t('Reading…')}` : t('Fill in with AI')}</button>
+  ${d.err ? `<p class="note is-error" role="alert">${esc(d.err)}</p>` : `<p class="note" role="status">${busy && d.status ? esc(d.status) : d.note ? esc(d.note) : t('The photo is sent for the fill and never kept.')}</p>`}
+  ${d.undo && !busy ? `<p class="note"><button type="button" class="link" data-act="pantry-undo">${t('Undo')}</button></p>` : ''}`
     : `<div class="notice"><p>${t('Add an API key to fill this in from a photo.')}</p><button type="button" class="link" data-act="settings" data-sec="analysis">${t('Add key')}</button></div>`;
   return `
   <header class="sheet-top"><h2 id="sheet-title">${d.id ? esc(td(((S.foods || []).find((x) => x.id === d.id) || d).name)) : t('Add a product')}</h2><button type="button" class="btn" data-act="pantry-cancel">${t('Cancel')}</button></header>
-  <div class="food-name">
-    <label for="pf-name">${t('Name')}<input id="pf-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(d.name)}"${inv(r.bad.name)}${off}${d.id ? '' : ` placeholder="${t('Eker Skyr natural')}"`}></label>
-    ${hasKey() ? `<button type="button" class="food-photo" data-act="pantry-pick-lib" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
-  </div>
-  ${ai}
-  ${hasKey() ? `<div class="actions">
-    <button type="button" class="btn" data-act="pantry-pick-cam"${off}>${ICON.camera}${t('Take a photo')}</button>
-    <button type="button" class="btn" data-act="pantry-pick-lib"${off}>${t('Choose a photo')}</button>
-  </div>` : ''}
+  <label class="pf-name" for="pf-name">${t('Name')}<input id="pf-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(d.name)}"${inv(r.bad.name)}${off}${d.id ? '' : ` placeholder="${t('Eker Skyr natural')}"`}></label>
+  ${fill}
   <p class="note">${t('Values per 100 g')}</p>
   <div class="field-grid">
     ${field(0, t('Calories'), 'numeric')}${field(1, t('Protein (g)'), 'decimal')}${field(2, t('Carbs (g)'), 'decimal')}${field(3, t('Fat (g)'), 'decimal')}${field(4, t('Fibre (g)'), 'decimal')}
   </div>
   <label class="pf-ing" for="pf-ing">${t('Ingredients (optional)')}<textarea id="pf-ing" maxlength="400" autocomplete="off"${off}>${esc(d.ing)}</textarea></label>
-  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="pantry-save"${r.valid && !busy ? '' : ' disabled'}>${t('Save')}</button></div>`;
+  ${d.saveErr ? `<p class="note is-error" role="alert">${esc(d.saveErr)}</p>` : ''}
+  <div class="actions"><button type="button" class="btn btn-primary btn-wide" data-act="pantry-save"${r.valid && !busy ? '' : ' disabled'}>${d.saveErr ? t('Try again') : t('Save')}</button></div>`;
 }
 
 // ——— Settings: every section starts collapsed and shows its current state in the heading ———

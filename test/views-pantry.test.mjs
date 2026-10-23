@@ -79,3 +79,43 @@ test('the verdict names the matched product in the note, with a link into the Pa
   assert.ok(html.includes(`${NOTE} Hummus dip with olive oil`));
   assert.ok(html.includes('data-act="settings" data-sec="foods"'));
 });
+
+// ——— The pantry editor: one photo row under the name, and the AI fill beneath it (issue #78) ———
+// ——— The pantry editor (issue #78): name first, one photo row that only feeds the fill, Undo, a save error ———
+const draft = (over = {}) => ({ id: null, newId: '', name: 'Eker Skyr natural', v: ['', '', '', '', ''], ing: '', pick: null, undo: null, busy: false, err: '', saveErr: '', note: '', status: '', ...over });
+const withDraft = (d, key, run) => {
+  const saved = { draft: S.foodDraft, settings: S.settings };
+  S.foodDraft = d;
+  S.settings = { ...S.settings, apiKey: key, provider: 'anthropic' };
+  try { return run(); } finally { S.foodDraft = saved.draft; S.settings = saved.settings; }
+};
+
+test('the pantry editor: the name comes first, then one photo row, then the fill', () => {
+  const html = withDraft(draft(), 'sk-test', () => views.renderPantryEditor());
+  assert.equal(html.match(/class="pf-photos"/g).length, 1, 'one photo row');
+  assert.ok(!html.includes('food-photo'), 'no photo tile beside the name');
+  assert.ok(html.indexOf('id="pf-name"') < html.indexOf('class="pf-photos"'), 'the name comes before the photo row');
+  assert.ok(html.indexOf('class="pf-photos"') < html.indexOf('id="pf-ai"'), 'the photo row comes before the AI fill');
+});
+
+test('the pantry editor: without a key there is no photo control, only the way to add one', () => {
+  const html = withDraft(draft(), '', () => views.renderPantryEditor());
+  assert.ok(!html.includes('pantry-pick-cam'), 'no camera control without a key');
+  assert.ok(!html.includes('class="pf-photos"'), 'no photo row without a key');
+  assert.ok(html.includes('data-sec="analysis"'), 'a link to add the key');
+});
+
+test('the pantry editor: Undo shows only after a fill, and Remove photo only with a photo to clear', () => {
+  const plain = withDraft(draft(), 'sk-test', () => views.renderPantryEditor());
+  assert.ok(!plain.includes('pantry-undo'));
+  assert.ok(!plain.includes('pantry-pick-clear'));
+  const filled = withDraft(draft({ undo: { name: 'Eker Skyr natural', v: ['', '', '', '', ''], ing: '' }, pick: { url: 'blob:x' } }), 'sk-test', () => views.renderPantryEditor());
+  assert.ok(filled.includes('data-act="pantry-undo"'), 'Undo after a fill');
+  assert.ok(filled.includes('data-act="pantry-pick-clear"'), 'Remove photo clears the fill photo');
+});
+
+test('the pantry editor: a failed save keeps the draft and offers Try again', () => {
+  const html = withDraft(draft({ saveErr: 'x' }), 'sk-test', () => views.renderPantryEditor());
+  assert.ok(html.includes('role="alert"'));
+  assert.ok(html.includes('data-act="pantry-save"'));
+});
