@@ -857,3 +857,15 @@ test('food values: a stored product of the same name is the reference, with no i
     assert.ok(!calls[2].body.system.includes('A product the person already stores'));
   });
 });
+
+test('sanitizeOut redacts a bare domain but leaves a quantity glued to it', () => {
+  assert.equal(sanitizeOut('Burger.co,2 eggs'), '[redacted],2 eggs');
+  assert.equal(sanitizeOut('tea.net/menu 250g'), '[redacted] 250g');
+});
+
+test('a correction hint keeps its lines apart in the analysis request', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await analyze({ cfg: sonnet, when: new Date(), text: '', hint: 'Your earlier estimate: 300 kcal\nCorrection from the person: 450 kcal', blobs: [] });
+  const text = calls[0].body.messages[0].content.find((c) => c.type === 'text')?.text ?? JSON.stringify(calls[0].body.messages);
+  assert.ok(text.includes('Your earlier estimate: 300 kcal\nCorrection from the person: 450 kcal'), text);
+});

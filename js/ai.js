@@ -57,7 +57,7 @@ const REDACTED = '[redacted]';
 const REDACT = [
   [/[\p{L}\p{N}_.+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu, REDACTED],
   [/\b(?:https?:\/\/|www\.)\S+/gi, REDACTED],
-  [/(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+\.(?:com|net|org|io|tr|uk|co)(?![\p{L}\p{N}])\/?\S*/giu, REDACTED],
+  [/(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+\.(?:com|net|org|io|tr|uk|co)(?![\p{L}\p{N}])(?:\/\S*)?/giu, REDACTED],
   [/\b\d{1,5}\s+(?:[\p{L}'.]+\s+){0,2}(?:street|st|avenue|ave|road|rd|lane|drive|dr|boulevard|blvd|cd|cad|caddesi|sk|sok|sokak|mah|mahallesi)\b\.?/giu, REDACTED],
   [/\+?\d[\d\s().-]*\d/g, (m) => (m.replace(/\D/g, '').length >= 7 ? REDACTED : m)], // 7 or more digits: a phone number
 ];
@@ -414,7 +414,7 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
 export async function analyze(o) {
   const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${placeWord(o.place)}` : '')];
   if (o.text) lines.push(`Note: ${sanitizeOut(o.text)}`);
-  if (o.hint) lines.push(sanitizeOut(o.hint));
+  if (o.hint) lines.push(String(o.hint).split('\n').map(sanitizeOut).join('\n')); // line by line: the correction's lines stay apart
   const req = { system: SYSTEM(o.text) + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
@@ -685,7 +685,7 @@ const FOOD_SCHEMA = {
  */
 export async function foodValues(o) {
   const name = clean(sanitizeOut(o.name), 60);
-  const req = { system: FOOD_SYSTEM(name), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
+  const req = { system: FOOD_SYSTEM(sanitizeOut(o.name)), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   return { ...r, data: cleanFoodValues(r.data) };
 }
