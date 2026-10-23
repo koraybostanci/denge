@@ -1,7 +1,7 @@
 // First-run setup: validation, the settings it produces and the upgrade of old settings (js/onboarding.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newClientId, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
+import { newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
 import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
@@ -77,6 +77,8 @@ test('name, age and gender are optional and checked when given', () => {
   assert.deepEqual(codes({ name: 'x'.repeat(41) }), ['name:too_long']);
   assert.deepEqual(codes({ name: 7 }), ['name:invalid']);
   assert.equal(validateOnboarding({ ...ok, name: ' \n\t ' }, TODAY).value.name, '');
+  assert.equal(validateOnboarding({ ...ok, name: 'A\u0007B \n  C' }, TODAY).value.name, 'A B C'); // as a restore cleans it
+  assert.deepEqual(codes({ name: 'x'.repeat(39) + '\u0001' + 'y' }), ['name:too_long']);
   assert.deepEqual(codes({ age: '' }), []);
   assert.deepEqual(codes({ age: 18 }), []);
   assert.deepEqual(codes({ age: '120' }), []);
@@ -146,4 +148,36 @@ test('validateProfile: the same checks as the setup, for Settings', () => {
   assert.deepEqual(codes2({ age: 'abc' }), ['age:range']);
   assert.deepEqual(codes2({ gender: 'x' }), ['gender:invalid']);
   assert.deepEqual(codes2({ name: 'x'.repeat(41), age: '1', gender: 'x' }), ['name:too_long', 'age:range', 'gender:invalid']);
+});
+
+test('parseNumberInput is strict', () => {
+  for (const [s, n, i] of [['85', 85], ['85.4', 85.4], [' 85,4 ', 85.4], ['1,550', 1.55], ['1,550', 1550, true], ['1.550', 1550, true], ['1 550', 1550, true], ['12 345 678', 12345678, true], ['1550', 1550, true], ['1.5', 1.5, true]]) {
+    assert.equal(parseNumberInput(s, i), n, `${s} ${i}`);
+  }
+  for (const [s, i] of [['85kg'], ['85.4.2'], ['1e2'], ['0x10'], ['Infinity'], ['-5'], ['.5'], ['5.'], [''], ['1 550', false], ['1,55,0', true], [null], [{}]]) {
+    assert.ok(Number.isNaN(parseNumberInput(s, i)), `${s} ${i}`);
+  }
+  assert.equal(parseNumberInput(7), 7);
+  assert.ok(Number.isNaN(parseNumberInput(Infinity)));
+});
+
+test('validateOnboarding reports text that is not a number as invalid, empty as required', () => {
+  assert.deepEqual(codes({ weight: '1e2' }), ['weight:invalid']);
+  assert.deepEqual(codes({ weight: '0x10' }), ['weight:invalid']);
+  assert.deepEqual(codes({ targetKg: 'Infinity' }), ['targetKg:invalid']);
+  assert.deepEqual(codes({ kcalRest: '85kg' }), ['kcalRest:invalid']);
+  assert.deepEqual(codes({ protein: 'abc' }), ['protein:invalid']);
+  assert.deepEqual(codes({ weight: '' }).includes('weight:required'), true);
+  assert.deepEqual(codes({ kcalTrain: '' }), ['kcalTrain:required']);
+});
+
+test('validateOnboarding accepts age 0 as unset', () => {
+  const r = validateOnboarding({ ...ok, age: 0 }, TODAY);
+  assert.equal(r.ok, true);
+  assert.equal(r.value.age, 0);
+});
+
+test('GOAL_KEYS is the one list of goal settings', () => {
+  assert.equal(GOAL_KEYS.length, 8);
+  assert.ok(GOAL_KEYS.includes('startKg') && GOAL_KEYS.includes('proteinMin'));
 });

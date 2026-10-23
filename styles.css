@@ -163,7 +163,8 @@ body.has-composer #view { padding-bottom: calc(var(--tabs-h) + var(--composer-h)
 /* Page heading */
 .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .top h1 { font: 600 32px/1.05 var(--display); letter-spacing: -.02em; }
-.top .sub { color: var(--ink2); font-size: 14px; margin-top: 4px; max-width: 34ch; }
+.top > div:first-child { min-width: 0; }
+.top .sub { overflow-wrap: anywhere; color: var(--ink2); font-size: 14px; margin-top: 4px; max-width: 34ch; }
 .top-actions { display: flex; gap: 8px; flex: none; }
 /* Narrow phones: the two 44px buttons would squeeze the subtitle into a column of 4 or 5 lines. They are taken out of the row and a float
    of their size keeps the title and the first line clear of them, so the rest of the subtitle runs the full width below */

@@ -12,7 +12,7 @@ export const APP_ID = 'weightplan';
 // ——— State ———
 // The settings of an app that has just been installed (new objects each time, so a reset never shares them)
 // Personal goals (dates, weights, calories, protein) are not part of it: setup asks for them, or a restore or an older install brings them
-const PERSONAL = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin'];
+export const PERSONAL = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin'];
 export const freshSettings = () => ({
   ...Object.fromEntries(Object.entries(DEFAULTS).filter(([k]) => !PERSONAL.includes(k))), schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
@@ -626,7 +626,7 @@ export function progressSig() {
   return djb2(JSON.stringify([
     ['startDate', 'targetDate', 'startKg', 'targetKg', 'kcalRest', 'kcalTrain', 'kcalMinDay', 'protein', 'fiber', 'steps', 'water'].map((k) => s[k]),
     planDigest(S.plan), last ? weekStart(last.day) : '', w.length, last ? Math.round(last.kg * 10) / 10 : '', Math.floor(mealDays / 5), verdictDays,
-    ...(s.age > 0 || s.gender ? [[s.age > 0 ? s.age : 0, s.gender || '']] : []), // age and gender are context for the review; an unset profile keeps the old hash
+    ...(s.age > 0 || s.gender === 'female' || s.gender === 'male' ? [[s.age > 0 ? s.age : 0, s.gender === 'female' || s.gender === 'male' ? s.gender : '']] : []), // only what the brief sends (age, female/male); an unset profile keeps the old hash
   ]));
 }
 

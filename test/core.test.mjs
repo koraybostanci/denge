@@ -609,6 +609,8 @@ test('progressSig: an unset profile keeps the hash, age or gender change it', ()
   S.settings.age = 35;
   assert.notEqual(progressSig(), withBoth);
   S.settings.age = 0; S.settings.gender = 'none';
+  assert.equal(progressSig(), base); // the brief sends no gender for 'none'
+  S.settings.gender = 'male';
   assert.notEqual(progressSig(), base);
 });
 test('progressSig ignores water, coffee and supplement ticks, an entry edit that changes no meal day, and S.rev', () => {

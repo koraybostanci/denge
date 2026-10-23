@@ -1818,7 +1818,7 @@ export function onboardError(field, code) {
   const n = (x) => fmtInt(x);
   if (code === 'required') return field === 'plan' ? t('Choose how to start') : field === 'targetDate' ? t('Pick a date') : t('Fill this in'); // i18n-ok: field names
   if (code === 'range') {
-    if (field === 'weight' || field === 'targetKg') return t('Enter a weight between {min} and {max} kg', { min: n(RANGES.startKg[0]), max: n(RANGES.startKg[1]) }); // i18n-ok: field names
+    if (field === 'weight' || field === 'targetKg') return t('Enter a weight between {min} and {max} kg', { min: n(RANGES[field === 'weight' ? 'startKg' : 'targetKg'][0]), max: n(RANGES[field === 'weight' ? 'startKg' : 'targetKg'][1]) }); // i18n-ok: field names
     if (field === 'protein') return t('Enter grams between {min} and {max}', { min: n(PROTEIN_MIN), max: n(RANGES.protein[1]) });
     if (field === 'age') return t('Enter an age between {min} and {max}', { min: AGE_RANGE[0], max: AGE_RANGE[1] });
     return t('Enter calories between {min} and {max}', { min: n(KCAL_FLOOR), max: n(RANGES.kcalRest[1]) });
@@ -1846,7 +1846,7 @@ export function renderOnboarding() {
   };
   const genders = [['female', t('Female')], ['male', t('Male')], ['other', t('Other')], ['none', t('Prefer not to say')]]; // i18n-ok: stored values
   const gender = `<div class="ob-field"><label for="ob-gender">${t('Gender')}</label><select id="ob-gender"${errs.gender ? ' aria-invalid="true" aria-describedby="ob-gender-err"' : ''}><option value=""${d.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${d.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${errs.gender ? `<p class="note is-error" id="ob-gender-err">${esc(errs.gender)}</p>` : ''}</div>`; // i18n-ok: markup
-  const choice = (v, label, id) => `<button type="button" role="radio" id="${id}" data-act="onboard-plan" data-plan="${v}" aria-checked="${d.plan === v}">${label}</button>`; // i18n-ok: markup
+  const choice = (v, label, id) => `<button type="button" role="radio" id="${id}" data-act="onboard-plan" data-plan="${v}" aria-checked="${d.plan === v}" tabindex="${d.plan === v || (!d.plan && v === 'blank') ? 0 : -1}">${label}</button>`; // i18n-ok: markup
   const C = { blank: choice('blank', t('Start blank'), 'ob-plan-blank'), other: choice('default', t('Use the default plan'), 'ob-plan-default') }; // i18n-ok: plan values and ids
   const F = {};
   F.name = input('name', t('Name'), 'autocomplete="off"'); // i18n-ok: field names
@@ -1861,7 +1861,7 @@ export function renderOnboarding() {
   <header class="top">
     <div>
       <h1>${t('Welcome to Pickle')}</h1>
-      <p class="sub">${t('Good things take time. A few answers set the app up for you; everything stays on this device.')}</p>
+      <p class="sub">${t('Good things take time. A few answers set the app up for you. Your data is stored on this device; see Privacy in the docs for what is sent to the model.')}</p>
     </div>
   </header>
   <section class="ob-lang">
@@ -1894,7 +1894,7 @@ export function renderOnboarding() {
   </section>
   <section class="ob-section" aria-labelledby="ob-h-plan">
     <h2 id="ob-h-plan">${t('Meal plan')}</h2>
-    <div class="seg" role="radiogroup" aria-labelledby="ob-h-plan"${errs.plan ? ' aria-invalid="true" aria-describedby="ob-plan-err"' : ''}>
+    <div class="seg" role="radiogroup" aria-labelledby="ob-h-plan"${errs.plan ? ' aria-describedby="ob-plan-err"' : ''}>
       ${C.blank}
       ${C.other}
     </div>

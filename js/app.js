@@ -13,7 +13,7 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId } from './onboarding.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, GOAL_KEYS } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -943,6 +943,7 @@ async function importBackup(file) {
   // Everything read from the file is checked first (see backup.js).
   let restored = 0;
   let skipped = 0;
+  let noGoals = false; // restored into a fresh install from a backup with no goals
   const gotBefore = S.badges ? S.badges.got : {};
   try {
     const newPhotos = []; // the incoming photos' food refs (never their bytes), kept for the pantry's sweep below
@@ -959,7 +960,10 @@ async function importBackup(file) {
     if (data.settings && typeof data.settings === 'object') {
       const { planPhotos, ...incoming } = cleanSettings(data.settings);
       if (planPhotos) pictures = { ...pictures, ...planPhotos }; // pictures are added to, not replaced
-      S.settings = withGoals({ ...S.settings, ...incoming }); // a backup with some goals missing leaves no undefined ones (it never brings clientId or onboarded: cleanSettings leaves them out)
+      const wasSet = !!S.settings.onboarded;
+      const hasGoals = Number.isFinite(incoming.startKg) && Number.isFinite(incoming.targetKg) && typeof incoming.startDate === 'string' && !!incoming.startDate && typeof incoming.targetDate === 'string' && !!incoming.targetDate;
+      if (!wasSet && !hasGoals) { noGoals = true; for (const k of GOAL_KEYS) delete incoming[k]; } // setup stays to be done: no defaults are put in place of goals
+      S.settings = wasSet || hasGoals ? withGoals({ ...S.settings, ...incoming }) : { ...S.settings, ...incoming, onboarded: false }; // a backup with some goals missing leaves no undefined ones (it never brings clientId or onboarded: cleanSettings leaves them out)
       if (S.settings.kcalMinDay > S.settings.kcalRest) S.settings.kcalMinDay = DEFAULTS.kcalMinDay; // a restore never leaves a minimum no day can reach
       await applyLang(S.settings.lang);
       await saveSettings();
@@ -1002,12 +1006,12 @@ async function importBackup(file) {
   render();
   if (S.sheet && S.sheet.type === 'settings') await openSettings(); // the open sheet shows the restored language
   const back = tn('{n} entry restored|{n} entries restored', restored);
+  if (noGoals) return toast(t('This backup has no goals. Enter yours to finish setting up.'));
   toast(skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back);
 }
 
 // ——— Loading and rendering ———
 // The goals a stored or restored settings object lacks take the defaults (fresh settings carry none)
-const GOAL_KEYS = ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin'];
 const withGoals = (s) => {
   const out = { ...s };
   for (const k of GOAL_KEYS) if (out[k] === undefined || out[k] === null || out[k] === '' || (typeof DEFAULTS[k] === 'number' && !Number.isFinite(out[k]))) out[k] = DEFAULTS[k];
@@ -1021,26 +1025,27 @@ function seedInMemory() {
 }
 async function load() {
   S.rev++;
-  const stored = await db.kvGet('settings', null);
-  const storedPlans = await db.kvGet('plans', null);
-  S.entries = await db.all('entries');
-  S.days = Object.fromEntries((await db.all('days')).map((d) => [d.day, d]));
-  const storedChecks = await db.kvGet('checks', null);
-  const storedFoods = await db.kvGet('foods', null);
+  const [stored, storedPlans, entries, days, storedChecks, storedFoods, progress, badges] = await Promise.all([
+    db.kvGet('settings', null), db.kvGet('plans', null), db.all('entries'), db.all('days'),
+    db.kvGet('checks', null), db.kvGet('foods', null), db.kvGet('progressReview', null),
+    badgeQueue(() => db.kvGet('badges', null)), // after any write still on its way
+  ]);
+  S.entries = entries;
+  S.days = Object.fromEntries(days.map((d) => [d.day, d]));
   S.checks = storedChecks || [];
   S.foods = storedFoods || [];
-  S.progressReview = readProgress(await db.kvGet('progressReview', null));
-  const badges = await badgeQueue(() => db.kvGet('badges', null)); // after any write still on its way
+  S.progressReview = readProgress(progress);
   S.badges = badges ? cleanBadges(badges) : null;
   const hasData = S.entries.length > 0 || Object.keys(S.days).length > 0 || storedPlans !== null || badges !== null || storedFoods !== null || storedChecks !== null;
-  const setup = needsOnboarding(stored, hasData);
+  // A restore that brought no goals leaves onboarded:false stored with no start weight: setup is still to be done
+  const setup = needsOnboarding(stored, hasData) || (!!stored && stored.onboarded === false && !Number.isFinite(stored.startKg));
   const usage = { ...S.settings.usage, ...((stored && stored.usage) || {}) };
   if (setup) {
     // A new install: the settings stay fresh (a language chosen on the setup screen is kept) until setup is finished
     S.settings = { ...S.settings, ...(stored || {}), usage, onboarded: false };
   } else {
     // An install from before setup existed, or one set up: goals that are missing take the defaults, and it gets its id once
-    S.settings = withGoals({ ...freshSettings(), ...upgradeSettings(stored, newClientId()), usage });
+    S.settings = { ...freshSettings(), ...upgradeSettings(stored, newClientId()), usage };
     const changed = !stored || stored.clientId !== S.settings.clientId || stored.onboarded !== true || GOAL_KEYS.some((k) => stored[k] !== S.settings[k]);
     if (changed) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
   }
@@ -1555,9 +1560,9 @@ const ACT = {
     if (onboarding) return;
     syncOnboard();
     const d = S.onboard;
-    const num = (x) => parseFloat(String(x).replace(',', '.'));
+    const num = (x, integer) => { const n = parseNumberInput(x, integer); return Number.isNaN(n) ? String(x == null ? '' : x) : n; }; // text that is not a number goes on as text, which validateOnboarding reports as invalid
     const day = today();
-    const res = validateOnboarding({ name: d.name, age: d.age, gender: d.gender, weight: num(d.weight), targetKg: num(d.targetKg), targetDate: d.targetDate, kcalRest: num(d.kcalRest), kcalTrain: num(d.kcalTrain), protein: num(d.protein) }, day);
+    const res = validateOnboarding({ name: d.name, age: d.age, gender: d.gender, weight: num(d.weight), targetKg: num(d.targetKg), targetDate: d.targetDate, kcalRest: num(d.kcalRest, true), kcalTrain: num(d.kcalTrain, true), protein: num(d.protein, true) }, day);
     const errors = res.errors.slice();
     if (d.plan !== 'blank' && d.plan !== 'default') errors.push({ field: 'plan', code: 'required' }); // the choice of plan is the screen's, not validateOnboarding's
     if (errors.length) { d.errors = errors; d.focusErrors = true; return render(); }
@@ -1565,11 +1570,16 @@ const ACT = {
     if (el) el.disabled = true;
     const before = { settings: S.settings, hadDay: !!S.days[day] };
     const entriesBefore = S.entries.length;
+    let wrotePlans = false;
     try {
-      // The plan first, then the settings (which end the setup), the first weigh-in last
-      if (d.plan === 'blank') { const mine = blankPlan(db.uid()); await writePlans([mine], mine.id); } else await writePlans([], 'default');
+      const hadPlans = (await db.kvGet('plans', null)) !== null; // restored plans stay as they are
+      // The settings first (they end the setup and hold the real goals), then the plan, the first weigh-in last
       S.settings = { ...S.settings, ...settingsFromOnboarding(res.value, day, S.settings.clientId || newClientId()) };
       await saveSettings();
+      if (!hadPlans) {
+        wrotePlans = true;
+        if (d.plan === 'blank') { const mine = blankPlan(db.uid()); await writePlans([mine], mine.id); } else await writePlans([], 'default');
+      }
       const kg = res.value.weight;
       await saveDay(day, { kg });
       await noteEntry('weight', titleFor('weight', { kg }), { kg }, day);
@@ -1579,12 +1589,12 @@ const ACT = {
       const written = S.entries.slice(entriesBefore).map((e) => e.id);
       S.entries.length = entriesBefore;
       S.rev++;
-      // Each cleanup stands alone; the settings go last, so a failure there skips nothing else
+      // Each cleanup stands alone (entries, the plans record, the day); the settings go last, so a failure there skips nothing else
       for (const id of written) { try { await db.del('entries', id); } catch { /* best effort */ } }
-      try { await db.del('kv', 'plans'); } catch { /* best effort */ }
+      if (wrotePlans) { try { await db.del('kv', 'plans'); } catch { /* best effort */ } }
       if (!before.hadDay) { try { await db.del('days', day); } catch { /* best effort */ } }
       try { await saveSettings(); } catch { /* the form stays and can be sent again */ }
-      seedInMemory();
+      if (wrotePlans) seedInMemory();
       toast(t('Could not save: {reason}', { reason: (err && err.message) || t('storage error') }));
       return render();
     } finally { onboarding = false; if (el) el.disabled = false; }
@@ -1984,6 +1994,7 @@ const ACT = {
     S.settings = { ...S.settings, name: r.value.name, age: r.value.age, gender: r.value.gender };
     await saveSettings();
     render();
+    await openSettings('profile'); // the open sheet shows the saved name and the cleaned fields
     toast(t('Profile saved'));
   },
   'loc-toggle': async (el) => { S.settings.useLocation = el.checked; await saveSettings(); openSettings(); },
@@ -2235,6 +2246,18 @@ $('#composer').addEventListener('submit', (ev) => {
   guard(() => submitText(t), () => { if (!inp.value) inp.value = t; }); // a failed save gives the text back
 });
 document.addEventListener('keydown', (ev) => {
+  // The setup plan choice is a radio group: the arrow keys move and select
+  const radio = ev.target.closest && ev.target.closest('[data-act="onboard-plan"]');
+  if (radio && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) {
+    const all = [...document.querySelectorAll('[data-act="onboard-plan"]')];
+    const i = all.indexOf(radio);
+    if (i >= 0) {
+      ev.preventDefault();
+      const step = ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 1;
+      guard(() => ACT['onboard-plan'](all[(i + step + all.length) % all.length]));
+    }
+    return;
+  }
   if (ev.key === 'Escape' && !$('#sheet').hidden) dismissSheet();
   // Enter in the correction box sends it
   if (ev.key === 'Enter' && (ev.target.id === 'supp-name' || ev.target.id === 'supp-dose')) { ev.preventDefault(); guard(ACT['supp-save']); }
@@ -2257,17 +2280,22 @@ function newDay() {
 document.addEventListener('visibilitychange', () => {
   if (!RUNS || document.visibilityState !== 'visible') return;
   newDay();
+  if (!S.settings.onboarded) return; // the setup form is being typed in: drawing it again would rebuild it
   render();
   autoReview();
 });
 // ...and when it stays open and in front through midnight
-setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay()) { render(); autoReview(); } }, 60000);
+setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay() && S.settings.onboarded) { render(); autoReview(); } }, 60000);
 
 // ——— Updates ———
 // When a new service worker takes control the page is still running old files, so it reloads.
 let swReg = null;
 function safeToReload() {
-  if (!S.settings.onboarded) return false; // the setup form may be half-typed
+  if (!S.settings.onboarded) { // the setup form may be half-typed
+    syncOnboard();
+    const o = S.onboard;
+    if (onboarding || (o && ['name', 'age', 'gender', 'weight', 'targetKg', 'targetDate', 'kcalRest', 'kcalTrain', 'protein'].some((k) => o[k]))) return false;
+  }
   const c = S.check;
   const working = S.busy.size || S.reviewing.size || S.coaching.size || S.progressReviewing.size || preparing || c.busy || c.photos.length || c.note || S.draft; // nothing in flight or half-written
   return $('#sheet').hidden && !$('#composer-input').value && !working && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName));
