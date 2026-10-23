@@ -13,7 +13,7 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, GOAL_KEYS } from './onboarding.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1006,7 +1006,7 @@ async function importBackup(file) {
   render();
   if (S.sheet && S.sheet.type === 'settings') await openSettings(); // the open sheet shows the restored language
   const back = tn('{n} entry restored|{n} entries restored', restored);
-  if (noGoals) return toast(t('This backup has no goals. Enter yours to finish setting up.'));
+  if (noGoals) return toast(t('{restored}; {noGoals}', { restored: back, noGoals: t('This backup has no goals. Enter yours to finish setting up.') }));
   toast(skipped ? t('{restored}; {skipped}', { restored: back, skipped: tn('{n} damaged item skipped|{n} damaged items skipped', skipped) }) : back);
 }
 
@@ -1540,6 +1540,7 @@ const ACT = {
     toast(el.dataset.kind === 'kg' ? t('Weight removed') : t('Steps removed'));
   },
   'lang': async (el) => { // the language control in Settings
+    if (onboarding) return; // a setup save is in flight: its rollback would restore a stale language
     const prev = S.settings.lang;
     S.settings.lang = el.dataset.lang === 'tr' ? 'tr' : 'en';
     if (!(await applyLang(S.settings.lang))) { S.settings.lang = prev; return; } // only a choice made here is rolled back
@@ -1983,7 +1984,7 @@ const ACT = {
     if (!patch.startDate || !patch.targetDate || patch.targetDate <= patch.startDate || !(patch.startKg > patch.targetKg) || !(patch.kcalMinDay >= 500) || !(patch.kcalRest >= patch.kcalMinDay) || !(patch.kcalTrain >= patch.kcalRest) || !(patch.protein > 50)) {
       return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
     }
-    S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * 0.89) };
+    S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();
     toast(t('Goals saved'));

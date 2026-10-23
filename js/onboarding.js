@@ -11,6 +11,7 @@ export const NAME_MAX = 40;
 export const AGE_RANGE = [18, 120];
 export const KCAL_FLOOR = 500;
 export const PROTEIN_MIN = 50;
+export const PROTEIN_MIN_RATIO = 0.89; // the same ratio save-targets in app.js uses
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === d; };
@@ -19,7 +20,8 @@ export function newClientId() {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
   const b = new Uint8Array(16);
-  c.getRandomValues(b);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
   b[6] = (b[6] & 0x0f) | 0x40; // version 4
   b[8] = (b[8] & 0x3f) | 0x80; // variant 10
   const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -98,7 +100,7 @@ export function validateOnboarding(input, today) {
   else value.targetKg = targetKg;
   const td = typeof input.targetDate === 'string' ? input.targetDate.trim() : '';
   if (!td) bad('targetDate', 'required');
-  else if (!DAY_RE.test(td) || !realDay(td)) bad('targetDate', 'invalid');
+  else if (!DAY_RE.test(td) || !realDay(td) || !(typeof today === 'string' && DAY_RE.test(today) && realDay(today))) bad('targetDate', 'invalid');
   else if (!(td > today)) bad('targetDate', 'not_after_today');
   else value.targetDate = td;
   const kcalRest = rnd(read(input.kcalRest, true));
@@ -129,7 +131,7 @@ export function validateOnboarding(input, today) {
 export function settingsFromOnboarding(input, today, clientId) {
   return {
     startDate: today, startKg: input.weight, targetKg: input.targetKg, targetDate: input.targetDate,
-    kcalRest: input.kcalRest, kcalTrain: input.kcalTrain, protein: input.protein, proteinMin: Math.round(input.protein * 0.89),
+    kcalRest: input.kcalRest, kcalTrain: input.kcalTrain, protein: input.protein, proteinMin: Math.round(input.protein * PROTEIN_MIN_RATIO),
     kcalMinDay: Math.min(DEFAULTS.kcalMinDay, input.kcalRest),
     name: input.name || '', age: input.age || 0, gender: input.gender || '', clientId, onboarded: true,
   };

@@ -181,3 +181,16 @@ test('GOAL_KEYS is the one list of goal settings', () => {
   assert.equal(GOAL_KEYS.length, 8);
   assert.ok(GOAL_KEYS.includes('startKg') && GOAL_KEYS.includes('proteinMin'));
 });
+
+test('newClientId falls back to Math.random without crypto', () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
+  try { assert.match(newClientId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/); }
+  finally { if (saved) Object.defineProperty(globalThis, 'crypto', saved); else delete globalThis.crypto; }
+});
+
+test('validateOnboarding reports a bad today as an invalid targetDate', () => {
+  for (const bad of [undefined, 'x', '2026-02-30']) {
+    assert.deepEqual(validateOnboarding(ok, bad).errors, [{ field: 'targetDate', code: 'invalid' }]);
+  }
+});

@@ -905,6 +905,7 @@ export default {
   'The backup could not be restored completely': 'Yedek tam olarak geri yüklenemedi',
   '{n} entry restored|{n} entries restored': '{n} kayıt geri yüklendi',
   '{restored}; {skipped}': '{restored}; {skipped}',
+  '{restored}; {noGoals}': '{restored}; {noGoals}',
   '{n} damaged item skipped|{n} damaged items skipped': '{n} bozuk öğe atlandı',
   'First kilo down': 'İlk kilo verildi',
   '{n} kilos down': '{n} kilo verildi',
