@@ -182,11 +182,18 @@ test('GOAL_KEYS is the one list of goal settings', () => {
   assert.ok(GOAL_KEYS.includes('startKg') && GOAL_KEYS.includes('proteinMin'));
 });
 
-test('newClientId falls back to Math.random without crypto', () => {
+test('newClientId returns an empty id without crypto, never a weak one', () => {
   const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
-  try { assert.match(newClientId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/); }
-  finally { if (saved) Object.defineProperty(globalThis, 'crypto', saved); else delete globalThis.crypto; }
+  const rnd = Math.random;
+  Math.random = () => { throw new Error('Math.random must not be used'); };
+  try { assert.equal(newClientId(), ''); }
+  finally { Math.random = rnd; if (saved) Object.defineProperty(globalThis, 'crypto', saved); else delete globalThis.crypto; }
+});
+
+test('upgradeSettings does not invent an id when none is given', () => {
+  assert.equal(upgradeSettings({}, '').clientId, '');
+  assert.equal(upgradeSettings({ clientId: 'old' }, '').clientId, 'old');
 });
 
 test('validateOnboarding reports a bad today as an invalid targetDate', () => {

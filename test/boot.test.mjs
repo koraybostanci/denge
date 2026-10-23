@@ -36,6 +36,18 @@ test('an already-upgraded install needs no save', () => {
   assert.equal(d.settings.clientId, 'abc');
 });
 
+test('with no crypto (empty id) a stored install needs no save, and a first start saves once', () => {
+  const stored = { ...fresh, ...goals, onboarded: true, clientId: '' };
+  const d = decide({ stored, hasData: true, fallbackId: '' });
+  assert.equal(d.needsSave, false);
+  assert.equal(d.settings.clientId, '');
+  delete stored.clientId;
+  const first = decide({ stored, hasData: true, fallbackId: '' });
+  assert.equal(first.needsSave, true);
+  const second = decide({ stored: first.settings, hasData: true, fallbackId: '' });
+  assert.equal(second.needsSave, false);
+});
+
 test('a changed goal value (a missing goal taking its default) needs a save', () => {
   const stored = { ...fresh, ...goals, onboarded: true, clientId: 'abc' };
   delete stored.protein;

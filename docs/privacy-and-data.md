@@ -23,8 +23,7 @@
 - Your age and gender, if you entered them (Settings → Profile, or at setup), are sent in the progress review only, as one line
   of context for a realistic pace and protein (only "female" or "male" is sent as a word; other choices send nothing). Your name is
   never sent: it stays on the device and is used for the greeting on Today. Neither goes into any other request.
-- The app creates an install id on first start. It stays on this device, is not in a backup file or the SQL export, and is
-  not sent in any request. It is also mirrored in the browser's local storage on this device. A factory reset keeps it (best effort: a browser can clear a site's data, and then the app starts with a new one).
+- The app creates an install id on first start, with the browser's random generator (Web Crypto), if it has one; with none, the install has no id. It stays on this device, is mirrored in the browser's local storage on this device, and is not in a backup file or the SQL export or sent in any request. A factory reset keeps it. It changes only when the browser clears this site's data (for example clearing website data in the browser settings) or when the app is installed on another device. There is no control in the app to change it.
 - Photos taken for a check are sent at up to 1536 px, so small print stays readable, together with
   where your day stands. They are not stored; the last 30 verdicts are, as text.
 - A photo taken to fill in a food's values is sent with no other data and is not stored. The

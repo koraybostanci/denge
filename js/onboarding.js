@@ -20,16 +20,9 @@ const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.i
 export function newClientId() {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  let h = '';
-  if (c && typeof c.getRandomValues === 'function') h = [...c.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
-  else {
-    // no crypto: hex from the clock, the timer and Math.random
-    let perf = 0;
-    try { if (typeof performance !== 'undefined' && typeof performance.now === 'function') perf = Math.floor(performance.now() * 1000); } catch { /* no timer */ }
-    h = Date.now().toString(16).padStart(12, '0').slice(-12) + perf.toString(16).padStart(8, '0').slice(-8);
-    while (h.length < 32) h += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
-    h = h.slice(0, 32);
-  }
+  // no Web Crypto: no id at all, never one from the clock, the timer or Math.random
+  if (!c || typeof c.getRandomValues !== 'function') return '';
+  const h = [...c.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
   const v = h.slice(0, 12) + '4' + h.slice(13, 16) + '89ab'[parseInt(h[16], 16) & 3] + h.slice(17); // version 4, variant 10
   return `${v.slice(0, 8)}-${v.slice(8, 12)}-${v.slice(12, 16)}-${v.slice(16, 20)}-${v.slice(20)}`;
 }
