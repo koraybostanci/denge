@@ -178,6 +178,8 @@ export function screens() {
   add('progress-review-gated', views.renderProgress);
   [S.entries, S.days] = kept2;
   S.progressReview = rec;
+  // The warning over the main screens when the startup settings upgrade could not be saved
+  add('save-warning', views.renderSaveWarning);
   // The setup screen: empty, then after a failed try (an error under each kind of field, and the plan not chosen)
   S.onboard = null;
   add('onboarding', views.renderOnboarding);

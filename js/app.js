@@ -15,7 +15,7 @@ import {
 import seedPlan from './default-plan.js';
 import { bootDecision, commitSetup, newSetupJournal, setupHadPlans } from './boot.js';
 import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
-import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart, renderSaveWarning } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -24,7 +24,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const CLIENT_ID_KEY = 'weightplan.clientId'; // a mirror of the install id, so a failed settings write does not give a new id at every start
 const mirroredClientId = () => { try { const v = localStorage.getItem(CLIENT_ID_KEY); return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : ''; } catch { return ''; } };
 const mirrorClientId = (id) => { try { if (id) localStorage.setItem(CLIENT_ID_KEY, id); } catch { /* no storage; the setting itself is kept */ } };
-async function saveSettings() { S.rev++; rememberLang(S.settings.lang); mirrorClientId(S.settings.clientId); await db.kvSet('settings', S.settings); }
+async function saveSettings() { S.rev++; rememberLang(S.settings.lang); mirrorClientId(S.settings.clientId); await db.kvSet('settings', S.settings); S.saveWarning = false; }
 // Switches the interface language and says whether it worked. When the text cannot be loaded (offline before it was cached)
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
@@ -1053,7 +1053,7 @@ async function load() {
   S.settings = boot.settings;
   if (!setup) {
     mirrorClientId(S.settings.clientId);
-    if (boot.needsSave) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
+    if (boot.needsSave) { try { await saveSettings(); } catch { S.saveWarning = true; /* tried again on the next start; the banner offers a retry now */ } }
   }
   // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
   // and a meal it no longer has loses its picture.
@@ -1119,7 +1119,7 @@ function render() {
   const y = window.scrollY;
   const fn = { today: renderToday, log: renderLog, check: renderCheck, progress: renderProgress, plan: renderPlan }[S.tab];
   const focusId = document.activeElement && v.contains(document.activeElement) ? document.activeElement.id : '';
-  v.innerHTML = fn();
+  v.innerHTML = (S.saveWarning ? renderSaveWarning() : '') + fn();
   v.dataset.view = S.tab;
   document.querySelectorAll('.tabs button').forEach((b) => {
     if (b.dataset.tab === S.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -1620,6 +1620,11 @@ const ACT = {
     window.scrollTo(0, 0);
     const h = $('#view h1');
     if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+  },
+  'retry-settings': async () => {
+    try { await saveSettings(); } catch (err) { return report(err); }
+    render();
+    toast(t('Settings saved'));
   },
   'hide-start': async () => { S.settings.hideStart = true; await saveSettings(); render(); },
   'camera': () => { photoTarget = null; $('#f-cam').click(); },
@@ -2122,6 +2127,7 @@ const ACT = {
     S.urls.clear();
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept, clientId, onboarded: false };
+    S.saveWarning = false;
     await saveSettings(); // at once: a reload from here on comes back to setup, not to an empty app
     seedInMemory(); // the plans start again from the seed; the record is written when setup is finished
     clearTimeout(announceTimer);

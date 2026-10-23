@@ -28,6 +28,7 @@ export const S = {
   settings: freshSettings(),
   entries: [],
   days: {},
+  saveWarning: false, // the startup upgrade of the settings could not be written: a banner with Retry shows until a save succeeds
   rev: 0, // moves on every save, load, clear and restore: what a cached result of the log is keyed on
   badgeIntro: 0, // badges taken in from the history, told once on the Progress tab
   viewDay: dayKey(new Date()),

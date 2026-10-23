@@ -1836,6 +1836,10 @@ export function onboardError(field, code) {
 }
 
 // The setup screen: one form. What was typed lives in S.onboard ({ name, age, gender, weight, targetKg, targetDate, kcalRest, kcalTrain, protein, plan: '' | 'blank' | 'default', errors: [{ field, code }] }), so drawing it again keeps it.
+// The banner over the main screens while the settings upgrade made at startup is not on this device yet
+export function renderSaveWarning() {
+  return `<div class="save-warning" role="status"><p>${t('Part of this install’s settings could not be saved on this device. Your log is not affected. Retry, or the app will try again the next time it opens.', { $id: 'save_warning.body' })}</p><button type="button" class="btn" data-act="retry-settings">${t('Retry')}</button></div>`; // i18n-ok: markup
+}
 export function renderOnboarding() {
   const d = S.onboard || {};
   const errs = {};
