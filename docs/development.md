@@ -24,6 +24,31 @@ rendered in Node from a fixed state (`test/screens.mjs`) for the English snapsho
 (`test/fixtures/en-snapshot.json`, regenerate it with `UPDATE_SNAPSHOT=1 node --test` after an
 intended English change) and for the language checks.
 
+## Browser smoke test
+
+The DOM and storage flows that `node --test` cannot reach run in headless Chromium, with no
+dependencies and no network beyond a server on localhost:
+
+```sh
+node tools/browser-smoke.mjs
+CHROME=/path/to/chrome node tools/browser-smoke.mjs   # a browser that is not found on its own
+```
+
+It prints `ok N checks` and exits 0, or names the failing step and exits 1. Without a Chromium it
+prints `SKIP: no Chromium found` and exits 0. It lives under `tools/`, so `node --test` does not run
+it. It uses a throw-away profile (removed on exit), switches the service worker off and uses the
+real `js/db.js`. The browser helpers are in `tools/browser-lib.mjs`.
+
+It covers: the setup screen's validation and focus; focus on the status line while saving; finishing
+setup with Default; an install from before setup existed being upgraded; the warning with Retry when
+the start-up save fails; a factory reset keeping the install id; a restore from the setup screen with
+and without goals (and My plan surviving the finish); and a failed save with a failed cleanup, then a
+changed plan choice. Storage failures are simulated by patching `IDBObjectStore`.
+
+Still manual: real touch input, browsers other than Chromium, the real file picker for a restore, a
+genuine storage failure (not a patched `IDBObjectStore.put`), and the service-worker update path
+while setup is open.
+
 ## Languages
 
 The interface is English or Turkish. The English text is written inline in the code and is its own
