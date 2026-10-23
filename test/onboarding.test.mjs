@@ -1,7 +1,7 @@
 // First-run setup: validation, the settings it produces and the upgrade of old settings (js/onboarding.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_LOSS_PER_WEEK, newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
+import { MAX_LOSS_PER_WEEK, weeklyLoss, tooFast, newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
 import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
@@ -204,4 +204,23 @@ test('pace: at most MAX_LOSS_PER_WEEK kg a week', () => {
   assert.deepEqual(codes({ weight: 90, targetKg: 87.9, targetDate: '2026-10-30' }), ['targetDate:too_fast']);
   assert.deepEqual(codes({ weight: 90, targetKg: 75, targetDate: '2026-10-24' }), ['targetDate:too_fast']); // 15 kg by tomorrow
   assert.deepEqual(codes({ weight: 90, targetKg: 95, targetDate: '2026-10-24' }), ['targetKg:not_below_weight']); // no pace error on top of another
+});
+
+test('weeklyLoss and tooFast', () => {
+  assert.equal(weeklyLoss(90, 88, '2026-10-23', '2026-10-30'), 2);
+  assert.equal(weeklyLoss(90.3, 88.3, '2026-10-23', '2026-10-30'), 2); // rounded to 0.1 kg
+  assert.equal(weeklyLoss(90, 80, '2026-10-23', '2026-10-23'), Infinity);
+  assert.ok(Number.isNaN(weeklyLoss(90, 80, '2026-10-23', 'x')));
+  assert.ok(Number.isNaN(weeklyLoss(NaN, 80, '2026-10-23', '2026-11-23')));
+  assert.equal(tooFast(90, 88, '2026-10-23', '2026-10-30'), false);
+  assert.equal(tooFast(90, 87.9, '2026-10-23', '2026-10-30'), true);
+  assert.equal(tooFast(90, 80, '2026-10-23', '2026-10-23'), true);
+  assert.equal(tooFast(NaN, 80, '2026-10-23', '2026-11-23'), false);
+  assert.equal(tooFast(87, 78, '2026-10-05', '2026-12-31'), false); // the default goals
+});
+
+test('a pace error puts the focus on the goal date, where its message is shown', async () => {
+  const { onboardFocusId } = await import('../js/views.js');
+  assert.equal(onboardFocusId([{ field: 'targetDate', code: 'too_fast' }]), 'ob-date');
+  assert.equal(onboardFocusId([{ field: 'weight', code: 'range' }, { field: 'targetDate', code: 'too_fast' }]), 'ob-weight');
 });

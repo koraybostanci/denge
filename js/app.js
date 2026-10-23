@@ -13,7 +13,7 @@ import {
   APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, tooFast, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1574,8 +1574,12 @@ const ACT = {
     if (d.plan !== 'blank' && d.plan !== 'default') errors.push({ field: 'plan', code: 'required' }); // the choice of plan is the screen's, not validateOnboarding's
     if (errors.length) { d.errors = errors; d.focusErrors = true; return render(); }
     onboarding = true;
-    if (el) el.disabled = true;
-    document.querySelectorAll('[data-act="lang"]').forEach((b) => { b.disabled = true; });
+    S.onboard.errors = []; // old messages are not drawn again while saving or after a failed save
+    S.onboard.saving = true;
+    renderSetup($('#view')); // the typed values are in the draft; the language buttons draw disabled
+    el = $('[data-act="onboard-finish"]') || el; // the form was drawn again: the button is new and takes the focus back
+    el.disabled = true;
+    el.focus({ preventScroll: true });
     const before = { settings: S.settings, hadDay: !!S.days[day] };
     const entriesBefore = S.entries.length;
     let wrotePlans = false;
@@ -1593,6 +1597,7 @@ const ACT = {
       await noteEntry('weight', titleFor('weight', { kg }), { kg }, day);
     } catch (err) {
       S.settings = { ...before.settings, onboarded: false };
+      if (S.onboard) S.onboard.saving = false;
       if (!before.hadDay) delete S.days[day];
       const written = S.entries.slice(entriesBefore).map((e) => e.id);
       S.entries.length = entriesBefore;
@@ -1604,8 +1609,16 @@ const ACT = {
       try { await saveSettings(); } catch { /* the form stays and can be sent again */ }
       if (wrotePlans) seedInMemory();
       toast(t('Could not save: {reason}', { reason: (err && err.message) || t('storage error') }));
-      return render();
-    } finally { onboarding = false; if (el) el.disabled = false; document.querySelectorAll('[data-act="lang"]').forEach((b) => { b.disabled = false; }); }
+      render();
+      const again = $('[data-act="onboard-finish"]');
+      if (again) again.focus({ preventScroll: true });
+      return;
+    } finally {
+      onboarding = false;
+      if (S.onboard) S.onboard.saving = false;
+      const btn = $('[data-act="onboard-finish"]'); // the form was drawn again: the old button is gone
+      if (btn) btn.disabled = false;
+    }
     S.onboard = null;
     S.tab = 'today';
     S.viewDay = day;
@@ -1991,6 +2004,9 @@ const ACT = {
     if (!patch.startDate || !patch.targetDate || patch.targetDate <= patch.startDate || !(patch.startKg > patch.targetKg) || !(patch.kcalMinDay >= 500) || !(patch.kcalRest >= patch.kcalMinDay) || !(patch.kcalTrain >= patch.kcalRest) || !(patch.protein > 50)) {
       return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
     }
+    const st = S.settings;
+    const goalChanged = patch.startKg !== st.startKg || patch.targetKg !== st.targetKg || patch.startDate !== st.startDate || patch.targetDate !== st.targetDate; // a stored goal already past the pace limit does not block other edits
+    if (goalChanged && tooFast(patch.startKg, patch.targetKg, patch.startDate, patch.targetDate)) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
     S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();
@@ -2039,7 +2055,7 @@ const ACT = {
   'export': () => exportBackup(false),
   'export-photos': () => exportBackup(true),
   'export-sql': () => exportSql(),
-  'import': () => $('#set-import').click(),
+  'import': () => { if (!onboarding) $('#set-import').click(); }, // not while the setup save is being written
   'persist': async () => {
     try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* not supported */ }
     openSettings();
@@ -2149,16 +2165,20 @@ document.addEventListener('click', (ev) => {
   if (ACT[act]) { ev.preventDefault(); guard(() => ACT[act](el)); }
 });
 
+// Profile fields typed but not saved are kept, so a rebuilt Settings sheet does not lose them
+function syncProfileDraft() {
+  const n = $('#set-name'), a = $('#set-age'), g = $('#set-gender');
+  if (n && a && g) S.profileDraft = { name: n.value, age: a.value, gender: g.value };
+}
+
 // The zoom slider of the framing step
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
-  // Profile fields typed but not saved are kept, so a rebuilt Settings sheet does not lose them
   if (ev.target.id === 'set-name' || ev.target.id === 'set-age') {
-    const n = $('#set-name'), a = $('#set-age'), g = $('#set-gender');
-    if (n && a && g) S.profileDraft = { name: n.value, age: a.value, gender: g.value };
+    syncProfileDraft();
   }
   // What is typed for a check is kept in state, so a re-render does not lose it
   if (ev.target.id === 'check-note') {
@@ -2171,8 +2191,7 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('change', (ev) => guard(async () => {
   const el = ev.target;
   if (el.id === 'set-gender') {
-    const n = $('#set-name'), a = $('#set-age');
-    if (n && a) S.profileDraft = { name: n.value, age: a.value, gender: el.value };
+    syncProfileDraft();
   }
   if (el.id === 'f-cam' || el.id === 'f-lib') {
     const files = Array.from(el.files || []);

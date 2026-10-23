@@ -1811,7 +1811,8 @@ const OB_ORDER = ['name', 'age', 'gender', 'weight', 'targetKg', 'targetDate', '
 const OB_ID = {  name: 'ob-name', age: 'ob-age', gender: 'ob-gender', weight: 'ob-weight', targetKg: 'ob-target', targetDate: 'ob-date', kcalRest: 'ob-rest', kcalTrain: 'ob-train', protein: 'ob-protein', plan: 'ob-plan-blank' }; // i18n-ok: field names and element ids
 export const ONBOARD_IDS = OB_ID;
 export const onboardFocusId = (errors) => {
-  const first = OB_ORDER.find((f) => (errors || []).some((e) => e.field === f));
+  const fields = (errors || []).map((e) => e.field);
+  const first = OB_ORDER.find((f) => fields.includes(f));
   return first ? OB_ID[first] : '';
 };
 // The words for a failed check of validateOnboarding (js/onboarding.js), or the missing choice of plan, which the app adds
@@ -1840,15 +1841,17 @@ export function renderOnboarding() {
   const errs = {};
   for (const e of d.errors || []) if (!errs[e.field]) errs[e.field] = onboardError(e.field, e.code);
   const lang = getLang() === 'tr' ? 'tr' : 'en';
+  const paceBad = !!errs.targetDate && (d.errors || []).some((e) => e.code === 'too_fast' && e.field === 'targetDate'); // i18n-ok: field name; the goal weight shares the date's message, only when it is drawn
   const input = (f, label, extra = '') => {
     const id = OB_ID[f];
-    const bad = errs[f] ? ` aria-invalid="true" aria-describedby="${id}-err"` : ''; // i18n-ok: attribute names
+    const bad = errs[f] ? ` aria-invalid="true" aria-describedby="${id}-err"` : f === 'targetKg' && paceBad ? ` aria-invalid="true" aria-describedby="${OB_ID.targetDate}-err"` : ''; // i18n-ok: attribute names
     const type = f === 'targetDate' ? 'date' : 'text'; // i18n-ok: input types
-    return `<div class="ob-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" ${extra} value="${esc(d[f] == null ? '' : d[f])}"${bad}>${errs[f] ? `<p class="note is-error" id="${id}-err">${esc(errs[f])}</p>` : ''}</div>`; // i18n-ok: markup
+    const off = d.saving ? ' disabled' : ''; // i18n-ok: attribute
+    return `<div class="ob-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" ${extra}${off} value="${esc(d[f] == null ? '' : d[f])}"${bad}>${errs[f] ? `<p class="note is-error" id="${id}-err">${esc(errs[f])}</p>` : ''}</div>`; // i18n-ok: markup
   };
   const genders = [['female', t('Female')], ['male', t('Male')], ['other', t('Other')], ['none', t('Prefer not to say')]]; // i18n-ok: stored values
-  const gender = `<div class="ob-field"><label for="ob-gender">${t('Gender')}</label><select id="ob-gender"${errs.gender ? ' aria-invalid="true" aria-describedby="ob-gender-err"' : ''}><option value=""${d.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${d.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${errs.gender ? `<p class="note is-error" id="ob-gender-err">${esc(errs.gender)}</p>` : ''}</div>`; // i18n-ok: markup
-  const choice = (v, label, id) => `<button type="button" role="radio" id="${id}" data-act="onboard-plan" data-plan="${v}" aria-checked="${d.plan === v}" tabindex="${d.plan === v || (!d.plan && v === 'blank') ? 0 : -1}">${label}</button>`; // i18n-ok: markup
+  const gender = `<div class="ob-field"><label for="ob-gender">${t('Gender')}</label><select id="ob-gender"${d.saving ? ' disabled' : ''}${errs.gender ? ' aria-invalid="true" aria-describedby="ob-gender-err"' : ''}><option value=""${d.gender ? '' : ' selected'}>${t('Not chosen')}</option>${genders.map(([v, l]) => `<option value="${v}"${d.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${errs.gender ? `<p class="note is-error" id="ob-gender-err">${esc(errs.gender)}</p>` : ''}</div>`; // i18n-ok: markup
+  const choice = (v, label, id) => `<button type="button" role="radio" id="${id}" data-act="onboard-plan" data-plan="${v}" aria-checked="${d.plan === v}"${d.saving ? ' disabled' : ''} tabindex="${d.plan === v || (!d.plan && v === 'blank') ? 0 : -1}">${label}</button>`; // i18n-ok: markup
   const C = { blank: choice('blank', t('Start blank'), 'ob-plan-blank'), other: choice('default', t('Use the default plan'), 'ob-plan-default') }; // i18n-ok: plan values and ids
   const F = {};
   F.name = input('name', t('Name'), 'autocomplete="off"'); // i18n-ok: field names
@@ -1868,8 +1871,8 @@ export function renderOnboarding() {
   </header>
   <section class="ob-lang">
     <div class="seg" role="group" aria-label="${t('Language')}">
-      <button type="button" lang="en" data-act="lang" data-lang="en" aria-pressed="${lang === 'en'}">English</button>
-      <button type="button" lang="tr" data-act="lang" data-lang="tr" aria-pressed="${lang === 'tr'}">Türkçe</button>
+      <button type="button" lang="en" data-act="lang" data-lang="en" aria-pressed="${lang === 'en'}"${d.saving ? ' disabled' : ''}>English</button>
+      <button type="button" lang="tr" data-act="lang" data-lang="tr" aria-pressed="${lang === 'tr'}"${d.saving ? ' disabled' : ''}>Türkçe</button>
     </div>
   </section>
   <section class="ob-section" aria-labelledby="ob-h-you">
@@ -1904,11 +1907,11 @@ export function renderOnboarding() {
     <p class="note">${t('A blank plan is empty and yours to fill. The default plan is a ready-made set of meals you can edit.')}</p>
   </section>
   <div class="actions ob-actions">
-    <button type="button" class="btn btn-primary btn-wide" data-act="onboard-finish">${t('Start', { $id: 'onboard.start' })}</button>
+    <button type="button" class="btn btn-primary btn-wide" data-act="onboard-finish"${d.saving ? ' disabled' : ''}>${t('Start', { $id: 'onboard.start' })}</button>
   </div>
   <section class="ob-section">
     <p class="note">${t('Already used Pickle? Bring your data back from a backup file.')}</p>
-    <div class="actions"><button type="button" class="btn" data-act="import">${t('Restore from a backup')}</button></div>
+    <div class="actions"><button type="button" class="btn" data-act="import"${d.saving ? ' disabled' : ''}>${t('Restore from a backup')}</button></div>
     <input id="set-import" type="file" accept="application/json,.json" hidden>
   </section>`;
 }

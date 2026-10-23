@@ -20,19 +20,30 @@ const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.i
 export function newClientId() {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  const b = new Uint8Array(16);
-  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  let h = '';
+  if (c && typeof c.getRandomValues === 'function') h = [...c.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
   else {
-    // no crypto: mix the clock into the random bytes so two installs at different times differ even with a poor RNG
-    let m = Date.now();
-    try { if (typeof performance !== 'undefined' && typeof performance.now === 'function') m += Math.floor(performance.now() * 1000); } catch { /* no timer */ }
-    for (let i = 0; i < 16; i++) { b[i] = (Math.floor(Math.random() * 256) ^ (m & 0xff)) & 0xff; m = Math.floor(m / 256) + i * 31; }
+    // no crypto: hex from the clock, the timer and Math.random
+    let perf = 0;
+    try { if (typeof performance !== 'undefined' && typeof performance.now === 'function') perf = Math.floor(performance.now() * 1000); } catch { /* no timer */ }
+    h = Date.now().toString(16).padStart(12, '0').slice(-12) + perf.toString(16).padStart(8, '0').slice(-8);
+    while (h.length < 32) h += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
+    h = h.slice(0, 32);
   }
-  b[6] = (b[6] & 0x0f) | 0x40; // version 4
-  b[8] = (b[8] & 0x3f) | 0x80; // variant 10
-  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  const v = h.slice(0, 12) + '4' + h.slice(13, 16) + '89ab'[parseInt(h[16], 16) & 3] + h.slice(17); // version 4, variant 10
+  return `${v.slice(0, 8)}-${v.slice(8, 12)}-${v.slice(12, 16)}-${v.slice(16, 20)}-${v.slice(20)}`;
 }
+
+// The loss the goal needs, kg per week (the weights to 0.1 kg): Infinity when it is due today or earlier and needs a loss, NaN when it cannot be told
+export function weeklyLoss(weight, targetKg, today, targetDate) {
+  const kg = Math.round((weight - targetKg) * 10) / 10;
+  const days = (Date.parse(`${targetDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5;
+  if (!Number.isFinite(kg) || !Number.isFinite(days)) return NaN;
+  if (days <= 0) return kg > 0 ? Infinity : NaN;
+  return kg / days * 7;
+}
+// True when the goal needs more than MAX_LOSS_PER_WEEK (a hair of slack for float noise); false when it cannot be told
+export const tooFast = (weight, targetKg, today, targetDate) => weeklyLoss(weight, targetKg, today, targetDate) > MAX_LOSS_PER_WEEK + 1e-9;
 
 // A number typed into a field: digits with one decimal separator ('.' or ','), or (integer fields only) a thousands form
 // like '1,550', '1.550' or '1 550'. Anything else ('85kg', '85.4.2', '1e2', '0x10', 'Infinity', '-5') is NaN.
@@ -108,7 +119,7 @@ export function validateOnboarding(input, today) {
   if (!td) bad('targetDate', 'required');
   else if (!DAY_RE.test(td) || !realDay(td) || !(typeof today === 'string' && DAY_RE.test(today) && realDay(today))) bad('targetDate', 'invalid');
   else if (!(td > today)) bad('targetDate', 'not_after_today');
-  else if (value.weight !== undefined && value.targetKg !== undefined && Math.round((value.weight - value.targetKg) * 10) / 10 / ((Date.parse(`${td}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5) * 7 > MAX_LOSS_PER_WEEK + 1e-9) bad('targetDate', 'too_fast');
+  else if (value.weight !== undefined && value.targetKg !== undefined && tooFast(value.weight, value.targetKg, today, td)) bad('targetDate', 'too_fast');
   else value.targetDate = td;
   const kcalRest = rnd(read(input.kcalRest, true));
   if (kcalRest === null) bad('kcalRest', 'invalid');
