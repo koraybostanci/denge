@@ -190,6 +190,8 @@ export function screens() {
     { field: 'weight', code: 'required' }, { field: 'targetKg', code: 'required' }, { field: 'targetDate', code: 'required' }, { field: 'targetDate', code: 'invalid' }, { field: 'kcalRest', code: 'range' }, { field: 'protein', code: 'range' }, { field: 'gender', code: 'invalid' },
   ] };
   add('onboarding-required', views.renderOnboarding);
+  S.onboard = { name: 'Ayşe', age: '34', gender: 'female', weight: '80', targetKg: '72', targetDate: day(120), kcalRest: '1800', kcalTrain: '2100', protein: '110', plan: 'blank', errors: [], saving: true };
+  add('onboarding-saving', views.renderOnboarding);
   S.onboard = null;
   return out;
 }

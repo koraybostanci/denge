@@ -1111,7 +1111,7 @@ function renderSetup(v) {
 }
 
 function render() {
-  if (!RUNS) return;
+  if (!RUNS || onboarding) return; // a setup save is in flight: the form stays as it is
   const v = $('#view');
   if (!S.settings.onboarded) return renderSetup(v); // the one gate: no section is drawn before setup is done
   S.onboard = null;
@@ -1576,10 +1576,11 @@ const ACT = {
     onboarding = true;
     S.onboard.errors = []; // old messages are not drawn again while saving or after a failed save
     S.onboard.saving = true;
-    renderSetup($('#view')); // the typed values are in the draft; the language buttons draw disabled
-    el = $('[data-act="onboard-finish"]') || el; // the form was drawn again: the button is new and takes the focus back
-    el.disabled = true;
-    el.focus({ preventScroll: true });
+    const status = $('#ob-status'); // the form stays in the DOM: the status line takes the focus, then the controls lock in place
+    status.textContent = t('Saving your setup…');
+    status.focus({ preventScroll: true });
+    $('#view').setAttribute('aria-busy', 'true');
+    document.querySelectorAll('#view input, #view select, #view button').forEach((c) => { c.disabled = true; });
     let failed = null;
     try {
       if (!d.journal) d.journal = newSetupJournal({ hadPlans: setupHadPlans((await db.kvGet('plans', null)) !== null, S.settings), hadDay: !!S.days[day] }); // the first attempt only; a retry never re-reads the plans
@@ -1605,16 +1606,20 @@ const ACT = {
       if (failed.wrotePlans) seedInMemory(); // writePlans already set S.plans/S.plan, whether or not the record could be removed
       const reason = (failed.error && failed.error.message) || t('storage error');
       toast(failed.rollbackFailed ? t('Could not save: {reason}. The setup may still count as finished; reload and check.', { reason }) : t('Could not save: {reason}', { reason }));
-      render();
-      const again = $('[data-act="onboard-finish"]');
-      if (again) { again.disabled = false; again.focus({ preventScroll: true }); }
+      $('#view').removeAttribute('aria-busy');
+      $('#ob-status').textContent = '';
+      document.querySelectorAll('#view input, #view select, #view button').forEach((c) => { c.disabled = false; });
+      el.focus({ preventScroll: true });
       return;
     }
+    $('#view').removeAttribute('aria-busy');
     S.onboard = null;
     S.tab = 'today';
     S.viewDay = day;
     render();
     window.scrollTo(0, 0);
+    const h = $('#view h1');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
   },
   'hide-start': async () => { S.settings.hideStart = true; await saveSettings(); render(); },
   'camera': () => { photoTarget = null; $('#f-cam').click(); },
@@ -2308,12 +2313,12 @@ function newDay() {
 document.addEventListener('visibilitychange', () => {
   if (!RUNS || document.visibilityState !== 'visible') return;
   newDay();
-  if (!S.settings.onboarded) return; // the setup form is being typed in: drawing it again would rebuild it
+  if (onboarding || !S.settings.onboarded) return; // the setup form is being typed in: drawing it again would rebuild it
   render();
   autoReview();
 });
 // ...and when it stays open and in front through midnight
-setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay() && S.settings.onboarded) { render(); autoReview(); } }, 60000);
+setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay() && S.settings.onboarded && !onboarding) { render(); autoReview(); } }, 60000);
 
 // ——— Updates ———
 // When a new service worker takes control the page is still running old files, so it reloads.
