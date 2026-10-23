@@ -10,11 +10,12 @@ import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } f
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, currentWeight, latestWeight, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, tooFast, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
-import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
+import { bootDecision, commitSetup, newSetupJournal, setupHadPlans } from './boot.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
+import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart, renderSaveWarning } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -23,7 +24,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const CLIENT_ID_KEY = 'weightplan.clientId'; // a mirror of the install id, so a failed settings write does not give a new id at every start
 const mirroredClientId = () => { try { const v = localStorage.getItem(CLIENT_ID_KEY); return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : ''; } catch { return ''; } };
 const mirrorClientId = (id) => { try { if (id) localStorage.setItem(CLIENT_ID_KEY, id); } catch { /* no storage; the setting itself is kept */ } };
-async function saveSettings() { S.rev++; rememberLang(S.settings.lang); mirrorClientId(S.settings.clientId); await db.kvSet('settings', S.settings); }
+async function saveSettings() { S.rev++; rememberLang(S.settings.lang); mirrorClientId(S.settings.clientId); await db.kvSet('settings', S.settings); S.saveWarning = false; }
 // Switches the interface language and says whether it worked. When the text cannot be loaded (offline before it was cached)
 // the screen stays in the language it had; the saved preference is never touched here, so the next start tries again.
 async function applyLang(lang) {
@@ -188,8 +189,9 @@ async function removeEntry(id, silent) {
   if (!silent) toast(t('Entry deleted'));
 }
 
-async function noteEntry(kind, titled, extra, day = today()) {
+async function noteEntry(kind, titled, extra, day = today(), onId) {
   const e = { id: db.uid(), ts: Date.now(), day, createdAt: Date.now(), kind, status: 'ok', src: 'text', ...titled, photoIds: [], timeSrc: 'now', ...extra };
+  if (onId) onId(e.id); // the caller knows the id before the write is awaited
   await saveEntry(e);
   return e;
 }
@@ -975,6 +977,7 @@ async function importBackup(file) {
     if (Array.isArray(data.plans) || (data.plans && typeof data.plans === 'object' && Array.isArray(data.plans.list))) { // anything else (null, a string, an object with no list) is a missing key
       const plans = cleanPlans(data.plans, data.settings && data.settings.activePlan);
       await writePlans(plans.list, plans.active);
+      if (!S.settings.onboarded) { S.settings.setupRestorePlans = true; await saveSettings(); } // setup may still show: a finish keeps these plans (load clears the marker when it does not)
     }
     // Then the pictures: a meal that no plan holds now loses its picture, and a photo nothing refers to any more is deleted
     await setPlanPhotos(pictures);
@@ -998,12 +1001,14 @@ async function importBackup(file) {
   } catch (err) {
     toast(t('The backup could not be restored completely'));
     await load();
+    if (S.onboard) delete S.onboard.journal; // a run begun before the restore is stale
     return render();
   }
   S.profileDraft = null; // a stale draft never overrides the restored profile
   dropDraft(); // a meal being edited goes: saving it would write its old plan over the restored ones (Settings then closes, not back to the food form)
   dropPantry(); // and so does a pantry editor: the restored list is what stands
   await load();
+  if (S.onboard) delete S.onboard.journal; // a setup run begun before the restore is stale
   badgesMode = 'restore';
   restoredFrom = gotBefore;
   checkBadges(); // silently: the restored log may earn more than the backup recorded
@@ -1042,18 +1047,13 @@ async function load() {
   S.progressReview = readProgress(progress);
   S.badges = badges ? cleanBadges(badges) : null;
   const hasData = S.entries.length > 0 || Object.keys(S.days).length > 0 || storedPlans !== null || badges !== null || storedFoods !== null || storedChecks !== null;
-  // A restore that brought no goals leaves onboarded:false stored with no start weight: setup is still to be done
-  const setup = needsOnboarding(stored, hasData) || (!!stored && stored.onboarded === false && !Number.isFinite(stored.startKg));
   const usage = { ...S.settings.usage, ...((stored && stored.usage) || {}) };
-  if (setup) {
-    // A new install: the settings stay fresh (a language chosen on the setup screen is kept) until setup is finished
-    S.settings = { ...S.settings, ...(stored || {}), usage, onboarded: false };
-  } else {
-    // An install from before setup existed, or one set up: goals that are missing take the defaults, and it gets its id once
-    S.settings = { ...freshSettings(), ...upgradeSettings(stored, mirroredClientId() || newClientId()), usage };
+  const boot = bootDecision({ stored, hasData, live: S.settings, fresh: freshSettings(), usage, fallbackId: mirroredClientId() || newClientId() });
+  const setup = boot.setup;
+  S.settings = boot.settings;
+  if (!setup) {
     mirrorClientId(S.settings.clientId);
-    const changed = !stored || stored.clientId !== S.settings.clientId || stored.onboarded !== true || GOAL_KEYS.some((k) => stored[k] !== S.settings[k]);
-    if (changed) { try { await saveSettings(); } catch { /* tried again on the next start */ } }
+    if (boot.needsSave) { try { await saveSettings(); } catch { S.saveWarning = true; /* tried again on the next start; the banner offers a retry now */ } }
   }
   // The plans: Default is always the seed as shipped. When the stored one differs (an update changed it) only it is rewritten,
   // and a meal it no longer has loses its picture.
@@ -1111,7 +1111,7 @@ function renderSetup(v) {
 }
 
 function render() {
-  if (!RUNS) return;
+  if (!RUNS || onboarding) return; // a setup save is in flight: the form stays as it is
   const v = $('#view');
   if (!S.settings.onboarded) return renderSetup(v); // the one gate: no section is drawn before setup is done
   S.onboard = null;
@@ -1119,7 +1119,7 @@ function render() {
   const y = window.scrollY;
   const fn = { today: renderToday, log: renderLog, check: renderCheck, progress: renderProgress, plan: renderPlan }[S.tab];
   const focusId = document.activeElement && v.contains(document.activeElement) ? document.activeElement.id : '';
-  v.innerHTML = fn();
+  v.innerHTML = (S.saveWarning ? renderSaveWarning() : '') + fn();
   v.dataset.view = S.tab;
   document.querySelectorAll('.tabs button').forEach((b) => {
     if (b.dataset.tab === S.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -1576,54 +1576,55 @@ const ACT = {
     onboarding = true;
     S.onboard.errors = []; // old messages are not drawn again while saving or after a failed save
     S.onboard.saving = true;
-    renderSetup($('#view')); // the typed values are in the draft; the language buttons draw disabled
-    el = $('[data-act="onboard-finish"]') || el; // the form was drawn again: the button is new and takes the focus back
-    el.disabled = true;
-    el.focus({ preventScroll: true });
-    const before = { settings: S.settings, hadDay: !!S.days[day] };
-    const entriesBefore = S.entries.length;
-    let wrotePlans = false;
+    const status = $('#ob-status'); // the form stays in the DOM: the status line takes the focus, then the controls lock in place
+    status.textContent = t('Saving your setup…');
+    status.focus({ preventScroll: true });
+    $('#view').setAttribute('aria-busy', 'true');
+    document.querySelectorAll('#view input, #view select, #view button').forEach((c) => { c.disabled = true; });
+    let failed = null;
     try {
-      const hadPlans = (await db.kvGet('plans', null)) !== null; // restored plans stay as they are
-      // The settings first (they end the setup and hold the real goals), then the plan, the first weigh-in last
-      S.settings = { ...S.settings, ...settingsFromOnboarding(res.value, day, S.settings.clientId || mirroredClientId() || newClientId()) };
-      await saveSettings();
-      if (!hadPlans) {
-        wrotePlans = true;
-        if (d.plan === 'blank') { const mine = blankPlan(db.uid()); await writePlans([mine], mine.id); } else await writePlans([], 'default');
-      }
-      const kg = res.value.weight;
-      await saveDay(day, { kg });
-      await noteEntry('weight', titleFor('weight', { kg }), { kg }, day);
+      if (!d.journal) d.journal = newSetupJournal({ hadPlans: setupHadPlans((await db.kvGet('plans', null)) !== null, S.settings), hadDay: !!S.days[day] }); // the first attempt only; a retry never re-reads the plans
+      const dayBefore = S.days[day];
+      const store = {
+        writeSettings: async (s) => { S.settings = s; await saveSettings(); },
+        writePlans: ({ list, active }) => writePlans(list, active),
+        deletePlans: () => db.del('kv', 'plans'),
+        writeDay: (dy, kg) => saveDay(dy, { kg }),
+        deleteDay: async (dy) => { if (!dayBefore) delete S.days[dy]; S.rev++; await db.del('days', dy); },
+        addWeightEntry: (dy, kg, onId) => noteEntry('weight', titleFor('weight', { kg }), { kg }, dy, onId),
+        deleteEntry: async (id) => { const i = S.entries.findIndex((x) => x.id === id); if (i >= 0) S.entries.splice(i, 1); S.rev++; await db.del('entries', id); },
+        uid: () => db.uid(),
+      };
+      const res2 = await commitSetup({ store, journal: d.journal, value: res.value, today: day, clientId: S.settings.clientId || mirroredClientId() || newClientId(), settings: S.settings, plan: d.plan });
+      if (!res2.ok) failed = res2;
     } catch (err) {
-      S.settings = { ...before.settings, onboarded: false };
-      if (S.onboard) S.onboard.saving = false;
-      if (!before.hadDay) delete S.days[day];
-      const written = S.entries.slice(entriesBefore).map((e) => e.id);
-      S.entries.length = entriesBefore;
-      S.rev++;
-      // Each cleanup stands alone (entries, the plans record, the day); the settings go last, so a failure there skips nothing else
-      for (const id of written) { try { await db.del('entries', id); } catch { /* best effort */ } }
-      if (wrotePlans) { try { await db.del('kv', 'plans'); } catch { /* best effort */ } }
-      if (!before.hadDay) { try { await db.del('days', day); } catch { /* best effort */ } }
-      try { await saveSettings(); } catch { /* the form stays and can be sent again */ }
-      if (wrotePlans) seedInMemory();
-      toast(t('Could not save: {reason}', { reason: (err && err.message) || t('storage error') }));
-      render();
-      const again = $('[data-act="onboard-finish"]');
-      if (again) again.focus({ preventScroll: true });
-      return;
-    } finally {
-      onboarding = false;
-      if (S.onboard) S.onboard.saving = false;
-      const btn = $('[data-act="onboard-finish"]'); // the form was drawn again: the old button is gone
-      if (btn) btn.disabled = false;
+      failed = { error: err, wrotePlans: false, rollbackFailed: false }; // the journal could not even be started
     }
+    onboarding = false;
+    if (S.onboard) S.onboard.saving = false;
+    if (failed) {
+      if (failed.wrotePlans) seedInMemory(); // writePlans already set S.plans/S.plan, whether or not the record could be removed
+      const reason = (failed.error && failed.error.message) || t('storage error');
+      toast(failed.rollbackFailed ? t('Could not save: {reason}. The setup may still count as finished; reload and check.', { reason }) : t('Could not save: {reason}', { reason }));
+      $('#view').removeAttribute('aria-busy');
+      $('#ob-status').textContent = '';
+      document.querySelectorAll('#view input, #view select, #view button').forEach((c) => { c.disabled = false; });
+      el.focus({ preventScroll: true });
+      return;
+    }
+    $('#view').removeAttribute('aria-busy');
     S.onboard = null;
     S.tab = 'today';
     S.viewDay = day;
     render();
     window.scrollTo(0, 0);
+    const h = $('#view h1');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+  },
+  'retry-settings': async () => {
+    try { await saveSettings(); } catch (err) { return report(err); }
+    render();
+    toast(t('Settings saved'));
   },
   'hide-start': async () => { S.settings.hideStart = true; await saveSettings(); render(); },
   'camera': () => { photoTarget = null; $('#f-cam').click(); },
@@ -2005,8 +2006,8 @@ const ACT = {
       return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
     }
     const st = S.settings;
-    const goalChanged = patch.startKg !== st.startKg || patch.targetKg !== st.targetKg || patch.startDate !== st.startDate || patch.targetDate !== st.targetDate; // a stored goal already past the pace limit does not block other edits
-    if (goalChanged && tooFast(patch.startKg, patch.targetKg, patch.startDate, patch.targetDate)) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
+    const now = today(); // a stored goal already past the pace limit does not block other edits
+    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
     S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();
@@ -2126,6 +2127,7 @@ const ACT = {
     S.urls.clear();
     S.check.photos.forEach((p) => URL.revokeObjectURL(p.url));
     S.settings = { ...freshSettings(), ...kept, clientId, onboarded: false };
+    S.saveWarning = false;
     await saveSettings(); // at once: a reload from here on comes back to setup, not to an empty app
     seedInMemory(); // the plans start again from the seed; the record is written when setup is finished
     clearTimeout(announceTimer);
@@ -2317,12 +2319,12 @@ function newDay() {
 document.addEventListener('visibilitychange', () => {
   if (!RUNS || document.visibilityState !== 'visible') return;
   newDay();
-  if (!S.settings.onboarded) return; // the setup form is being typed in: drawing it again would rebuild it
+  if (onboarding || !S.settings.onboarded) return; // the setup form is being typed in: drawing it again would rebuild it
   render();
   autoReview();
 });
 // ...and when it stays open and in front through midnight
-setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay() && S.settings.onboarded) { render(); autoReview(); } }, 60000);
+setInterval(() => { if (RUNS && document.visibilityState === 'visible' && newDay() && S.settings.onboarded && !onboarding) { render(); autoReview(); } }, 60000);
 
 // ——— Updates ———
 // When a new service worker takes control the page is still running old files, so it reloads.

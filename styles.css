@@ -153,6 +153,14 @@ button:disabled { opacity: .35; cursor: default; }
 .ob-field .note { margin-top: 0; font-size: 13px; }
 .ob-section .field-grid { align-items: start; }
 .ob-actions { margin-top: 28px; }
+.ob-status { min-height: 1.4em; margin-top: 8px; }
+.ob-status:focus { outline: none; }
+.ob-privacy { margin-top: 8px; }
+.ob-privacy summary { cursor: pointer; color: var(--ink2); font-size: 14px; }
+.save-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-ctl); background: var(--warn-soft); color: var(--warn-ink); font-size: 14px; }
+.save-warning p { flex: 1 1 220px; min-width: 0; margin: 0; }
+.save-warning .btn { flex: none; }
+.ob-privacy .note { margin-top: 4px; }
 .seg [role="radio"] { min-height: 44px; border-radius: var(--r-ctl); font-size: 14px; color: var(--ink2); padding: 0 10px; }
 .seg [role="radio"][aria-checked="true"] { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
 .seg[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--over); }

@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '55'; // bump together with VERSION in sw.js
+export const APP_VERSION = '56'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -28,6 +28,7 @@ export const S = {
   settings: freshSettings(),
   entries: [],
   days: {},
+  saveWarning: false, // the startup upgrade of the settings could not be written: a banner with Retry shows until a save succeeds
   rev: 0, // moves on every save, load, clear and restore: what a cached result of the log is keyed on
   badgeIntro: 0, // badges taken in from the history, told once on the Progress tab
   viewDay: dayKey(new Date()),
@@ -336,6 +337,12 @@ export function avg7(day) {
 export function latestWeight(day = today()) {
   const last = weightSeries().filter((d) => d.day <= day).pop();
   return last ? { kg: last.kg, n: 1, day: last.day } : null;
+}
+
+// The weight a remaining goal is judged from: the latest weigh-in on or before the day, or the
+// fallback (the plan's start weight by default) before the first weigh-in.
+export function currentWeight(day = today(), fallback = S.settings.startKg) {
+  return latestWeight(day)?.kg ?? fallback;
 }
 
 export function weightSeries() {

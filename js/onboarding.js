@@ -12,7 +12,7 @@ export const AGE_RANGE = [18, 120];
 export const KCAL_FLOOR = 500;
 export const PROTEIN_MIN = 50;
 export const PROTEIN_MIN_RATIO = 0.89; // the same ratio save-targets in app.js uses
-export const MAX_LOSS_PER_WEEK = 2; // kg per week: a goal that needs more is not a steady pace
+export const MAX_LOSS_PER_WEEK = 2; // kg per week: a product choice, not medical advice; a goal that needs more is not a steady pace
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === d; };
@@ -20,16 +20,9 @@ const realDay = (d) => { const t = Date.parse(`${d}T00:00:00Z`); return Number.i
 export function newClientId() {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  let h = '';
-  if (c && typeof c.getRandomValues === 'function') h = [...c.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
-  else {
-    // no crypto: hex from the clock, the timer and Math.random
-    let perf = 0;
-    try { if (typeof performance !== 'undefined' && typeof performance.now === 'function') perf = Math.floor(performance.now() * 1000); } catch { /* no timer */ }
-    h = Date.now().toString(16).padStart(12, '0').slice(-12) + perf.toString(16).padStart(8, '0').slice(-8);
-    while (h.length < 32) h += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
-    h = h.slice(0, 32);
-  }
+  // no Web Crypto: no id at all, never one from the clock, the timer or Math.random
+  if (!c || typeof c.getRandomValues !== 'function') return '';
+  const h = [...c.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
   const v = h.slice(0, 12) + '4' + h.slice(13, 16) + '89ab'[parseInt(h[16], 16) & 3] + h.slice(17); // version 4, variant 10
   return `${v.slice(0, 8)}-${v.slice(8, 12)}-${v.slice(12, 16)}-${v.slice(16, 20)}-${v.slice(20)}`;
 }
@@ -44,6 +37,15 @@ export function weeklyLoss(weight, targetKg, today, targetDate) {
 }
 // True when the goal needs more than MAX_LOSS_PER_WEEK (a hair of slack for float noise); false when it cannot be told
 export const tooFast = (weight, targetKg, today, targetDate) => weeklyLoss(weight, targetKg, today, targetDate) > MAX_LOSS_PER_WEEK + 1e-9;
+
+// Settings: a changed goal is judged by the loss still ahead, from the current weight and today.
+// Returns true only when a goal field changed and the remaining pace is too fast; unchanged goals
+// are accepted even if the stored plan is already past the limit. startKg only feeds the pace
+// (as the fallback current weight) while there is no weigh-in; startDate never does.
+export function goalPaceError(stored, patch, currentKg, today, hasWeighIn) {
+  const changed = patch.targetDate !== stored.targetDate || patch.targetKg !== stored.targetKg || (!hasWeighIn && patch.startKg !== stored.startKg);
+  return changed && tooFast(currentKg, patch.targetKg, today, patch.targetDate);
+}
 
 // A number typed into a field: digits with one decimal separator ('.' or ','), or (integer fields only) a thousands form
 // like '1,550', '1.550' or '1 550'. Anything else ('85kg', '85.4.2', '1e2', '0x10', 'Infinity', '-5') is NaN.

@@ -178,6 +178,8 @@ export function screens() {
   add('progress-review-gated', views.renderProgress);
   [S.entries, S.days] = kept2;
   S.progressReview = rec;
+  // The warning over the main screens when the startup settings upgrade could not be saved
+  add('save-warning', views.renderSaveWarning);
   // The setup screen: empty, then after a failed try (an error under each kind of field, and the plan not chosen)
   S.onboard = null;
   add('onboarding', views.renderOnboarding);
@@ -190,6 +192,8 @@ export function screens() {
     { field: 'weight', code: 'required' }, { field: 'targetKg', code: 'required' }, { field: 'targetDate', code: 'required' }, { field: 'targetDate', code: 'invalid' }, { field: 'kcalRest', code: 'range' }, { field: 'protein', code: 'range' }, { field: 'gender', code: 'invalid' },
   ] };
   add('onboarding-required', views.renderOnboarding);
+  S.onboard = { name: 'Ayşe', age: '34', gender: 'female', weight: '80', targetKg: '72', targetDate: day(120), kcalRest: '1800', kcalTrain: '2100', protein: '110', plan: 'blank', errors: [], saving: true };
+  add('onboarding-saving', views.renderOnboarding);
   S.onboard = null;
   return out;
 }
