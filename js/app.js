@@ -10,10 +10,10 @@ import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } f
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
 import {
-  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
+  APP_VERSION, SCHEMA_VERSION, APP_ID, freshSettings, freshCheck, S, mealById, aiCfg, hasKey, today, eff, macroEdits, dayTotals, isPerfect, suppTaken, SUPP_MAX, kilosDown, dayVerdict, verdictText, reviewSig, fmtInt, currentWeight, latestWeight, CHECK_MAX, checkReady, COUNT_MAX, getProgressGen, bumpProgressGen, resetProgressGen, progressSig, progressRatingHint, progressGate, progressState, parseLocal, titleFor, titleOf, startDraft, dropDraft, draftChanged, foodFormChanged, startFood, doneFood, dropFood, releasePhotos,
 } from './core.js';
 import seedPlan from './default-plan.js';
-import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, tooFast, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
+import { validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings, newClientId, parseNumberInput, goalPaceError, GOAL_KEYS, PROTEIN_MIN_RATIO } from './onboarding.js';
 import { onboardError, renderOnboarding, onboardFocusId, ONBOARD_IDS, renderToday, renderLog, renderCheck, renderProgress, renderPlan, renderSettings, renderEntrySheet, renderNumSheet, renderSlotSheet, renderPlanSheet, renderMealEditor, mealEditorTotal, renderFoodForm, renderPantrySheet, renderPantryEditor, renderBadgeSheet, renderAvatarSheet, badgeContext, unlockToast, renderFrameSheet, attachChart } from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -2005,8 +2005,8 @@ const ACT = {
       return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
     }
     const st = S.settings;
-    const goalChanged = patch.startKg !== st.startKg || patch.targetKg !== st.targetKg || patch.startDate !== st.startDate || patch.targetDate !== st.targetDate; // a stored goal already past the pace limit does not block other edits
-    if (goalChanged && tooFast(patch.startKg, patch.targetKg, patch.startDate, patch.targetDate)) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
+    const now = today(); // a stored goal already past the pace limit does not block other edits
+    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
     S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();

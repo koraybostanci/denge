@@ -338,6 +338,12 @@ export function latestWeight(day = today()) {
   return last ? { kg: last.kg, n: 1, day: last.day } : null;
 }
 
+// The weight a remaining goal is judged from: the latest weigh-in on or before the day, or the
+// fallback (the plan's start weight by default) before the first weigh-in.
+export function currentWeight(day = today(), fallback = S.settings.startKg) {
+  return latestWeight(day)?.kg ?? fallback;
+}
+
 export function weightSeries() {
   return Object.values(S.days).filter((d) => d.kg).sort((a, b) => (a.day < b.day ? -1 : 1));
 }

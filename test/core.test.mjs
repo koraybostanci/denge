@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, avg7, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, currentWeight, avg7, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
   itemRests, REST_KCAL, REST_MACROS,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
@@ -139,6 +139,16 @@ test('a week without weighing keeps the last average, so progress does not reset
   assert.equal(avg7(T), null);
   assert.equal(latestWeight(T).kg, 84);
   assert.equal(kilosDown(T), 2);
+});
+
+test('currentWeight: latest weigh-in, else the fallback, ignoring future days', () => {
+  reset();
+  assert.equal(currentWeight(T), S.settings.startKg);
+  assert.equal(currentWeight(T, 91), 91);
+  S.days[day(-3)] = { day: day(-3), kg: 84 };
+  S.days[day(2)] = { day: day(2), kg: 70 };
+  assert.equal(currentWeight(T, 91), 84);
+  assert.equal(currentWeight(day(-5), 91), 91);
 });
 
 test('kilos down follow the latest weigh-in, not the average', () => {

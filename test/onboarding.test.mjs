@@ -1,7 +1,7 @@
 // First-run setup: validation, the settings it produces and the upgrade of old settings (js/onboarding.js). `node --test`
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_LOSS_PER_WEEK, weeklyLoss, tooFast, newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
+import { MAX_LOSS_PER_WEEK, weeklyLoss, tooFast, goalPaceError, newClientId, parseNumberInput, GOAL_KEYS, validateProfile, validateOnboarding, settingsFromOnboarding, blankPlan, needsOnboarding, upgradeSettings } from '../js/onboarding.js';
 import { freshSettings } from '../js/core.js';
 import { DEFAULTS } from '../js/plan.js';
 import { cleanSettings } from '../js/backup.js';
@@ -217,6 +217,22 @@ test('weeklyLoss and tooFast', () => {
   assert.equal(tooFast(90, 80, '2026-10-23', '2026-10-23'), true);
   assert.equal(tooFast(NaN, 80, '2026-10-23', '2026-11-23'), false);
   assert.equal(tooFast(87, 78, '2026-10-05', '2026-12-31'), false); // the default goals
+});
+
+test('goalPaceError judges a changed goal from the current weight and today', () => {
+  const stored = { startDate: '2026-01-01', startKg: 100, targetDate: '2026-12-31', targetKg: 80 };
+  const err = (patch, kg, weighed = true) => goalPaceError(stored, { ...stored, ...patch }, kg, '2026-10-23', weighed);
+  assert.equal(err({}, 90), false); // unchanged
+  assert.equal(err({ targetDate: '2026-11-06' }, 90), true); // late edit: 10 kg in 2 weeks
+  assert.equal(err({ targetDate: '2027-02-01' }, 90), false);
+  assert.equal(err({ targetDate: '2026-10-22' }, 90), true); // past date, still above goal
+  assert.equal(err({ targetKg: 70 }, 90), true);
+  const over = { ...stored, targetDate: '2026-11-06' }; // stored plan already past the limit
+  assert.equal(goalPaceError(over, { ...over }, 90, '2026-10-23', true), false);
+  assert.equal(goalPaceError(over, { ...over, startDate: '2026-02-01' }, 90, '2026-10-23', true), false);
+  assert.equal(goalPaceError(over, { ...over, startKg: 99 }, 90, '2026-10-23', true), false); // weigh-in present
+  assert.equal(goalPaceError(over, { ...over, startKg: 99 }, 99, '2026-10-23', false), true); // no weigh-in: start is the current weight
+  assert.equal(goalPaceError(over, { ...over, startDate: '2026-02-01' }, 100, '2026-10-23', false), false);
 });
 
 test('a pace error puts the focus on the goal date, where its message is shown', async () => {
