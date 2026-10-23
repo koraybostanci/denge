@@ -1612,15 +1612,13 @@ export function renderPantryEditor() {
     : `<div class="notice"><p>${t('Add an API key to fill this in from a photo.')}</p><button type="button" class="link" data-act="settings" data-sec="analysis">${t('Add key')}</button></div>`;
   return `
   <header class="sheet-top"><h2 id="sheet-title">${d.id ? esc(td(((S.foods || []).find((x) => x.id === d.id) || d).name)) : t('Add a product')}</h2><button type="button" class="btn" data-act="pantry-cancel">${t('Cancel')}</button></header>
-  <div class="food-name">
-    <label for="pf-name">${t('Name')}<input id="pf-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(d.name)}"${inv(r.bad.name)}${off}${d.id ? '' : ` placeholder="${t('Eker Skyr natural')}"`}></label>
-    ${hasKey() ? `<button type="button" class="food-photo" data-act="pantry-pick-lib" aria-label="${photo ? t('Change the photo') : t('Add a photo of the label or the food')}"${off}>${photo ? `<img src="${photo.url}" alt="">` : ICON.camera}</button>` : ''}
-  </div>
-  ${ai}
-  ${hasKey() ? `<div class="actions">
+  <label class="pf-name" for="pf-name">${t('Name')}<input id="pf-name" type="text" autocomplete="off" maxlength="${PLAN_CAPS.name}" value="${esc(d.name)}"${inv(r.bad.name)}${off}${d.id ? '' : ` placeholder="${t('Eker Skyr natural')}"`}></label>
+  ${hasKey() ? `<div class="pf-photos">
+    ${photo ? `<img class="pf-thumb" src="${photo.url}" alt="">` : ''}
     <button type="button" class="btn" data-act="pantry-pick-cam"${off}>${ICON.camera}${t('Take a photo')}</button>
     <button type="button" class="btn" data-act="pantry-pick-lib"${off}>${t('Choose a photo')}</button>
   </div>` : ''}
+  ${ai}
   <p class="note">${t('Values per 100 g')}</p>
   <div class="field-grid">
     ${field(0, t('Calories'), 'numeric')}${field(1, t('Protein (g)'), 'decimal')}${field(2, t('Carbs (g)'), 'decimal')}${field(3, t('Fat (g)'), 'decimal')}${field(4, t('Fibre (g)'), 'decimal')}

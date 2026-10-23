@@ -79,3 +79,20 @@ test('the verdict names the matched product in the note, with a link into the Pa
   assert.ok(html.includes(`${NOTE} Hummus dip with olive oil`));
   assert.ok(html.includes('data-act="settings" data-sec="foods"'));
 });
+
+// ——— The pantry editor: one photo row under the name, and the AI fill beneath it (issue #78) ———
+test('the pantry editor has one photo row: no second photo tile beside the name, and the fill sits under the row', () => {
+  const savedDraft = S.foodDraft;
+  const savedSettings = S.settings;
+  S.settings = { ...S.settings, apiKey: 'sk-test', provider: 'anthropic' };
+  S.foodDraft = { id: null, name: 'Eker Skyr natural', v: ['', '', '', '', ''], ing: '', pick: null, newPhoto: null, busy: false, err: '', note: '', status: '' };
+  try {
+    const html = views.renderPantryEditor();
+    assert.equal(html.match(/class="pf-photos"/g).length, 1, 'one photo row');
+    assert.ok(!html.includes('food-photo'), 'no photo tile beside the name');
+    assert.ok(html.indexOf('class="pf-photos"') < html.indexOf('id="pf-ai"'), 'the photo row comes before the AI fill');
+  } finally {
+    S.foodDraft = savedDraft;
+    S.settings = savedSettings;
+  }
+});
