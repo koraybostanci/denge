@@ -5,7 +5,7 @@ import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
 import { readMeta, placeLabel } from './exif.js';
-import { analyze, review, coach, check, progressReview, foodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
+import { analyze, review, coach, check, progressReview, foodValues, cleanItems, reconcileConf, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
 import { buildPlan, SLOTS, SLOT_NAME, FLEX, slotByTime, dayKey, parseDay, addDays, has, DEFAULTS } from './plan.js';
@@ -809,7 +809,7 @@ async function analyzeEntry(id, opts = {}) {
         kind: 'meal', status: 'ok',
         slot: has(SLOT_NAME, data.slot) ? data.slot : e.slot,
         flags: Array.isArray(data.flags) ? data.flags.map((f) => String(f).slice(0, 20)).slice(0, 4) : [],
-        conf: Math.max(0, Math.min(1, +data.conf || 0)), q: String(data.q || '').slice(0, 160),
+        conf: reconcileConf({ conf: data.conf, kcal: e.kcal, p: e.p, c: e.c, f: e.f, flags: data.flags }, e.planId ? null : e.items), q: String(data.q || '').slice(0, 160),
       });
     } else if (settled) {
       failure = t('Nothing to log was found in that, so the entry is unchanged.');

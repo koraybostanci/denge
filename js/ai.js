@@ -25,17 +25,17 @@ function workoutNote(plan) {
 // prompt with no products stays byte-identical). The note is the person's text of this entry: foods they name are
 // always in the digest, whatever the caps.
 const SYSTEM = (note = '') => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
-Input: photo(s) and/or a short text in any language, plus local time and place.
+Input: photo(s) and/or a short text in any language, plus the person's local time and place. Weights are in grams (g), energy in kcal, water in litres.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
-For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks, and when unsure pick the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal.
+For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks. Precedence for each amount: the person's note or correction first, then what is visible, and only where neither shows it the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal, and 4·p + 4·c + 9·f comes within about 15% of kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
 If the meal clearly matches a plan meal below, set plan to its id and use its numbers; otherwise plan is "".
 slot: morning, lunch, snack1, snack2, dinner, late, or ${workoutNote(S.plan)}. Choose by time and content.
-tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = sugary drinks, fried food, crisps, salted nuts, pastries (simit, börek, poğaça, croissant, pretzel), white bread or toast.
+tier: "plan" = fits the plan's foods; "flex" = weekly-budget items (beer, a small dessert, a restaurant dinner); "off" = anything on the plan's off list: ${inEnglish(() => RULES.off.join(' '))}
 flags: add "alcohol" for any alcohol.
-conf: 0–1 confidence in the kcal total. q: if something you cannot see (cooking method, fat content, a count, hidden oil or sugar) could change kcal by more than 10%, ask about it in one short line, else "".
+conf: how sure you are of the kcal total, 0–1: 0.8–1 when every item is visible and its amount is clear, about 0.5 when amounts or hidden fats are guessed, 0.2 or less when the food itself is unclear or there is no photo. q: ask only when a factor you cannot see (cooking method, fat content, a count, hidden oil or sugar) could move kcal by more than 10%, in one short line, else "". Never ask about what the note already settles.
 Plan meals:
-${planDigest(S.plan)}${pantryDigest(note)}`;
+${planOut(S.plan)}${habitsDigest()}${pantryDigest(note)}`;
 
 // The prompts are English and built at each request from the active plan, and what the model sends back is shown as it comes. For Turkish one line is added at request time,
 // from the language the person chose (getUiLang, not changed by inEnglish). English adds nothing, so its prompts are byte-identical.
@@ -46,9 +46,11 @@ const TURKISH = {
 };
 export const langLine = (kind = 'text') => (getUiLang() === 'tr' ? TURKISH[kind] : '');
 
-// Text that came from outside (the pantry's records, a model reply): the squeeze of cleanFood in js/backup.js and
-// cleanIng in js/app.js, mirrored here — one plain line, no control characters, so no text can forge a line's shape
-const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
+// The redaction and the squeeze live in js/text.js (pure, so the briefs import them without the model module); re-exported here for the model's callers
+import { sq, sanitizeOut, placeWord } from './text.js';
+export { sanitizeOut, placeWord };
+// The plan digest, line by line through sanitizeOut (the digest keeps its line breaks)
+const planOut = (plan) => planDigest(plan).split('\n').map(sanitizeOut).join('\n');
 
 // ——— The pantry digest, in the analysis and check SYSTEM texts ———
 // One line per stored food (S.foods, values per 100 g), the person's usual products, so the estimate leans on
@@ -64,11 +66,15 @@ const PANTRY_CHARS = 2000; // the whole digest at most, header and how-to includ
 const PANTRY_ING = 60; // the ingredients snippet of a check line, at most
 // The last-used foods first (newest first), the never-used or older ones in their stored place. Array#sort is
 // stable, so foods without lastUsed keep insertion order behind the used ones.
-const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+// The pantry's usual-products header, the same text in the analysis, the coach and the review
+const USUAL = "The person's usual products, with values per 100 g:";
+const rankedFoods = () => [...(Array.isArray(S.foods) ? S.foods : [])].filter(Boolean).sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+// The name and the values per 100 g: `name, X kcal Xp Xc Xf Xfib per 100 g`
+const valuesText = (f) => `${sanitizeOut(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
 // One line: `id: name, X kcal Xp Xc Xf Xfib per 100 g`; the check adds `; ingredients: …` (snippet only)
 const foodLine = (f, ing) => {
-  const base = `${f.id}: ${sq(f.name)}, ${f.v[0]} kcal ${f.v[1]}p ${f.v[2]}c ${f.v[3]}f ${f.v[4]}fib per 100 g`;
-  return ing && f.ing ? `${base}; ingredients: ${sq(f.ing).slice(0, PANTRY_ING)}` : base;
+  const base = `${f.id}: ${valuesText(f)}`;
+  return ing && f.ing ? `${base}; ingredients: ${sanitizeOut(f.ing).slice(0, PANTRY_ING)}` : base;
 };
 // The digest text, or '' when the pantry is empty (the prompts then stay exactly as they ever were)
 function pantryDigest(note = '', ingredients = false) {
@@ -81,7 +87,7 @@ function pantryDigest(note = '', ingredients = false) {
     return !!name && Math.min(text.length, name.length) >= 4 && text.includes(name);
   };
   const forced = new Set(foods.filter(says).map((f) => f.id)); // a food the note names is always in
-  const header = "The person's usual products, with values per 100 g:";
+  const header = USUAL;
   const how = ingredients
     ? 'Judge one of these products by its exact name here and its stored per-100 g values; where the photo shows a readable nutrition label, the label outranks the stored values. Never invent a product line.'
     : 'When an item clearly is one of these products, set that item\'s pantry to that line\'s id and give its kcal, p, c, f and fib as the product\'s per-100 g values at the grams you estimated; name the item as the product is listed here. Never invent a product line.';
@@ -100,6 +106,64 @@ function pantryDigest(note = '', ingredients = false) {
     chars += line.length + 1;
   }
   return kept || forced.size ? '\n\n' + lines.join('\n') : '';
+}
+
+// ——— The person's own history in the prompts: favourites and corrected meals (the analysis), the pantry by name (the coach and the review),
+// a stored product of the same name (the food values). Names, grams, kcal and the stored values only, never an id (the coach and the review
+// cannot link a product, and the others get no id they did not already have), each text through sanitizeOut. A block is at most GROUND_ITEMS
+// lines and GROUND_CHARS characters, header and how-to included, whole lines only; no line fits or no match ⇒ '' and the prompt stays as it was.
+const GROUND_ITEMS = 8;
+const GROUND_CHARS = 600;
+function groundBlock(header, how, lines) {
+  let chars = header.length + how.length + 3; // the two leading newlines and the one after the header
+  const kept = [];
+  for (const l of lines) {
+    if (kept.length >= GROUND_ITEMS || chars + l.length + 1 > GROUND_CHARS) break;
+    kept.push(l);
+    chars += l.length + 1;
+  }
+  return kept.length ? `\n\n${[header, how, ...kept].join('\n')}` : '';
+}
+const storedFoods = () => rankedFoods().filter((f) => f && typeof f.name === 'string' && Array.isArray(f.v) && f.v.length === 5 && f.v.every(Number.isFinite));
+// The meals the person corrected lately (newest first), then the favourites, as name and kcal; a name that appears twice is listed once,
+// so a correction wins over an older favourite of the same name. Grams are left out: a kcal correction does not change the items' grams.
+function habitsDigest() {
+  const seen = new Set();
+  const lines = [];
+  const add = (name, line) => {
+    const key = foldKey(sq(name));
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    lines.push(line);
+  };
+  const fixed = S.entries.filter((e) => e && e.kind === 'meal' && e.status === 'ok' && e.edited).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  for (const e of fixed) add(e.title, `Corrected: ${sanitizeOut(e.title)}, ${Math.round((+e.kcal || 0) * (e.mult || 1))} kcal`);
+  for (const f of Array.isArray(S.settings.favorites) ? S.settings.favorites : []) {
+    if (f && typeof f.name === 'string') add(f.name, `Favourite: ${sanitizeOut(f.name)}, ${Math.round(+f.kcal || 0)} kcal`);
+  }
+  return groundBlock(
+    "The meals the person corrected lately and their favourites, with the kcal they have on record:",
+    "Where a food and its portion match one of these, use its kcal as the person's own figure; a note, a correction or what is visible still outranks it.",
+    lines,
+  );
+}
+// The pantry by name for the coach and the review: values per 100 g, no ids. A suggestion may name one of these, never link it.
+function stockDigest() {
+  return groundBlock(
+    USUAL,
+    'When a suggestion fits one of these, name it as listed here; never invent a product.',
+    storedFoods().map(valuesText),
+  );
+}
+// The stored products the typed name matches (the same name, folded), values per 100 g, no ids: the reference beside the name
+function matchDigest(name) {
+  const key = foldKey(sq(name));
+  if (!key) return '';
+  return groundBlock(
+    'A product the person already stores under this name, with values per 100 g:',
+    'Use these values as the reference for the same product, unless a readable label shows otherwise.',
+    storedFoods().filter((f) => foldKey(sanitizeOut(f.name)) === key).map(valuesText),
+  );
 }
 
 const SCHEMA = {
@@ -271,6 +335,8 @@ async function post(url, headers, payload, opts = {}) {
  */
 export async function callModel(cfg, { system, shape = '', text, blobs = [], schema = null, json = false, maxTokens = 600, maxImages = 3, retry = true, onRetry = null, timeout = TIMEOUT_MS }) {
   const retryOpts = { retry, onRetry, timeout };
+  // The text channel's last check: every line through sanitizeOut, so a call site that forgets it still sends no contact details
+  const safe = text == null ? text : String(text).split('\n').map(sanitizeOut).join('\n');
   if (!cfg || !cfg.key) throw new AiError('no_key', 'No API key set');
   const imgs = [];
   for (const b of blobs.slice(0, maxImages)) imgs.push(await toB64(b));
@@ -278,11 +344,11 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
   if (cfg.provider === 'openai') {
     if (!cfg.base || !cfg.model) throw new AiError('no_key', 'No address or model set');
     const content = imgs.map((d) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${d}` } }));
-    content.push({ type: 'text', text });
+    content.push({ type: 'text', text: safe });
     const body = {
       model: cfg.model,
       max_tokens: Math.max(maxTokens * 2, 1500), // thinking models spend part of the budget on reasoning
-      messages: [{ role: 'system', content: system + shape }, { role: 'user', content: imgs.length ? content : text }],
+      messages: [{ role: 'system', content: system + shape }, { role: 'user', content: imgs.length ? content : safe }],
     };
     if (json) body.response_format = { type: 'json_object' };
     const url = cfg.base.replace(/\/+$/, '') + '/chat/completions';
@@ -307,7 +373,7 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
   }
 
   const content = imgs.map((d) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d } }));
-  content.push({ type: 'text', text });
+  content.push({ type: 'text', text: safe });
   const body = { model: cfg.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] };
   // Sonnet 5.5 thinks before it answers unless told not to, and that thinking would eat the small token budget
   if (cfg.model === STRONG_MODEL) body.thinking = { type: 'between_tools' };
@@ -335,9 +401,9 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
  * @returns {Promise<{data:object, usage:{in:number,out:number}, model:string}>}
  */
 export async function analyze(o) {
-  const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${o.place}` : '')];
-  if (o.text) lines.push(`Note: ${o.text}`);
-  if (o.hint) lines.push(o.hint);
+  const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${placeWord(o.place)}` : '')];
+  if (o.text) lines.push(`Note: ${sanitizeOut(o.text)}`);
+  if (o.hint) lines.push(String(o.hint).split('\n').map(sanitizeOut).join('\n')); // line by line: the correction's lines stay apart
   const req = { system: SYSTEM(o.text) + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
   return callWithFallback(o.cfg, req, o.onRetry);
 }
@@ -383,7 +449,7 @@ cut: up to 2 things that cost the most and what would have reduced them, with th
 next: one concrete thing to do tomorrow; for a day still in progress, for the rest of today.
 Every string at most 22 words.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}${stockDigest()}`);
 const REVIEW_SHAPE = '\nReturn exactly one JSON object with these keys: {"head":"","good":[""],"cut":[""],"next":""}';
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -437,7 +503,7 @@ change: up to 2 small changes that would help most. Empty if none are needed.
 adjust: "" unless a plan-level change (a different budget or rate) may be worth considering, then ONE sentence. You may agree with the adjustment the app shows, but never change or re-derive its numbers.
 Every string at most 30 words.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}`);
 const PROGRESS_SHAPE = '\nReturn exactly one JSON object with these keys: {"rating":"great|on-track|a-bit-behind|stuck|too-early","head":"","good":[""],"change":[""],"adjust":""}';
 const PROGRESS_SCHEMA = {
   type: 'object',
@@ -489,7 +555,7 @@ Off plan: ${RULES.off.join(' ')}
 note: two or three short sentences, at most 45 words in all. Say how the day is going so far, then what is left of the budget and which macros (protein first, then fibre) are still worth adding, with a concrete food or meal from the plan for the rest of the day. Warm and encouraging, never scolding; if the day is already above budget, be kind and say what to do next without skipping meals.
 The calories against the budget are the main goal; protein and fibre are secondary, so mention them as an easy extra, never as a failure. Use only the foods and numbers given; never invent an amount. No medical advice.
 Plan meals:
-${planDigest(S.plan)}`);
+${planOut(S.plan)}${stockDigest()}`);
 const COACH_SHAPE = '\nReturn exactly one JSON object with this key: {"note":""}';
 const COACH_SCHEMA = { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string' } } };
 
@@ -509,9 +575,9 @@ export const cleanCoach = (d) => ({ note: clean(d && typeof d === 'object' ? d.n
 // ——— Check before ordering or buying: photos of a menu, a dish or a product, judged against the plan ———
 // The prompts are always English, whatever the interface language is
 const CHECK_SYSTEM = (note = '') => inEnglish(() => `You help one person on a weight-loss plan decide what to order or what to buy. They send photos of a restaurant menu, a dish, a shop shelf or a packaged product (front, nutrition table, ingredients), sometimes with a note. Several photos can show one thing or several things to compare. Reply with JSON only, in English. Keep dish and product names as written; add a short English gloss in brackets when the name is in another language.
-The plan is built from: ${planFoods(S.plan)}.
+The plan is built from: ${sanitizeOut(planFoods(S.plan))}.
 Plan meals:
-${planDigest(S.plan)}
+${planOut(S.plan)}
 Weekly allowance: ${RULES.weekly.join(' ')}
 Off plan: ${RULES.off.join(' ')}
 kind: "menu", "product" (one or several packaged products), "dish" (prepared food in front of them), or "none" when there is nothing to judge or the text is too small or blurred to read.
@@ -584,14 +650,14 @@ export function cleanVerdict(d) {
 
 // ——— The values of one food per 100 g, for the food form: from a nutrition label, a package, the food itself or a name ———
 // The prompt is always English, whatever the interface language is
-const FOOD_SYSTEM = () => inEnglish(() => `You give the nutrition values of one food per 100 g, for the food table of a weight-loss plan. Reply with JSON only, in English.
+const FOOD_SYSTEM = (name = '') => inEnglish(() => `You give the nutrition values of one food per 100 g, for the food table of a weight-loss plan. Reply with JSON only, in English.
 Input: up to two photos (a nutrition label, a package, or the food itself) and/or the food's name, in any language.
 If a nutrition label is readable, copy its per-100 g values. If it gives values only per serving, convert them to per 100 g using the serving size. If it gives energy only in kJ, divide by 4.184.
 Otherwise estimate typical values per 100 g of the food as shown or named, as it is sold (raw unless it is clearly cooked).
 name: a short name for the food, at most 60 characters: the product name when one is shown, else a plain name.
 ing: the ingredients text as the label or package writes it, squeezed to one line, at most 400 characters, when you can read one; omit the key when you cannot.
 kcal: energy per 100 g. p, c, f, fib: protein, carbohydrate, fat and fibre in grams per 100 g.
-known: true if you can tell what the food is or read its values, false if you cannot (then the other values do not matter). A food with 0 kcal, such as water, is known.`);
+known: true if you can tell what the food is or read its values, false if you cannot (then the other values do not matter). A food with 0 kcal, such as water, is known.${matchDigest(name)}`);
 const FOOD_SHAPE = '\nReturn exactly one JSON object with these keys: {"name":"","known":true,"kcal":0,"p":0,"c":0,"f":0,"fib":0,"ing":""}';
 const FOOD_SCHEMA = {
   type: 'object',
@@ -607,8 +673,8 @@ const FOOD_SCHEMA = {
  * @returns {Promise<{data:{name:string,kcal:number,p:number,c:number,f:number,fib:number}, usage:{in:number,out:number}, model:string}>}
  */
 export async function foodValues(o) {
-  const name = clean(o.name, 60);
-  const req = { system: FOOD_SYSTEM(), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
+  const name = clean(sanitizeOut(o.name), 60);
+  const req = { system: FOOD_SYSTEM(sanitizeOut(o.name)), shape: FOOD_SHAPE, text: name ? `Food: ${name}` : 'No name given; use the photo.', blobs: o.blobs || [], maxImages: 2, schema: FOOD_SCHEMA, json: true, maxTokens: 300 };
   const r = await callWithFallback(o.cfg, req, o.onRetry);
   return { ...r, data: cleanFoodValues(r.data) };
 }
@@ -655,9 +721,10 @@ export const ITEM_CAPS_WRITE = {
 // claim "0 g carbs". Absence survives both storages: a spread of such an item never adds an undefined key, and a backup
 // round-trip restores through itemList in js/backup.js, which leaves the keys absent the same way. At most 12 items;
 // unknown junk is dropped. Pure: no DOM and no storage (app.js is browser-only, so this is the testable seam).
+// The number a reply's field holds, NaN when it holds none: shared by cleanItems and reconcileConf
+const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
 export function cleanItems(items, caps) {
   const cap = (v, max) => Math.min(max, Math.max(0, +v || 0)); // NaN and undefined fall to 0
-  const num = (v) => (v == null || typeof v === 'object' || (typeof v === 'string' && !v.trim()) ? NaN : +v);
   const macro = (v, max) => (Number.isFinite(num(v)) ? Math.min(max, Math.max(0, num(v))) : undefined); // absent when the source has no number
   return (Array.isArray(items) ? items : []).slice(0, 12)
     .map((i) => (i && typeof i === 'object' ? i : {}))
@@ -669,6 +736,27 @@ export function cleanItems(items, caps) {
       }
       return item;
     });
+}
+
+// Consistency of a meal reply after cleanItems. The item list explains the total, so an entry's kcal is the sum of its items'
+// kcal whenever they carry any (app.js does that); this check never changes a number. Items are never rewritten here, so a
+// value the person corrected or a pantry product supplied stays as it is. What it can do is doubt: the confidence is capped
+// at 0.5 when the entry's 4·p + 4·c + 9·f misses its kcal by more than 15% (at least 25 kcal, so small portions are not
+// flagged for rounding), or when an item's macros miss its kcal the same way (an item is checked only when it has both c
+// and f). The entry's numbers are the stored ones, so a pantry product's exact values are used as they are saved. An
+// alcohol entry is not checked at all: its alcohol energy (7 kcal a gram) is not in the macro sum. Fibre is left out of the sum: whether
+// the label's carbohydrate includes it varies, and the tolerance covers that. A plan meal passes items null and keeps its
+// confidence as the model gave it: its numbers come from the plan, not from this reply's items.
+const near = (a, b, pct, floor) => Math.abs(a - b) <= Math.max(pct * Math.max(Math.abs(a), Math.abs(b)), floor);
+const atwater = (kcal, p, c, f) => near(kcal, 4 * p + 4 * c + 9 * f, 0.15, 25);
+export function reconcileConf(data, items) {
+  const conf = Math.max(0, Math.min(1, +data.conf || 0));
+  if (!items || (data.flags || []).includes('alcohol')) return conf;
+  const kcal = num(data.kcal), p = num(data.p), c = num(data.c), f = num(data.f);
+  const total = [kcal, p, c, f].every(Number.isFinite) && !atwater(kcal, p, c, f);
+  // An item with no kcal is not checked: cleanItems stores an absent kcal as 0, which is not a claim that the item has no energy
+  const item = items.some((i) => i.kcal > 0 && i.c !== undefined && i.f !== undefined && !atwater(i.kcal, i.p, i.c, i.f));
+  return total || item ? Math.min(conf, 0.5) : conf;
 }
 
 // The `pantry` ids of a reply's items, applied beside js/app.js's planId flow: an item whose optional pantry id

@@ -2,11 +2,12 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, reconcileConf, pantryMatch, sanitizeOut, placeWord, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { reviewBrief } from '../js/briefs.js';
 import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
-import { S } from '../js/core.js';
-import { buildPlan, planDigest, planFoods } from '../js/plan.js';
+import { S, today } from '../js/core.js';
+import { buildPlan, planDigest, planFoods, RULES } from '../js/plan.js';
 import seedPlan from '../js/default-plan.js';
 
 const sonnet = { provider: 'anthropic', key: 'sk-ant-secretsecret', model: 'claude-sonnet-5-5' };
@@ -167,6 +168,43 @@ test('cleanItems: the item caps stay pinned to MACRO_CAPS, ITEM_MACRO_CAPS and P
   for (const k of ['c', 'f', 'fib']) assert.equal(ITEM_CAPS_ANALYSIS[k], ITEM_MACRO_CAPS[k], `ITEM_CAPS_ANALYSIS.${k} drifts from ITEM_MACRO_CAPS`);
   // the analysis handler keeps its tighter kcal/p caps inside the write range; c, f and fib are the same
   for (const k of ['g', 'kcal', 'p', 'c', 'f', 'fib']) assert.ok(ITEM_CAPS_ANALYSIS[k] <= ITEM_CAPS_WRITE[k], `ITEM_CAPS_ANALYSIS.${k} exceeds ITEM_CAPS_WRITE.${k}`);
+});
+
+test('reconcileConf: a reply that adds up keeps its confidence and is clamped as before', () => {
+  const items = cleanItems([{ n: 'Rice', g: 200, kcal: 260, p: 5, c: 57, f: 0.5 }, { n: 'Chicken', g: 150, kcal: 250, p: 45, c: 0, f: 5 }], ITEM_CAPS_ANALYSIS);
+  const good = { conf: 0.9, kcal: 510, p: 50, c: 57, f: 5.5 }; // items sum to 510; 4·50 + 4·57 + 9·5.5 = 477.5, within 15%
+  assert.equal(reconcileConf(good, items), 0.9);
+  assert.equal(reconcileConf({ ...good, conf: 1.7 }, items), 1);
+  assert.equal(reconcileConf({ ...good, conf: 'x' }, items), 0);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 500, p: 1 }, [cleanItems([{ n: 'x', g: 1, kcal: 500, p: 1 }], ITEM_CAPS_ANALYSIS)[0]]), 0.9); // no c or f: no macro check
+});
+
+test('reconcileConf: a total that differs from the sum of the items, or macros that miss kcal, cap the confidence at 0.5', () => {
+  const items = cleanItems([{ n: 'Rice', g: 200, kcal: 260, p: 5, c: 57, f: 0.5 }, { n: 'Chicken', g: 150, kcal: 250, p: 45, c: 0, f: 5 }], ITEM_CAPS_ANALYSIS);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 800, p: 50, c: 57, f: 5.5 }, items), 0.5); // 800 against 478 from the macros
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 510, p: 20, c: 20, f: 5 }, items), 0.5); // 205 from the macros against 510
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 510, p: 50, c: 57, f: 5.5, flags: ['alcohol'] }, items), 0.9); // an alcohol entry is not checked against the macros
+  const off = cleanItems([{ n: 'Egg', g: 50, kcal: 100, p: 0, c: 0, f: 0 }, { n: 'Cheese', g: 30, kcal: 100, p: 50, c: 0, f: 0 }], ITEM_CAPS_ANALYSIS);
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 200, p: 50, c: 0, f: 0 }, off), 0.5); // each item's macros are checked, not only the entry's
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 5, p: 0, c: 1, f: 0 }, cleanItems([{ n: 'Tea', g: 0, kcal: 5, p: 0, c: 1, f: 0 }], ITEM_CAPS_ANALYSIS)), 0.9); // 25 kcal floor for small portions
+});
+
+test('reconcileConf: a plan meal keeps its confidence, the items of a plan are not checked', () => {
+  assert.equal(reconcileConf({ conf: 0.9, kcal: 9999, p: 1, c: 1, f: 1 }, null), 0.9);
+});
+
+test('the analysis prompt: one precedence order, a defined confidence and question trigger, metric units, and the off tier from the plan', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await ask(haiku);
+  const sys = calls[0].body.system;
+  assert.match(sys, /Precedence for each amount: the person's note or correction first, then what is visible, and only where neither shows it the larger plausible portion\./);
+  assert.doesNotMatch(sys, /when unsure pick the larger plausible portion/);
+  assert.match(sys, /conf: how sure you are of the kcal total, 0–1: 0\.8–1/);
+  assert.match(sys, /q: ask only when a factor you cannot see/);
+  assert.match(sys, /the person's local time/);
+  assert.match(sys, /Weights are in grams \(g\)/);
+  for (const line of RULES.off) assert.ok(sys.includes(line), `off list line missing: ${line}`);
+  assert.doesNotMatch(sys, /sugary drinks, fried food/); // the tier is no longer a hardcoded second list
 });
 
 test('a review whose list is a plain string is accepted', async () => {
@@ -628,4 +666,228 @@ test('app.js wires the flow: the match beside planId, one lastUsed write, the ch
   assert.match(src, /lastUsed: now/); // the foods actually applied, one setFoods per analysis
   assert.match(src, /brief: checkBrief\(note\), note/);
   assert.match(src, /if \(data\.ing\) d\.ing = data\.ing;/); // the pantry editor's field filled from the reply
+});
+
+test('sanitizeOut redacts e-mails, links, phone numbers and street addresses, and leaves food text alone', () => {
+  assert.equal(sanitizeOut('mail me at a.b@example.com now'), 'mail me at [redacted] now');
+  assert.equal(sanitizeOut('see https://x.test/a?b=1 or www.shop.test'), 'see [redacted] or [redacted]');
+  assert.equal(sanitizeOut('call +90 532 123 45 67 later'), 'call [redacted] later');
+  assert.equal(sanitizeOut('phone 02125551234'), 'phone [redacted]');
+  assert.equal(sanitizeOut("Mum's flat, 12 Elm Street"), "Mum's flat, [redacted]");
+  assert.equal(sanitizeOut('Bağdat Caddesi 45 sk'), 'Bağdat Caddesi [redacted]');
+  for (const food of ['200 g rice, 2 eggs', '2 x 150 g chicken', 'Bread 7-11 cut', '1.5 l water', '3 eggs and 2 slices of toast', '1200 kcal dinner', '10 - 20 - 30 g nuts']) {
+    assert.equal(sanitizeOut(food), food, food);
+  }
+  assert.equal(sanitizeOut('  two\n\nlines\t here '), 'two lines here'); // squeezed like the other pantry text
+  assert.equal(sanitizeOut(undefined), '');
+});
+
+test('sanitizeOut is idempotent', () => {
+  const once = sanitizeOut('Mum\'s flat, 12 Elm Street, a.b@c.io, +90 532 123 45 67, https://x.test');
+  assert.equal(sanitizeOut(once), once);
+});
+
+test('a saved place is named only by Home, Office or out; any other name becomes a generic label', () => {
+  assert.equal(placeWord('out'), 'out');
+  assert.equal(placeWord('Home'), 'home');
+  assert.equal(placeWord('office'), 'office');
+  assert.equal(placeWord("Mum's flat, 12 Elm Street"), 'a saved place');
+});
+
+test('a place name never reaches the analysis request body', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await analyze({ cfg: sonnet, when: new Date(), text: 'lentil soup', place: "Mum's flat, 12 Elm Street", blobs: [] });
+  const body = JSON.stringify(calls[0].body);
+  assert.ok(!body.includes('Elm'), 'street kept out of the body');
+  assert.ok(!body.includes("Mum's flat"), 'place name kept out of the body');
+  assert.ok(body.includes('place: a saved place'));
+});
+
+test('a place name and a note with contact details never reach the review request body', async () => {
+  const saved = S.entries;
+  const savedSettings = { ...S.settings }, savedPlan = S.plan;
+  const day = today();
+  S.plan = buildPlan(seedPlan);
+  Object.assign(S.settings, { startDate: day, startKg: 86.4, targetDate: day, targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 });
+  S.entries = [{ id: 'e1', day, ts: Date.now(), kind: 'meal', status: 'ok', slot: 'lunch', title: 'Soup at 12 Elm Street, a.b@c.io', tier: 'plan', flags: [], mult: 1,
+    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], place: "Mum's flat, 12 Elm Street", photoIds: [], planId: '' }];
+  try {
+    const brief = reviewBrief(day);
+    assert.ok(!brief.includes('Elm') && !brief.includes('a.b@c.io') && !brief.includes("Mum's flat"), brief);
+    assert.ok(brief.includes('200 g'), 'food quantities survive');
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ head: 'h', good: [], cut: [], next: 'n' }))));
+    await review({ cfg: sonnet, brief });
+    assert.ok(!JSON.stringify(calls[0].body).includes('Elm'));
+  } finally { S.entries = saved; Object.assign(S.settings, savedSettings); S.plan = savedPlan; }
+});
+
+test('a typed food name with contact details is redacted before it reaches the food-values request', async () => {
+  mockFetch(() => reply(200, claudeBody(JSON.stringify({ name: 'Skyr', kcal: 60, p: 10, c: 4, f: 0, fib: 0 }))));
+  await foodValues({ cfg: sonnet, name: 'Skyr from a.b@c.io, +90 532 123 45 67', blobs: [] });
+  const body = JSON.stringify(calls[0].body);
+  assert.ok(!body.includes('a.b@c.io') && !body.includes('532 123'), body);
+  assert.ok(body.includes('Food: Skyr from [redacted], [redacted]'));
+});
+
+test('sanitizeOut redacts Turkish-letter e-mails and domains whole, not from the first ASCII letter', () => {
+  assert.equal(sanitizeOut('ayşe.yılmaz@gmail.com'), '[redacted]');
+  assert.equal(sanitizeOut('Ahmet Çelik, çağla@hotmail.com'), 'Ahmet Çelik, [redacted]');
+  assert.equal(sanitizeOut('ad@şirket.com.tr'), '[redacted]');
+  assert.equal(sanitizeOut('Şirket.com sipariş'), '[redacted] sipariş');
+});
+
+test('app.js wires the confidence check to the saved numbers, the items of a meal and its alcohol flag', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /conf: reconcileConf\(\{ conf: data\.conf, kcal: e\.kcal, p: e\.p, c: e\.c, f: e\.f, flags: data\.flags \}, e\.planId \? null : e\.items\)/);
+});
+
+// ——— The person's own history in the prompts: favourites and corrected meals, the pantry by name, a stored product of the same name ———
+const HABITS = 'The meals the person corrected lately and their favourites';
+const STOCK = "The person's usual products, with values per 100 g:";
+const favOf = (id, name, kcal) => ({ id, name, slot: 'any', kcal, p: 1, c: 1, f: 1, fib: 0, tier: 'plan', flags: [], items: [] });
+const correctedOf = (id, title, ts, items, kcal, extra = { edited: true }) => ({ id, day: today(), ts, kind: 'meal', status: 'ok', slot: 'lunch', title, tier: 'plan', flags: [], mult: 1, kcal, p: 1, c: 1, f: 1, fib: 0, conf: 1, q: '', items, place: '', photoIds: [], planId: '', ...extra });
+const withHistory = async (favorites, entries, run) => {
+  const saved = { favorites: S.settings.favorites, entries: S.entries };
+  try {
+    S.settings.favorites = favorites;
+    S.entries = entries;
+    return await run();
+  } finally { S.settings.favorites = saved.favorites; S.entries = saved.entries; }
+};
+
+test('the analysis history: corrected meals newest first, then favourites, as name and kcal; no ids, a name once, unedited entries left out', async () => {
+  await withHistory([favOf('fav-SECRET', 'Ayran', 120), favOf('f9', 'ayran', 130)], [
+    correctedOf('c1', 'Lentil soup', 1000, [{ n: 'lentils', g: 200, kcal: 300 }, { n: 'bread', g: 60, kcal: 150 }], 450),
+    correctedOf('c2', 'Yogurt bowl', 2000, [{ n: 'yogurt', g: 170, kcal: 100 }], 100),
+    correctedOf('c3', 'Lentil soup', 500, [], 300), // the same name, older: listed once
+    correctedOf('c4', 'Plain toast', 3000, [], 90, { edited: false, conf: 1 }), // not a correction, though the model was sure of it
+  ], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[0].body.system;
+    const lines = sys.slice(sys.indexOf(HABITS)).split('\n');
+    assert.deepEqual(lines.slice(2), [
+      'Corrected: Yogurt bowl, 100 kcal',
+      'Corrected: Lentil soup, 450 kcal',
+      'Favourite: Ayran, 120 kcal',
+    ]);
+    const body = JSON.stringify(calls[0].body);
+    assert.ok(!body.includes('fav-SECRET') && !body.includes('"c1"') && !body.includes('Plain toast'));
+  });
+});
+
+test('the analysis history: at most 8 lines and 600 characters, whole lines only', async () => {
+  const favs = Array.from({ length: 12 }, (_, i) => favOf(`x${i}`, `Food ${i}`, 100 + i));
+  await withHistory(favs, [], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[0].body.system;
+    assert.equal(sys.slice(sys.indexOf(HABITS)).split('\n').length, 2 + 8); // header, how-to, eight lines
+  });
+  const long = Array.from({ length: 8 }, (_, i) => favOf(`y${i}`, `${i} ${'long name '.repeat(9)}`.trim(), 200));
+  await withHistory(long, [], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    const sys = calls[1].body.system;
+    const block = sys.slice(sys.indexOf(HABITS));
+    assert.ok(block.length <= 600, `block is ${block.length} characters`);
+    assert.ok(block.split('\n').slice(2).length < 8, 'the characters cap cuts before the item cap');
+  });
+});
+
+test('the analysis history: a favourite name is sanitized, and no history means no block', async () => {
+  await withHistory([favOf('f1', 'Ayran a.b@c.io', 120)], [correctedOf('c9', 'Hidden', 1, [], 0, { edited: false, conf: 0.5 })], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    assert.ok(calls[0].body.system.includes('Favourite: Ayran [redacted], 120 kcal'));
+    assert.ok(!JSON.stringify(calls[0].body).includes('a.b@c.io'));
+  });
+  await withHistory([], [correctedOf('c9', 'Hidden', 1, [], 0, { edited: false, conf: 0.5 })], async () => {
+    mockFetch(() => reply(200, claudeBody(meal)));
+    await ask(haiku);
+    assert.ok(!calls[1].body.system.includes(HABITS));
+    assert.ok(calls[1].body.system.endsWith(planDigest(S.plan)));
+  });
+});
+
+test('the coach and the review name the pantry by name only: values per 100 g, no ids, at most 8 lines, sanitized; absent with an empty pantry', async () => {
+  const named = pf('f7', 'Skyr a.b@c.io', [63, 11, 4, 0.2, 0]);
+  await withFoods([named, oatRace, cola, egg], async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ head: 'h', good: [], cut: [], next: 'n' }))));
+    await review({ cfg: haiku, brief: 'b' });
+    for (const c of calls) {
+      const sys = c.body.system;
+      assert.ok(sys.includes(`${STOCK}\n`), 'the block is there');
+      assert.ok(sys.includes('Skyr [redacted], 63 kcal 11p 4c 0.2f 0fib per 100 g'));
+      assert.ok(sys.includes('Egg, 143 kcal 12.5p 0.7c 9.5f 0fib per 100 g'));
+      assert.ok(!/\bf[0-9]+: /.test(sys), 'no pantry ids');
+      assert.ok(!JSON.stringify(c.body).includes('a.b@c.io'));
+    }
+  });
+  const many = Array.from({ length: 20 }, (_, i) => pf(`g${i}`, `Product ${i}`, [100 + i, 5, 10, 4, 1]));
+  await withFoods(many, async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    const sys = calls[2].body.system;
+    assert.equal(sys.slice(sys.indexOf(STOCK)).split('\n').length, 2 + 8);
+  });
+  await withFoods([], async () => {
+    mockFetch(() => reply(200, claudeBody(JSON.stringify({ note: 'n' }))));
+    await coach({ cfg: haiku, brief: 'b' });
+    assert.ok(!calls[3].body.system.includes(STOCK));
+    assert.ok(calls[3].body.system.endsWith(planDigest(S.plan)));
+  });
+});
+
+test('food values: a stored product of the same name is the reference, with no id; another name or no name adds nothing', async () => {
+  await withFoods([oatRace, cola], async () => {
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, name: 'oat DRINK', blobs: [] });
+    const sys = calls[0].body.system;
+    assert.ok(sys.includes('A product the person already stores under this name, with values per 100 g:'));
+    assert.ok(sys.endsWith('Oat drink, 45 kcal 1p 6.5c 1.5f 0.8fib per 100 g'));
+    assert.ok(!sys.includes('f1: ') && !sys.includes('Diet cola'));
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, name: 'Skyr', blobs: [] });
+    assert.ok(!calls[1].body.system.includes('A product the person already stores'));
+    mockFetch(() => reply(200, claudeBody(FOOD)));
+    await foodValues({ cfg: sonnet, blobs: [] });
+    assert.ok(!calls[2].body.system.includes('A product the person already stores'));
+  });
+});
+
+test('sanitizeOut redacts a bare domain but leaves a quantity glued to it', () => {
+  assert.equal(sanitizeOut('Burger.co,2 eggs'), '[redacted],2 eggs');
+  assert.equal(sanitizeOut('tea.net/menu 250g'), '[redacted] 250g');
+});
+
+test('a correction hint keeps its lines apart in the analysis request', async () => {
+  mockFetch(() => reply(200, claudeBody(meal)));
+  await analyze({ cfg: sonnet, when: new Date(), text: '', hint: 'Your earlier estimate: 300 kcal\nCorrection from the person: 450 kcal', blobs: [] });
+  const text = calls[0].body.messages[0].content.find((c) => c.type === 'text')?.text ?? JSON.stringify(calls[0].body.messages);
+  assert.ok(text.includes('Your earlier estimate: 300 kcal\nCorrection from the person: 450 kcal'), text);
+});
+
+test('sanitizeOut: a street type after the name and the number is redacted, a short English abbreviation is not', () => {
+  assert.equal(sanitizeOut('Işıklar Sokak 12'), '[redacted]');
+  assert.equal(sanitizeOut('Atatürk Caddesi No:12 kapı'), '[redacted] kapı');
+  assert.equal(sanitizeOut('45 Bağdat sokağı'), '[redacted]');
+  assert.equal(sanitizeOut('Elm Street 12'), '[redacted]');
+  assert.equal(sanitizeOut('2 Dr Pepper'), '2 Dr Pepper');
+  assert.equal(sanitizeOut('Oats 1 st'), 'Oats 1 st');
+});
+
+test('sanitizeOut: a date, a kcal range and a list of single digits are not phone numbers', () => {
+  assert.equal(sanitizeOut('lunch 2026-10-24 13.30, 2 eggs'), 'lunch 2026-10-24 13.30, 2 eggs');
+  assert.equal(sanitizeOut('1200-1500 kcal dinner'), '1200-1500 kcal dinner');
+  assert.equal(sanitizeOut('1 2 3 4 5 6 7'), '1 2 3 4 5 6 7');
+  assert.equal(sanitizeOut('Lentil soup 07:30-08:00'), 'Lentil soup 07:30-08:00');
+  assert.equal(sanitizeOut('call 02125551234'), 'call [redacted]');
+});
+
+test('sanitizeOut: a street after a lowercase name and a number is redacted, the quantities around it are not', () => {
+  assert.equal(sanitizeOut('bağdat sokağı 45'), '[redacted]');
+  assert.equal(sanitizeOut('200 g rice, 2 eggs'), '200 g rice, 2 eggs');
 });

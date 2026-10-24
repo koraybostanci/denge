@@ -79,6 +79,20 @@ about 2,000 characters, so under 500 tokens in, in the worst case. The ingredien
 little on each check line. Reading an ingredients text in the form costs about 30–60 tokens, once
 per product.
 
+The analysis also gets your own history, as name and kcal only: the meals you corrected lately (newest
+first), then your favourites, one line each; a name that is in both is listed once, as the correction. A
+line reads "Corrected: …" or "Favourite: …". The coach and the review get your Pantry products by name with
+their values per 100 g, and a food's values (the food form's fill from a photo or a name) get the stored
+product of the same name as a reference. Each of these blocks holds at most 8 lines and 600 characters,
+whole lines only, and is left out when there is nothing to show. No ids are sent with them.
+
+Each meal estimate is checked for consistency. Its confidence is capped at 0.5 when the entry's
+calories miss 4 × protein + 4 × carbs + 9 × fat by more than 15% (at least 25 kcal, so small portions are
+not flagged for rounding), or when any one item's calories miss the same sum by that much (an item is
+checked only when it has both carbs and fat and some kcal). The numbers are never changed by the check. Alcohol entries
+are not checked, since their alcohol energy is not in the sum, and plan meals are not checked: their
+numbers come from the plan.
+
 Estimates from a photo are rough. Treat them as a starting point and correct the portion when
 it is off. Each item in an estimate now carries carbohydrates, fat and fibre next to the
 calories and protein, and the entry sheet's edit fields let you correct them along with the rest.
