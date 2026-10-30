@@ -557,7 +557,6 @@ export function renderNumSheet(kind, day) {
 }
 
 const TIME_SOURCE = { exif: T('from photo'), file: T('from file'), manual: T('edited') };
-const placeText = (place) => (place === 'out' ? t('out') : t('at {place}', { place: lower(String(place)) }));
 
 // The macro columns of the two item tables (entry sheet and plan sheet, kept identical): compact headers with the full word
 // in the abbr's title and the unit in small print; cells show '–' where an item lacks the key (one from before per-item macros).
@@ -580,7 +579,7 @@ function entryDetail(e) {
   }
   const v = eff(e);
   const photos = (e.photoIds || []).map((p) => `<img data-photo="${esc(p)}" alt="${t('Photo of the meal')}">`).join('');
-  const meta = [when, SLOT_NAME[e.slot] ? td(SLOT_NAME[e.slot]) : '', e.place ? esc(placeText(e.place)) : ''].filter(Boolean).join(', ');
+  const meta = [when, SLOT_NAME[e.slot] ? td(SLOT_NAME[e.slot]) : ''].filter(Boolean).join(', ');
   let body;
   if (S.busy.has(e.id)) {
     body = `<p class="status"><span class="spin" aria-hidden="true"></span>${esc(entryState(e))}</p>`;
@@ -1638,7 +1637,6 @@ export function renderSettings() {
   const u = s.usage || { in: 0, out: 0, calls: 0, usd: 0 };
   const storage = S.storage;
   const mb = (b) => (b / 1048576).toLocaleString(LOCALE, { maximumFractionDigits: 1 });
-  const places = s.places || [];
   const favorites = s.favorites || [];
   const savedOpenai = s.provider === 'openai';
   const openai = ((S.keyDraft && S.keyDraft.provider) || s.provider) === 'openai'; // a provider picked but not yet saved shapes the form
@@ -1715,15 +1713,6 @@ export function renderSettings() {
     </div>
     <div class="actions"><button type="button" class="btn btn-primary" data-act="save-profile">${t('Save profile')}</button></div>`; // i18n-ok: markup
 
-  const location = `
-    <label class="check"><input type="checkbox" data-act="loc-toggle"${s.useLocation ? ' checked' : ''}> ${t('Use the photo’s location')}</label>
-    <p class="note">${t('Location is read on the device and matched to your saved places here. The model only gets a generic label: “Home”, “Office”, “out” or “a saved place”; coordinates are never sent to the model (they are in your backup file). When you choose from the library, location only comes through if Location is switched on under Options in the picker.')}</p>
-    <div class="actions">
-      <button type="button" class="btn" data-act="loc-save" data-name="Home">${t('I am here: Home')}</button>
-      <button type="button" class="btn" data-act="loc-save" data-name="Office">${t('I am here: Office')}</button>
-    </div>
-    <p class="note" id="loc-out" role="status">${places.length ? t('Saved places: {names}.', { names: places.map((p) => esc(p.name)).join(', ') }) : t('No saved places.')}</p>`;
-
   const backup = `
     <p class="note">${t('Data lives only on this device. iOS can delete web data when storage runs low; save a backup to Files once a week.')}</p>
     <div class="actions">
@@ -1734,7 +1723,7 @@ export function renderSettings() {
     <details class="adv">
     <summary>${t('More')}</summary>
     <div class="actions"><button type="button" class="btn" data-act="export-photos">${t('With photos')}</button></div>
-    <p class="note">${t('For analysis on a computer: one .sql file with your days, meals and goals that loads into any SQLite database. Photos, keys and saved places are left out.')}</p>
+    <p class="note">${t('For analysis on a computer: one .sql file with your days, meals and goals that loads into any SQLite database. Photos and keys are left out.')}</p>
     <div class="actions"><button type="button" class="btn" data-act="export-sql">${t('Export for SQLite')}</button></div>
     <p class="note">${S.persisted === true ? t('Persistent storage is on.') : S.persisted === false ? t('Persistent storage has not been granted yet. Adding the app to the Home Screen makes that more likely.') : ''} ${storage && storage.usage != null ? t('Space used: {mb} MB.', { mb: mb(storage.usage) }) : ''}</p>
     ${S.persisted === false ? `<div class="actions"><button type="button" class="btn" data-act="persist">${t('Request persistent storage')}</button></div>` : ''}
@@ -1774,7 +1763,7 @@ export function renderSettings() {
       <p class="note">${t('Starts your tracking over; the app stays set up as it is.')}</p>
       <dl class="reset-diff">
         <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts.')}</dd></div>
-        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, your plans (My plan and Default), the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
+        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, your plans (My plan and Default), the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
       </dl>
       ${S.resetStep === 'clear'
         ? `<p class="note is-error" role="alert">${t('This cannot be undone.')}</p><div class="actions"><button type="button" class="btn btn-danger btn-danger-solid" data-act="wipe">${t('Clear my log')}</button><button type="button" class="btn" data-act="reset-cancel">${t('Cancel')}</button></div>`
@@ -1784,7 +1773,7 @@ export function renderSettings() {
       <h3>${t('Factory reset')}</h3>
       <p class="note">${t('Back to how the app was on its first launch.')}</p>
       <dl class="reset-diff">
-        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The app returns to the setup screen.')}</dd></div>
+        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The app returns to the setup screen.')}</dd></div>
         <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Only the install id, the language, and your API key and provider if the box is ticked.')}</dd></div>
       </dl>
       <label class="check"><input type="checkbox" id="keep-key"${S.resetKeep === false ? '' : ' checked'}> ${t('Keep my API key and provider')}</label>
@@ -1817,7 +1806,6 @@ export function renderSettings() {
     ${section('favorites', t('Favourites'), favorites.length ? tn('{n} meal|{n} meals', favorites.length) : t('None yet'), favoritesBody)}
     ${pantrySection}
     ${section('supplements', t('Supplements'), supps.length ? supps.map((x) => x.name).join(', ') : t('None yet'), suppBody)}
-    ${section('location', t('Location'), s.useLocation ? (places.length ? t('On: {names}', { names: places.map((p) => p.name).join(', ') }) : t('On, no saved places')) : t('Off'), location)}
     <h3 class="setting-group">${t('Data and analysis')}</h3>
     ${section('analysis', t('Photo and text analysis'), analysisStatus, analysis)}
     ${section('backup', t('Backup and export'), backupStatus, backup)}

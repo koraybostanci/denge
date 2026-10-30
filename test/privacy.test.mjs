@@ -20,8 +20,7 @@ const KEYS = { anthropic: 'sk-ant-PRIVATEKEY-42', openai: 'sk-openai-PRIVATEKEY-
 const PERSON = { name: 'Zehra Quillon', age: 34, gender: 'female' };
 const CLIENT_ID = 'c1ient-install-7f3e9a';
 const SUPP = { id: 'supp-quill-1', name: 'Quillmag Citrate', dose: '400 mg' };
-const PLACE = { name: 'Mum Quillflat', lat: 41.318273, lon: 29.104657 };
-const FORBIDDEN = [PERSON.name, 'Zehra', 'Quillon', KEYS.anthropic, KEYS.openai, 'PRIVATEKEY', CLIENT_ID, SUPP.name, 'Quillmag', PLACE.name, 'Quillflat', String(PLACE.lat), String(PLACE.lon)];
+const FORBIDDEN = [PERSON.name, 'Zehra', 'Quillon', KEYS.anthropic, KEYS.openai, 'PRIVATEKEY', CLIENT_ID, SUPP.name, 'Quillmag'];
 
 const ROUTES = {
   anthropic: { provider: 'anthropic', key: KEYS.anthropic, model: 'claude-sonnet-5-5' },
@@ -40,7 +39,7 @@ const REPLY = {
 
 const day = today();
 const CALLS = {
-  analyze: (cfg) => analyze({ cfg, when: new Date(), text: 'lentil soup', place: PLACE.name, blobs: [IMG] }),
+  analyze: (cfg) => analyze({ cfg, when: new Date(), text: 'lentil soup', blobs: [IMG] }),
   check: (cfg) => check({ cfg, brief: checkBrief('pancakes, please'), note: 'pancakes, please', blobs: [IMG] }),
   review: (cfg) => review({ cfg, brief: reviewBrief(day) }),
   coach: (cfg) => coach({ cfg, brief: coachBrief(day) }),
@@ -55,11 +54,11 @@ function seed() {
   S.settings = {
     ...freshSettings(),
     name: PERSON.name, age: PERSON.age, gender: PERSON.gender, clientId: CLIENT_ID, apiKey: KEYS.anthropic, oaKey: KEYS.openai,
-    places: [PLACE], supplements: [SUPP],
+    supplements: [SUPP],
     startDate: addDays(day, -10), startKg: 86.4, targetDate: addDays(day, 60), targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120,
   };
   S.entries = [{ id: 'e1', day, ts: Date.now(), kind: 'meal', status: 'ok', slot: 'lunch', title: 'Lentil soup', tier: 'plan', flags: [], mult: 1,
-    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], place: PLACE.name, photoIds: [], planId: '' }];
+    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], photoIds: [], planId: '' }];
   S.days = { [day]: { day, kg: 85.9, steps: 6000, water: 1500, train: true, taken: [SUPP.id] } };
   return () => Object.assign(S, saved);
 }

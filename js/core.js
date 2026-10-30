@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '61'; // bump together with VERSION in sw.js
+export const APP_VERSION = '62'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -17,7 +17,7 @@ export const freshSettings = () => ({
   ...Object.fromEntries(Object.entries(DEFAULTS).filter(([k]) => !PERSONAL.includes(k))), schema: SCHEMA_VERSION,
   provider: 'openai', oaBase: 'https://generativelanguage.googleapis.com/v1beta/openai', oaModel: 'gemini-3.5-flash', oaKey: '', apiKey: '',
   name: '', age: 0, gender: '', clientId: '', onboarded: false,
-  useLocation: false, places: [], favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
+  favorites: [], supplements: [], hideStart: false, autoReview: true, lang: 'en',
   usage: { in: 0, out: 0, calls: 0, usd: 0 }, lastBackup: 0,
 });
 // What the Check screen is holding while a check is put together; its photos live in memory only

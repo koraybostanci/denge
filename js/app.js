@@ -4,7 +4,7 @@ import { setLang, getLang, storedLang, rememberLang, applyStatic, t, tn, td, fol
 import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
-import { readMeta, placeLabel } from './exif.js';
+import { readMeta } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, cleanItems, reconcileConf, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
@@ -157,7 +157,7 @@ async function logMeal(tpl, src, day = S.viewDay) {
     items: cleanItems(tpl.items, ITEM_CAPS_WRITE), // a favourite whose items never had macros keeps them absent, not stored 0
     kcal: cap(tpl.kcal, ITEM_CAPS_WRITE.kcal), p: cap(tpl.p, ITEM_CAPS_WRITE.p), c: cap(tpl.c, ITEM_CAPS_WRITE.c), f: cap(tpl.f, ITEM_CAPS_WRITE.f), fib: cap(tpl.fib, ITEM_CAPS_WRITE.fib),
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
-    photoIds: [], timeSrc: day === today() ? 'now' : 'manual', place: null,
+    photoIds: [], timeSrc: day === today() ? 'now' : 'manual',
   };
   await saveEntry(e);
   render();
@@ -247,25 +247,11 @@ async function submitText(text) {
   const e = {
     id: db.uid(), ts: now.getTime(), day: dayKey(now), createdAt: now.getTime(), kind: 'meal', status: 'pending',
     src: 'text', text, title: text, slot: slotByTime(now), items: [], kcal: 0, p: 0, c: 0, f: 0, fib: 0,
-    tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds: [], timeSrc: 'now', place: null,
+    tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds: [], timeSrc: 'now',
   };
   await saveEntry(e);
   go('log');
   queueAnalyze(e.id);
-}
-
-let posCache = null;
-function getPos(force = false) {
-  if (!(force || S.settings.useLocation) || !navigator.geolocation) return Promise.resolve(null);
-  if (posCache && Date.now() - posCache.at < 300000) return Promise.resolve(posCache);
-  return new Promise((res) => {
-    const t = setTimeout(() => res(null), 6000);
-    navigator.geolocation.getCurrentPosition(
-      (p) => { clearTimeout(t); posCache = { lat: p.coords.latitude, lon: p.coords.longitude, at: Date.now() }; res(posCache); },
-      () => { clearTimeout(t); res(null); },
-      { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 },
-    );
-  });
 }
 
 let preparing = 0; // photo batches being prepared; an update must not reload the page under them
@@ -290,7 +276,7 @@ async function prepareAndQueue(files, note) {
         if (lm && Date.now() - lm > 120000 && lm > Date.parse('2020-01-01')) { ts = lm; timeSrc = 'file'; } else { ts = Date.now(); timeSrc = 'now'; }
       }
       if (ts > Date.now() + 60000) { ts = Date.now(); timeSrc = 'now'; }
-      prepared.push({ small, ts, timeSrc, lat: meta.lat, lon: meta.lon });
+      prepared.push({ small, ts, timeSrc });
     } catch (err) {
       toast(t('Could not open a photo: {name}', { name: f.name }));
     }
@@ -306,15 +292,6 @@ async function prepareAndQueue(files, note) {
   }
   for (const g of groups) {
     const first = g[0];
-    let place = null;
-    const withGps = g.find((p) => p.lat != null);
-    if (S.settings.useLocation) {
-      if (withGps) place = placeLabel(withGps.lat, withGps.lon, S.settings.places);
-      else if (first.timeSrc === 'now') {
-        const pos = await getPos();
-        if (pos) place = placeLabel(pos.lat, pos.lon, S.settings.places);
-      }
-    }
     const photoIds = [];
     for (const p of g) {
       const pid = db.uid();
@@ -325,7 +302,7 @@ async function prepareAndQueue(files, note) {
     const e = {
       id: db.uid(), ts: first.ts, day: dayKey(when), createdAt: Date.now(), kind: 'meal', status: 'pending',
       src: 'photo', text: note || '', ...titleFor('photo', {}), slot: slotByTime(when), items: [], kcal: 0, p: 0, c: 0, f: 0, fib: 0,
-      tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds, timeSrc: first.timeSrc, place,
+      tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds, timeSrc: first.timeSrc,
     };
     await saveEntry(e);
     queueAnalyze(e.id);
@@ -750,7 +727,7 @@ async function analyzeEntry(id, opts = {}) {
     const cfg = aiCfg();
     if (opts.strong && cfg.provider === 'anthropic') cfg.model = STRONG_MODEL;
     const { data, usage, model: usedModel } = await analyze({
-      cfg, blobs, text: e.text, when: new Date(e.ts), place: e.place, hint: opts.hint,
+      cfg, blobs, text: e.text, when: new Date(e.ts), hint: opts.hint,
       onRetry: (...a) => { S.retry.set(id, retryNote(...a)); render(); },
     });
     await addUsage(usedModel, usage);
@@ -2021,7 +1998,6 @@ const ACT = {
     await openSettings('profile'); // the open sheet shows the saved name and the cleaned fields
     toast(t('Profile saved'));
   },
-  'loc-toggle': async (el) => { S.settings.useLocation = el.checked; await saveSettings(); openSettings(); },
   'review-toggle': async (el) => { S.settings.autoReview = el.checked; await saveSettings(); },
   'coach-day': (el) => {
     if (!hasKey()) return toast(t('Add an API key in Settings to get a note'));
@@ -2038,18 +2014,6 @@ const ACT = {
     if (!navigator.onLine) return toast(td(AI_ERRORS.offline));
     if (!hasProgressData()) return toast(t('Log something first and the review has more to go on'));
     queueProgressReview();
-  },
-  'loc-save': async (el) => {
-    const out = $('#loc-out');
-    out.textContent = t('Getting your location…');
-    posCache = null;
-    const pos = await getPos(true);
-    if (!pos) { out.textContent = t('Could not get a location. Check that the browser has location permission.'); return; }
-    const name = el.dataset.name;
-    S.settings.places = (S.settings.places || []).filter((p) => p.name !== name).concat([{ name, lat: pos.lat, lon: pos.lon }]);
-    await saveSettings();
-    openSettings();
-    toast(t('This spot is saved as “{name}”', { name }));
   },
   'export': () => exportBackup(false),
   'export-photos': () => exportBackup(true),
@@ -2139,7 +2103,7 @@ const ACT = {
     S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null; S.keyDraft = null; S.resetStep = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
-    autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
+    autoTried.clear(); pausedUntil = 0; frame = null; photoTarget = null;
     dropPantry();
     closeSheet();
     S.tab = 'today'; S.onboard = null;
@@ -2215,7 +2179,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals and favourites are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {
@@ -2231,7 +2195,6 @@ document.addEventListener('change', (ev) => guard(async () => {
     $(sel).scrollIntoView({ block: 'nearest' });
     return;
   }
-  if (el.dataset.act === 'loc-toggle') return ACT['loc-toggle'](el);
   if (el.dataset.act === 'review-toggle') return ACT['review-toggle'](el);
   if (el.dataset.chg === 'provider') { S.keyDraft = { provider: el.value }; return openSettings(); }
   if (el.dataset.chg === 'preset') {

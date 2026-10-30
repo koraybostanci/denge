@@ -74,7 +74,6 @@ CREATE TABLE weightplan_meals (
   fat_g      REAL,
   fibre_g    REAL,
   confidence REAL,                              -- 0 to 1: the model's own estimate; 1 for meals you tapped or edited; NULL when unknown
-  place      TEXT,                              -- Home, Office or out, when photo location is on
   note       TEXT,                              -- what was typed
   photos     INTEGER NOT NULL DEFAULT 0,        -- number of photos; the photos themselves are not exported
   flags      TEXT                               -- comma-separated, for example alcohol
@@ -149,7 +148,7 @@ export function buildSql({ settings: s, entries, days, badges = {}, foods = [], 
     '-- Load it into a new or existing SQLite database:',
     `--   sqlite3 -bail pickle.db < ${exportName(now)}`,
     '-- Loading again replaces the weightplan_* tables and the weightplan_daily view; nothing else in the database is touched.',
-    '-- Not included: photos, API keys, the coordinates of saved places.',
+    '-- Not included: photos, API keys.',
     '',
     'BEGIN TRANSACTION;',
     'DROP VIEW IF EXISTS weightplan_daily;',
@@ -213,10 +212,10 @@ export function buildSql({ settings: s, entries, days, badges = {}, foods = [], 
     const ok = e.status === 'ok';
     const m = e.mult || 1;
     const v = (x) => (ok ? num((x || 0) * m) : 'NULL');
-    out.push(`INSERT INTO weightplan_meals (id, day, logged_at, slot, title, source, plan_id, tier, status, portion, kcal, protein_g, carbs_g, fat_g, fibre_g, confidence, place, note, photos, flags) VALUES (${[
+    out.push(`INSERT INTO weightplan_meals (id, day, logged_at, slot, title, source, plan_id, tier, status, portion, kcal, protein_g, carbs_g, fat_g, fibre_g, confidence, note, photos, flags) VALUES (${[
       text(e.id), text(e.day), text(localTime(e.ts)), text(e.slot), text(e.title), text(e.src), text(e.planId), text(ok ? e.tier : null),
       text(e.status), num(m), v(e.kcal), v(e.p), v(e.c), v(e.f), v(e.fib), ok && e.conf > 0 ? num(e.conf) : 'NULL',
-      text(e.place), text(e.text), int((e.photoIds || []).length), text((e.flags || []).join(',')),
+      text(e.text), int((e.photoIds || []).length), text((e.flags || []).join(',')),
     ].join(', ')});`);
     if (!ok) continue;
     (e.items || []).forEach((it, i) => {

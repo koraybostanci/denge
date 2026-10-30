@@ -33,9 +33,6 @@
   picture of their own; a picture stored before that is kept until you remove it.
 - The API key is stored on the device only, unencrypted like the rest of the app's data, and is
   never written to a backup file.
-- Photo location is off by default. When on, it is read on the device and matched to places you
-  saved; the model only receives a generic label, "home", "office", "out" or "a saved place", never the
-  name you gave the place, and never coordinates.
 - Free text you type (a note, a meal or food name, an ingredient name) is filtered before it is sent:
   e-mail addresses, web links, phone numbers (7 or more digits, but not dates, time ranges or lists of single digits) and street addresses are replaced with
   "[redacted]". Nothing else is filtered, so other details in your text go as you wrote them. Photo
@@ -48,15 +45,15 @@
   change of goals does not move them). Nothing about badges is sent anywhere, and the model never sees them.
 - There is no sync. Back up from Settings → "Backup and export"; the backup is a JSON file you can
   restore on the same or another device. It holds your entries, goals, favourites, My plan (the
-  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear, and your saved places with their coordinates. It also holds your Pantry products with their values (name, per-100 g values, and the ingredients text where one is stored, and when each was last used) and their pictures. Photos of
+  Default plan comes with the app and is not in the file), the plan's pictures, the verdicts of your checks, the progress review, the badges you have earned (and which of them you have already looked at), the parts of your pickle avatar you chose to wear. It also holds your Pantry products with their values (name, per-100 g values, and the ingredients text where one is stored, and when each was last used) and their pictures. Photos of
   logged meals are included only when you choose "With photos". Restoring adds the backup's
   entries, days, checks, badges, plan pictures and Pantry products to what is on the device (an entry or day that is in
-  both takes the backup's version; a Pantry product that is in both takes the backup's values); its goals, favourites, saved places and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). Your name, age and gender are part of the backup, but the install id of this device stays and the backup brings none. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
+  both takes the backup's version; a Pantry product that is in both takes the backup's values); its goals, favourites and My plan replace yours (a backup with no My plan removes yours; a backup from before plans could be changed leaves yours alone). Your name, age and gender are part of the backup, but the install id of this device stays and the backup brings none. The avatar you wear on this device stays (a device with no badge record yet takes the backup's); a worn part is only ever one that the badges on the device have earned. The
   provider, address, model and key stay as they are.
 - Settings → "Reset" has two levels. "Clear my log" deletes what you tracked (meals and their photos,
   weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review, checks) and keeps every setting (goals and profile included), your plans, the plan's
   pictures, your Pantry products with their photos, your API key and the badges you have earned. "Factory reset" empties the app as it was on its first launch and returns to the setup screen. It deletes the
-  goals, name, age and gender, favourites, saved places, My plan, the plan's pictures, your Pantry products with their photos, the badges and the usage totals; the API key and provider
+  goals, name, age and gender, favourites, My plan, the plan's pictures, your Pantry products with their photos, the badges and the usage totals; the API key and provider
   stay unless you untick the box. The language and the install id stay too. It asks you to type DELETE. Both refuse while something is being
   analysed. Neither can be undone, so save a backup first.
 
@@ -91,7 +88,7 @@ have numbers. The per-item macro columns (`carbs_g`, `fat_g`, `fibre_g` in `weig
 lose the app's difference between "estimated as 0" and "never estimated", which the app shows as
 `–`: where nothing was stored for an item, the export writes 0. `target_kcal` and `target_weight_kg`
 are worked out from your current Goals, so
-changing them changes past rows. Photos, API keys and the coordinates of saved places are not
+changing them changes past rows. Photos and API keys are not
 exported.
 
 ```sql

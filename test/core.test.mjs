@@ -324,14 +324,14 @@ test('fresh settings are those of a new install, as new objects each time', () =
   assert.equal(a.schema, SCHEMA_VERSION);
   assert.equal(a.apiKey, '');
   assert.equal(a.hideStart, false);
-  assert.deepEqual(a.places, []);
+  assert.equal('places' in a || 'useLocation' in a, false);
   assert.deepEqual([a.name, a.age, a.gender, a.clientId, a.onboarded], ['', 0, '', '', false]);
   for (const k of ['startDate', 'startKg', 'targetDate', 'targetKg', 'kcalRest', 'kcalTrain', 'protein', 'proteinMin']) assert.equal(k in a, false, `${k} is the person's, not a default`);
   for (const k of ['kcalMinDay', 'fiber', 'steps', 'water', 'model']) assert.equal(a[k], DEFAULTS[k]); // the rest of the defaults stay
   a.name = 'x'; a.clientId = 'c'; a.onboarded = true;
   assert.deepEqual([b.name, b.clientId, b.onboarded], ['', '', false]);
-  a.places.push({ name: 'x' }); a.favorites.push({ id: 'f' }); a.usage.calls = 9;
-  assert.deepEqual([b.places, b.favorites, b.usage.calls], [[], [], 0]); // nothing shared between resets
+  a.favorites.push({ id: 'f' }); a.usage.calls = 9;
+  assert.deepEqual([b.favorites, b.usage.calls], [[], 0]); // nothing shared between resets
   const c = freshCheck();
   c.photos.push(1);
   assert.deepEqual(freshCheck().photos, []);

@@ -6,7 +6,7 @@
 export const sq = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
 
 // Free text the person wrote (a note, a title, a food or ingredient name) leaves the device only after sanitizeOut: an e-mail, a link,
-// a phone number or a street address is redacted, so contact details and saved places never reach the model. Conservative on purpose:
+// a phone number or a street address is redacted, so contact details never reach the model. Conservative on purpose:
 // "200 g rice", "2 x 150 g", "1200-1500 kcal", "2026-10-24" and "2 Dr Pepper" come out unchanged, and the output has no digits left for a
 // second pass to match, so it is idempotent.
 const REDACTED = '[redacted]';
@@ -37,8 +37,3 @@ const RULES = [
 ];
 export const sanitizeOut = (v) => RULES.reduce((s, [re, rep]) => s.replace(re, rep), sq(v));
 
-// A saved place is named by the person: only the two words the app suggests (Home, Office) and "out" go to the model as they are
-export const placeWord = (p) => {
-  const w = sq(p).toLowerCase();
-  return p === 'out' ? 'out' : w === 'home' || w === 'office' ? w : 'a saved place';
-};

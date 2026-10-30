@@ -25,7 +25,7 @@ function workoutNote(plan) {
 // prompt with no products stays byte-identical). The note is the person's text of this entry: foods they name are
 // always in the digest, whatever the caps.
 const SYSTEM = (note = '') => `You log food for one person on a weight-loss plan. Reply with JSON only. Write food names, title and q in English.
-Input: photo(s) and/or a short text in any language, plus the person's local time and place. Weights are in grams (g), energy in kcal, water in litres.
+Input: photo(s) and/or a short text in any language, plus the person's local time. Weights are in grams (g), energy in kcal, water in litres.
 kind: "meal" (food or drink), "weight" (scale reading, set kg), "steps" (step count, set steps), "none" (nothing to log).
 For meals: list each item with grams estimated from visual cues (dinner plate ≈ 26 cm, cutlery, hands), include visible oil, sauces and drinks. Precedence for each amount: the person's note or correction first, then what is visible, and only where neither shows it the larger plausible portion. Each item also reports its own kcal, p, c, f and fib for its portion. Give c, f, fib for an item only when you can estimate it; omit the key when you cannot, and report 0 only when you know the food has none — the item macros together should roughly add up to the entry c, f and fib totals. Name each item specifically and, where you assumed something you cannot see, say so in brackets: "falafel (assumed fried)", "white cheese (assumed full-fat)". Food eaten "out" usually carries more fat. kcal, p, c, f, fib are totals for the whole entry; kcal equals the sum of the items' kcal, and 4·p + 4·c + 9·f comes within about 15% of kcal.
 A note or correction from the person outranks what you see: follow it, drop the matching assumption and do not ask about it again.
@@ -47,8 +47,8 @@ const TURKISH = {
 export const langLine = (kind = 'text') => (getUiLang() === 'tr' ? TURKISH[kind] : '');
 
 // The redaction and the squeeze live in js/text.js (pure, so the briefs import them without the model module); re-exported here for the model's callers
-import { sq, sanitizeOut, placeWord } from './text.js';
-export { sanitizeOut, placeWord };
+import { sq, sanitizeOut } from './text.js';
+export { sanitizeOut };
 // The plan digest, line by line through sanitizeOut (the digest keeps its line breaks)
 const planOut = (plan) => planDigest(plan).split('\n').map(sanitizeOut).join('\n');
 
@@ -397,11 +397,11 @@ export async function callModel(cfg, { system, shape = '', text, blobs = [], sch
 }
 
 /**
- * @param {{cfg:object, blobs?:Blob[], text?:string, when:Date, place?:string|null, hint?:string, onRetry?:Function}} o
+ * @param {{cfg:object, blobs?:Blob[], text?:string, when:Date, hint?:string, onRetry?:Function}} o
  * @returns {Promise<{data:object, usage:{in:number,out:number}, model:string}>}
  */
 export async function analyze(o) {
-  const lines = [`Time ${hhmm(o.when)}` + (o.place ? `, place: ${placeWord(o.place)}` : '')];
+  const lines = [`Time ${hhmm(o.when)}`];
   if (o.text) lines.push(`Note: ${sanitizeOut(o.text)}`);
   if (o.hint) lines.push(String(o.hint).split('\n').map(sanitizeOut).join('\n')); // line by line: the correction's lines stay apart
   const req = { system: SYSTEM(o.text) + langLine('entry'), shape: SHAPE, text: lines.join('\n'), blobs: o.blobs || [], schema: SCHEMA, json: true, maxTokens: 1500 }; // headroom above the analysis shape: 12 items with verbose names on the Anthropic route (which spends the cap exactly, unlike the OpenAI path that doubles it for reasoning) can approach ~2k characters, and providers bill the generated tokens, not the cap — 1500 leaves the classified "cut off" failure practically unreachable for a reply
