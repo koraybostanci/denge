@@ -288,7 +288,8 @@ export function kilosDown(day = today()) {
 }
 
 // Looking back over the plan so far: days on plan, the longest run, perfect days
-export function history() {
+export function history() { return withDayIndex(historyPass); }
+function historyPass() {
   const s = S.settings;
   const t = today();
   let onPlan = 0;
@@ -688,7 +689,8 @@ export function coachState(day) {
 const djb2 = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = (Math.imul(h, 33) + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 // What the progress review was written for: the goals, the plan, the weigh-ins and, in steps of five, the days with meals.
 // Water, coffee and supplement ticks, edits to an entry (its kcal or tier only move the day's verdict, not that it has one) and S.rev leave it as it is.
-export function progressSig() {
+export function progressSig() { return withDayIndex(progressSigPass); }
+function progressSigPass() {
   const s = S.settings;
   const w = weightSeries();
   const last = w[w.length - 1];

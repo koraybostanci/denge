@@ -15,7 +15,7 @@ function reviewBriefText(day) {
   const v = dayVerdict(day);
   const r = (x) => Math.round(x);
   // The brief is read by the model and stays English whatever the interface language is
-  const date = (d) => new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(parseDay(d));
+  const date = (d) => FULL_DATE.format(parseDay(d));
   const meals = mealsOf(day).sort((a, b) => a.ts - b.ts);
   const lines = [
     `Day: ${date(day)}, ${dd.train ? 'workout day' : 'rest day'}, ${v.live ? `still in progress, now ${hhmm(Date.now())}` : 'finished'}.`,
@@ -98,6 +98,9 @@ export const BRIEF_MAX = 3500;
 // Is there anything at all for the review to go on? The same check the brief opens with, kept apart so the tap path can ask once cheaply instead of building the whole summary.
 export const hasProgressData = () => S.entries.some((e) => e.kind === 'meal' && e.status === 'ok')
   || Object.values(S.days).some((d) => d && (d.kg || d.steps || d.water || d.coffee || (d.taken && d.taken.length) || d.train));
+const FULL_DATE = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const LONG_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const SHORT_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 export const progressBrief = () => inEnglish(() => progressBriefText());
 function progressBriefText() {
   const s = S.settings;
@@ -107,8 +110,8 @@ function progressBriefText() {
     const r = (x) => Math.round(x);
     const f1 = (x) => (Math.round(x * 10) / 10 || 0).toFixed(1); // never "-0.0"
     const f2 = (x) => (Math.round(x * 100) / 100 || 0).toFixed(2);
-    const date = (d) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(parseDay(d));
-    const short = (d) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(parseDay(d));
+    const date = (d) => LONG_DATE.format(parseDay(d));
+    const short = (d) => SHORT_DATE.format(parseDay(d));
     const total = diffDays(s.startDate, s.targetDate);
     const sched = (d) => (total > 0 ? targetAt(d, s) : null);
     const sf = (d) => (total > 0 ? f1(targetAt(d, s)) : 'n/a');
@@ -178,10 +181,12 @@ function progressBriefText() {
       return `${d.day} ${f1(d.kg)} trend ${f1(tw ? tw.kg : d.kg)} line ${sf(d.day)}`;
     }));
     // The first `old` weigh-ins as one average line per week, then the rest raw
+    const weekOfReading = weighed.map((d) => weekStart(d.day)); // looked up once: the trimming below calls thin() for every number of readings it tries
+    const weekLabel = new Map(); // week → its date as the brief writes it
     const thin = (old) => {
       const byWeek = new Map();
-      for (const d of weighed.slice(0, old)) { const w = weekStart(d.day); byWeek.set(w, [...(byWeek.get(w) || []), d.kg]); }
-      return [...[...byWeek].map(([w, v]) => `week of ${date(w)}: avg ${f1(v.reduce((a, b) => a + b, 0) / v.length)} kg, ${v.length} weigh-ins`), ...raw.slice(old)];
+      for (let i = 0; i < old; i++) { const w = weekOfReading[i]; const g = byWeek.get(w); if (g) g.push(weighed[i].kg); else byWeek.set(w, [weighed[i].kg]); }
+      return [...[...byWeek].map(([w, v]) => { if (!weekLabel.has(w)) weekLabel.set(w, date(w)); return `week of ${weekLabel.get(w)}: avg ${f1(v.reduce((a, b) => a + b, 0) / v.length)} kg, ${v.length} weigh-ins`; }), ...raw.slice(old)];
     };
     // 5. The current week
     const ws = weekStart(t);

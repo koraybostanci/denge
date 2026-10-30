@@ -1,5 +1,5 @@
 import {
-  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, trendWeight, withTrendIndex, latestWeight, weightSeries, projection,
+  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, trendWeight, withTrendIndex, withDayIndex, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
   plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses, shownName,
@@ -1184,7 +1184,9 @@ function adjustNotice() {
   return '';
 }
 
-export function renderProgress() {
+// One pass over the whole log: the entries are bucketed by day once (withDayIndex), so each day's totals do not filter them all again
+export const renderProgress = () => withDayIndex(renderProgressScreen);
+function renderProgressScreen() {
   const s = S.settings;
   const { head, line, a, target, started } = progressSummary();
   const pr = projection();
