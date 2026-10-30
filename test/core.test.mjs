@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, currentWeight, avg7, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, currentWeight, avg7, trendWeight, withTrendIndex, trendSeriesOf, TREND_ALPHA, TREND_SLACK, TREND_MAX_SWING, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
   itemRests, REST_KCAL, REST_MACROS,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
@@ -681,19 +681,29 @@ test('progressRatingHint: at the target but losing far faster than the plan read
   assert.ok(-projection().perWeek > planRate().kg * 7, 'the overshoot the check looks for');
   assert.equal(progressRatingHint(), 'on-track');
 });
-test('progressRatingHint: the 0.2 kg band, stuck as in adjustNotice, flat weight and target reached', () => {
-  const setup = (a, b) => { reset(); S.settings.startDate = day(-40); for (const o of [0, -2, -4, -6]) wi(o, a); for (const o of [-7, -9, -11, -13]) wi(o, b); };
+// Daily weigh-ins whose trend is exactly x a week ago and y today: x all the way back, then the one level that moves the trend
+// from x to y over the 7 days after it (the trend after k days at a is x + (a − x)(1 − (1 − α)^k), so a = (y − x·r) / (1 − r))
+const pin = (x, y) => {
+  const r = (1 - TREND_ALPHA) ** 7;
+  for (let o = -45; o <= -7; o++) wi(o, x);
+  const a = (y - x * r) / (1 - r);
+  for (let o = -6; o <= 0; o++) wi(o, a);
+};
+test('progressRatingHint: the 0.2 kg band, stuck as in adjustNotice, flat weight and target reached (on pinned trends)', () => {
+  const setup = (x, y) => { reset(); pin(x, y); assert.ok(Math.abs(trendWeight(day(-7)).kg - x) < 1e-9 && Math.abs(trendWeight(day(0)).kg - y) < 1e-9, 'the pinned trends'); };
   const tgt = (o) => targetAt(day(o), S.settings);
-  setup(0, 0); const t0 = tgt(0);
-  setup(t0 + 0.19, t0 + 0.19 + 0.5); assert.equal(progressRatingHint(), 'on-track');
-  setup(t0 + 0.2, t0 + 0.2 + 0.5); assert.equal(progressRatingHint(), 'a-bit-behind');
-  // stuck: both averages more than 0.7 kg above their own schedule (the week before is exactly 4-day samples of b)
-  setup(t0 + 0.8, tgt(-7) + 0.8); assert.equal(progressRatingHint(), 'stuck');
-  setup(t0 + 0.8, tgt(-7) + 0.69); assert.notEqual(progressRatingHint(), 'stuck');
-  // flat: the average three weeks ago is less than 0.15 kg above today's
-  setup(t0 + 0.3, t0 + 0.9); for (const o of [-21, -22, -23]) wi(o, t0 + 0.3 + 0.1);
-  assert.equal(progressRatingHint(), 'stuck');
-  setup(S.settings.targetKg - 0.1, S.settings.targetKg + 0.5); assert.equal(progressRatingHint(), 'great');
+  reset(); const t0 = tgt(0);
+  // 0.2 kg above the line is the edge of a bit behind: either side of it (0.01 apart, clear of float noise)
+  setup(t0 + 0.19 + 0.5, t0 + 0.19); assert.equal(progressRatingHint(), 'on-track');
+  setup(t0 + 0.21 + 0.5, t0 + 0.21); assert.equal(progressRatingHint(), 'a-bit-behind');
+  // stuck: both trends more than 0.7 kg above their own schedule
+  setup(tgt(-7) + 0.8, t0 + 0.8); assert.equal(progressRatingHint(), 'stuck');
+  setup(tgt(-7) + 0.69, t0 + 0.8); assert.notEqual(progressRatingHint(), 'stuck'); // the week before is 0.69 above: not two weeks in a row
+  setup(tgt(-7) + 0.71, t0 + 0.69); assert.notEqual(progressRatingHint(), 'stuck'); // today is 0.69 above: the other arm
+  // flat: the trend three weeks ago is less than 0.15 kg above today's
+  setup(t0 + 0.4, t0 + 0.3); assert.equal(progressRatingHint(), 'stuck');
+  setup(t0 + 0.5, t0 + 0.3); assert.notEqual(progressRatingHint(), 'stuck');
+  setup(S.settings.targetKg + 0.5, S.settings.targetKg - 0.1); assert.equal(progressRatingHint(), 'great');
 });
 test('progressGate: none before day 7, gated until 14 days or 3 weigh-ins in the average', () => {
   reset();
@@ -769,4 +779,153 @@ test('itemRests is pure and read-only: a frozen entry does not throw and prints 
 test('the run gates for the rest row are the named constants 5 kcal and 2 macro grams', () => {
   assert.equal(REST_KCAL, 5);
   assert.equal(REST_MACROS, 2);
+});
+
+// ——— Trend weight (an exponentially weighted moving average of the weigh-ins) ———
+const pts = (list, from = 0) => list.map((kg, i) => ({ day: day(from + i), kg }));
+const trendOf = (list, opts, from = 0) => trendSeriesOf(pts(list, from), opts).map((r) => r.trend);
+const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
+
+test('trend weight: the first reading seeds it, a constant weight gives a constant trend', () => {
+  near(trendOf([85])[0], 85);
+  for (const v of trendOf([85, 85, 85, 85, 85])) near(v, 85);
+});
+test('trend weight: each daily reading takes α of the way, and a gap takes the share of the days it covers', () => {
+  near(trendOf([86, 84])[1], 86 + TREND_ALPHA * (84 - 86)); // one day apart
+  const gapped = trendSeriesOf([{ day: day(-3), kg: 86 }, { day: day(0), kg: 84 }]); // three days apart: 1 − 0.7³ of the way
+  near(gapped[1].trend, 86 + (1 - (1 - TREND_ALPHA) ** 3) * (84 - 86));
+  const week = trendSeriesOf([{ day: day(-10), kg: 86 }, { day: day(0), kg: 84 }]);
+  assert.ok(week[1].trend < 84.1, 'after ten days away the new reading nearly is the trend');
+});
+test('trend weight: on a steady loss it lags less than the 7-day mean', () => {
+  reset();
+  for (let i = 0; i < 21; i++) wi(-20 + i, Math.round((88 - 0.1 * i) * 100) / 100); // 0.1 kg a day, 86 kg today
+  const last = latestWeight(T).kg;
+  const lagTrend = trendWeight(T).kg - last;
+  const lagMean = avg7(T).kg - last;
+  assert.ok(lagTrend > 0 && lagTrend < lagMean, `${lagTrend} against ${lagMean}`);
+  near(lagTrend, 0.1 * (1 - TREND_ALPHA) / TREND_ALPHA, 0.02); // (1 − α) / α days behind, at 0.1 kg a day
+});
+test('trend weight: an old reading leaving the window does not make it jump, as it does the 7-day mean', () => {
+  reset();
+  for (let o = -20; o <= 0; o++) wi(o, 85);
+  wi(-7, 88); // one high reading a week ago
+  const step = (f) => { let m = 0; for (let o = -5; o <= 0; o++) m = Math.max(m, Math.abs(f(day(o)).kg - f(day(o - 1)).kg)); return m; };
+  const trendStep = step((d) => trendWeight(d));
+  const meanStep = step((d) => avg7(d));
+  assert.ok(meanStep > 0.4, 'the mean drops by 3/7 kg when the reading leaves');
+  assert.ok(trendStep < meanStep / 2, `${trendStep} against ${meanStep}`);
+});
+test('trend weight: shaped like avg7 — n counts the readings of the 7 days, null when there is none, future days are ignored', () => {
+  reset();
+  assert.equal(trendWeight(T), null);
+  wi(-20, 85); wi(-19, 85);
+  assert.equal(trendWeight(T), null, 'a week without weighing: no trend, as no average');
+  assert.equal(trendWeight(day(-19)).n, 2);
+  wi(-6, 84); wi(-3, 83.5); wi(2, 70);
+  const a = trendWeight(T);
+  assert.equal(a.n, 2);
+  assert.equal(a.day, day(-3));
+  assert.equal(avg7(T).n, a.n, 'the same guards read the same count');
+  assert.ok(a.kg > 83.5 && a.kg < 85, 'the 70 kg of the future moved nothing');
+});
+test('trend weight: a mistyped reading is set aside, counted in n, and moves nothing', () => {
+  const rows = trendSeriesOf(pts([85, 85.2, 58, 84.8]), { startKg: 85, startDate: day(0) });
+  assert.deepEqual(rows.map((r) => r.skipped), [false, false, true, false]);
+  near(rows[2].trend, rows[1].trend); // carried
+  assert.ok(rows[3].trend > 84.9 && rows[3].trend < 85.2);
+  reset(); wi(-2, 85); wi(-1, 58); wi(0, 84.8);
+  assert.equal(trendWeight(T).n, 3);
+  assert.ok(trendWeight(T).kg > 84.5);
+});
+test('trend weight: the allowance is 3 kg plus 1 kg per day since the last reading, and never above 15 kg', () => {
+  const skipped = (a, b, gapDays) => trendSeriesOf([{ day: day(-gapDays), kg: a }, { day: day(0), kg: b }])[1].skipped;
+  assert.equal(skipped(85, 88, 1), false); // 3 kg in a day is within 3 + 1
+  assert.equal(skipped(85, 89, 1), false); // exactly on the edge counts
+  assert.equal(skipped(85, 89.1, 1), true);
+  assert.equal(skipped(85, 92, 5), false); // a week-ish away allows more
+  assert.equal(skipped(85, 101, 90), true); // 16 kg is past the cap however long it has been
+  assert.equal(skipped(85, 100, 90), false); // 15 kg is on the cap
+});
+test('trend weight: two odd readings that agree are a new level, not typos', () => {
+  const rows = trendSeriesOf(pts([85, 85, 85, 78, 78.4, 78.2]));
+  assert.deepEqual(rows.map((r) => r.skipped), [false, false, false, true, false, false]);
+  near(rows[4].trend, 78.4, 1e-9); // started over at the second
+  assert.ok(rows[5].trend < 78.4 && rows[5].trend > 78.2);
+  // two odd readings that disagree stay set aside
+  assert.deepEqual(trendSeriesOf(pts([85, 85, 78, 91, 85])).map((r) => r.skipped), [false, false, true, true, false]);
+});
+test('trend weight: the first reading is judged against the start weight; a typo that seeded the trend is corrected by the next two', () => {
+  const start = { startKg: 87, startDate: day(0) };
+  const first = trendSeriesOf(pts([58, 87, 86.8]), start);
+  assert.deepEqual(first.map((r) => r.skipped), [true, false, false]);
+  assert.equal(first[0].trend, null);
+  assert.equal(trendSeriesOf(pts([58]), start)[0].trend, null);
+  // 97 for 87 is within the first reading's allowance and seeds the trend; the two real readings after it start over
+  const seeded = trendSeriesOf(pts([97, 87, 87.2, 87]), start);
+  assert.deepEqual(seeded.map((r) => r.skipped), [false, true, false, false]);
+  near(seeded[2].trend, 87.2);
+  // with no start weight the first reading is simply the seed
+  assert.equal(trendOf([58])[0], 58);
+});
+test('trend weight: a reading no one can use is skipped without breaking the rest (NaN, 0, negative, missing)', () => {
+  const rows = trendSeriesOf([{ day: day(-3), kg: 85 }, { day: day(-2), kg: NaN }, { day: day(-1), kg: 0 }, null, { day: day(0), kg: -4 }, { day: day(1), kg: 84 }, { day: day(2) }]);
+  assert.deepEqual(rows.map((r) => r.kg), [85, 84]);
+  assert.deepEqual(trendSeriesOf([]), []);
+});
+test('trend weight: pure — the readings handed in are not touched, and the same input gives the same output', () => {
+  const input = pts([85, 84.6, 84.9, 58, 84.2]);
+  const copy = JSON.parse(JSON.stringify(input));
+  const a = trendSeriesOf(input, { startKg: 85, startDate: day(0) });
+  assert.deepEqual(input, copy);
+  assert.deepEqual(trendSeriesOf(input, { startKg: 85, startDate: day(0) }), a);
+});
+test('trend weight: readings from before the start date count, and trendWeight takes the start weight from the settings', () => {
+  reset(); S.settings.startKg = 86; S.settings.startDate = day(-3);
+  wi(-5, 86.5); wi(-4, 86.2); wi(-1, 85.5); wi(0, 85.1);
+  const a = trendWeight(T);
+  assert.equal(a.n, 4);
+  assert.ok(a.kg < 86 && a.kg > 85.1);
+  // a start weight that is wrong by more than the allowance: the first reading is set aside, the second agrees with it and starts the trend
+  const rows = trendSeriesOf(pts([86.5, 86.2, 85.5]), { startKg: 60, startDate: day(0) });
+  assert.deepEqual(rows.map((r) => r.skipped), [true, false, false]);
+  near(rows[1].trend, 86.2);
+  reset();
+});
+test('trend weight: the constants stay where the docs and the issue say they are', () => {
+  assert.equal(TREND_ALPHA, 0.3); assert.equal(TREND_SLACK, 3); assert.equal(TREND_MAX_SWING, 15);
+});
+test('trend weight: decisions read the trend — the Progress tab notice rule and the rating agree on a steady overshoot', () => {
+  reset(); S.settings.startDate = day(-40);
+  const tgt = (o) => targetAt(day(o), S.settings);
+  for (let o = -45; o <= 0; o++) wi(o, tgt(-7) + 0.8); // flat 0.8 kg above where the line stood a week ago, daily
+  assert.ok(trendWeight(T).kg - tgt(0) > 0.7 && trendWeight(day(-7)).kg - tgt(-7) > 0.7);
+  assert.equal(progressRatingHint(), 'stuck');
+});
+
+test('trend weight: withTrendIndex gives the same answers as without it, on every day, for a messy log', () => {
+  reset(); S.settings.startKg = 87; S.settings.startDate = day(-60);
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let o = -90; o <= 3; o++) { const r = rnd(); if (r < 0.25) continue; wi(o, r > 0.97 ? 58 : Math.round((87 - 0.05 * (o + 90) + (rnd() - 0.5)) * 10) / 10); } // gaps, typos, a few future days
+  const days = []; for (let o = -100; o <= 5; o++) days.push(day(o));
+  const plain = days.map((d) => trendWeight(d));
+  const indexed = withTrendIndex(() => days.map((d) => trendWeight(d)));
+  assert.deepEqual(indexed, plain);
+  assert.ok(plain.some((x) => x) && plain.some((x) => x === null), 'both weighed and unweighed days are in the sample');
+});
+test('trend weight: withTrendIndex nests, hands back what fn returns, lets go afterwards and when fn throws', () => {
+  reset(); S.settings.startKg = 86; wi(-3, 86); wi(-1, 85);
+  assert.equal(withTrendIndex(() => withTrendIndex(() => trendWeight(T).n)), 2);
+  assert.equal(withTrendIndex(() => 'x'), 'x');
+  assert.throws(() => withTrendIndex(() => { throw new Error('boom'); }), /boom/);
+  wi(0, 84); // the log changed after the passes: nothing stale is kept
+  assert.equal(trendWeight(T).n, 3);
+  near(trendWeight(T).kg, trendSeriesOf(pts([86, 85, 84], -3 + 0).map((p, i) => ({ day: [day(-3), day(-1), day(0)][i], kg: p.kg })), S.settings)[2].trend);
+});
+test('trend weight: a pass over three years of daily weigh-ins is fast with the index', () => {
+  reset(); S.settings.startKg = 95; S.settings.startDate = day(-1100);
+  for (let o = -1095; o <= 0; o++) wi(o, Math.round((95 - 0.012 * (o + 1095) + Math.sin(o) * 0.3) * 10) / 10);
+  const t0 = performance.now();
+  withTrendIndex(() => { for (let o = -1095; o <= 0; o++) trendWeight(day(o)); });
+  assert.ok(performance.now() - t0 < 500, `${Math.round(performance.now() - t0)} ms`);
 });

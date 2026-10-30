@@ -3,7 +3,7 @@
 import { inEnglish } from './i18n.js';
 import { sanitizeOut, placeWord } from './text.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
-import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
+import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, trendWeight, withTrendIndex, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';
 
 // The day in plain lines: what the model gets to read. Text only, a few hundred tokens.
@@ -15,7 +15,7 @@ function reviewBriefText(day) {
   const v = dayVerdict(day);
   const r = (x) => Math.round(x);
   // The brief is read by the model and stays English whatever the interface language is
-  const date = (d) => new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(parseDay(d));
+  const date = (d) => FULL_DATE.format(parseDay(d));
   const meals = mealsOf(day).sort((a, b) => a.ts - b.ts);
   const lines = [
     `Day: ${date(day)}, ${dd.train ? 'workout day' : 'rest day'}, ${v.live ? `still in progress, now ${hhmm(Date.now())}` : 'finished'}.`,
@@ -38,12 +38,12 @@ function reviewBriefText(day) {
   lines.push(`Steps: ${dd.steps ? r(dd.steps) : 'not logged'}. Water: ${dd.water ? `${(dd.water / 1000).toFixed(1)} l` : 'not logged'}. Weigh-in: ${dd.kg ? `${dd.kg} kg` : 'none'}.`);
   const rate = planRate();
   let goal = `Goal: ${s.startKg} kg on ${s.startDate} to ${s.targetKg} kg on ${s.targetDate}, which needs about ${rate.kg.toFixed(2)} kg (${r(rate.kcal / 10) * 10} kcal) a day.`;
-  const avg = avg7(day);
+  const avg = trendWeight(day);
   if (day < s.startDate) goal += ' On this day the plan had not started yet.';
   else if (avg) {
     const sched = targetAt(day, s);
     const gap = avg.kg - sched;
-    goal += ` Schedule for this day ${sched.toFixed(1)} kg; 7-day average ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
+    goal += ` Schedule for this day ${sched.toFixed(1)} kg; trend weight (smoothed over recent weigh-ins) ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
   }
   lines.push(goal);
   const f = weekFlex(day);
@@ -82,10 +82,10 @@ function checkBriefText(note) {
   lines.push(`This week: flexible dinner ${f.meal} of 1 used, beer or small dessert ${f.small} of 1 used, off-plan entries ${f.off}.`);
   const rate = planRate();
   let goal = `Goal: ${s.startKg} kg to ${s.targetKg} kg by ${s.targetDate}, about ${rate.kg.toFixed(2)} kg (${r(rate.kcal / 10) * 10} kcal) a day.`;
-  const avg = avg7(t);
+  const avg = trendWeight(t);
   if (avg && t >= s.startDate) {
     const gap = avg.kg - targetAt(t, s);
-    goal += ` 7-day average ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
+    goal += ` Trend weight (smoothed over recent weigh-ins) ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
   }
   lines.push(goal);
   lines.push(note ? `Note from the person: ${sanitizeOut(note)}` : 'No note from the person.');
@@ -98,6 +98,9 @@ export const BRIEF_MAX = 3500;
 // Is there anything at all for the review to go on? The same check the brief opens with, kept apart so the tap path can ask once cheaply instead of building the whole summary.
 export const hasProgressData = () => S.entries.some((e) => e.kind === 'meal' && e.status === 'ok')
   || Object.values(S.days).some((d) => d && (d.kg || d.steps || d.water || d.coffee || (d.taken && d.taken.length) || d.train));
+const FULL_DATE = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const LONG_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const SHORT_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 export const progressBrief = () => inEnglish(() => progressBriefText());
 function progressBriefText() {
   const s = S.settings;
@@ -107,8 +110,8 @@ function progressBriefText() {
     const r = (x) => Math.round(x);
     const f1 = (x) => (Math.round(x * 10) / 10 || 0).toFixed(1); // never "-0.0"
     const f2 = (x) => (Math.round(x * 100) / 100 || 0).toFixed(2);
-    const date = (d) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(parseDay(d));
-    const short = (d) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(parseDay(d));
+    const date = (d) => LONG_DATE.format(parseDay(d));
+    const short = (d) => SHORT_DATE.format(parseDay(d));
     const total = diffDays(s.startDate, s.targetDate);
     const sched = (d) => (total > 0 ? targetAt(d, s) : null);
     const sf = (d) => (total > 0 ? f1(targetAt(d, s)) : 'n/a');
@@ -173,12 +176,19 @@ function progressBriefText() {
     };
     // 4. Every weigh-in since the start
     const weighed = Object.values(S.days).filter((d) => d.kg && d.day >= s.startDate && d.day <= t).sort((a, b) => (a.day < b.day ? -1 : 1));
-    const raw = weighed.map((d) => `${d.day} ${f1(d.kg)} avg ${f1(avg7(d.day).kg)} line ${sf(d.day)}`);
+    const raw = withTrendIndex(() => weighed.map((d) => {
+      const tw = trendWeight(d.day); // null only while every reading so far was set aside as a typo: the reading itself stands in
+      return `${d.day} ${f1(d.kg)} trend ${f1(tw ? tw.kg : d.kg)} line ${sf(d.day)}`;
+    }));
     // The first `old` weigh-ins as one average line per week, then the rest raw
+    const weekOfReading = weighed.map((d) => weekStart(d.day)); // looked up once: the trimming below tries many numbers of readings
+    const weekLabel = new Map(); // week → its date as the brief writes it
+    // The line for a week of collapsed readings: their sum (added in the order of the log) and how many
+    const weekLine = (w, sum, n) => { if (!weekLabel.has(w)) weekLabel.set(w, date(w)); return `week of ${weekLabel.get(w)}: avg ${f1(sum / n)} kg, ${n} weigh-ins`; };
     const thin = (old) => {
       const byWeek = new Map();
-      for (const d of weighed.slice(0, old)) { const w = weekStart(d.day); byWeek.set(w, [...(byWeek.get(w) || []), d.kg]); }
-      return [...[...byWeek].map(([w, v]) => `week of ${date(w)}: avg ${f1(v.reduce((a, b) => a + b, 0) / v.length)} kg, ${v.length} weigh-ins`), ...raw.slice(old)];
+      for (let i = 0; i < old; i++) { const w = weekOfReading[i]; const g = byWeek.get(w); if (g) { g.sum += weighed[i].kg; g.n += 1; } else byWeek.set(w, { sum: weighed[i].kg, n: 1 }); }
+      return [...[...byWeek].map(([w, g]) => weekLine(w, g.sum, g.n)), ...raw.slice(old)];
     };
     // 5. The current week
     const ws = weekStart(t);
@@ -202,10 +212,10 @@ function progressBriefText() {
       comp.push(`Supplements: taken ${whole} over the whole plan, ${last} of ${have * 7} in the last week.`);
     }
     // 7. The adjust rule, worked out here and handed over as given
-    const a = avg7(t);
-    const b = avg7(addDays(t, -7));
+    const a = trendWeight(t);
+    const b = trendWeight(addDays(t, -7));
     const adjust = total > 0 && h.days > 14 && a && b && a.n >= 3 && b.n >= 3 && a.kg - sched(t) > 0.7 && b.kg - sched(addDays(t, -7)) > 0.7
-      ? `Adjustment rule: the 7-day average has been more than 0.7 kg behind the schedule for two weeks, so the app suggests: cut 100 kcal a day or add 2,000 steps, never below the minimum of ${kcalMinDay()} kcal. Pass this on as given; do not work out other numbers.`
+      ? `Adjustment rule: the trend weight has been more than 0.7 kg behind the schedule for two weeks, so the app suggests: cut 100 kcal a day or add 2,000 steps, never below the minimum of ${kcalMinDay()} kcal. Pass this on as given; do not work out other numbers.`
       : 'No automatic adjustment is suggested at this time.';
     // 8. The app's rating and pace
     const tail = [`APP RATING ESTIMATE: ${progressRatingHint()}`];
@@ -221,18 +231,42 @@ function progressBriefText() {
     const weekLines = weeks.map(weekRow);
     const build = (from, strip) => {
       return [...lines, ...(from < weekLines.length ? [`Weeks, oldest first (budgets are today's):`, ...weekLines.slice(from)] : []),
-        'Weigh-ins since the start (day, kg, 7-day average, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
+        'Weigh-ins since the start (day, kg, trend weight, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
     };
+    // The trimming only needs to know how long each try would be, so it adds up the lengths of the parts (each part and the newline
+    // after it, less the last newline) and builds the text once, at the end. build(from, strip) is the text, sizeOf its length.
+    const cost = (arr) => arr.reduce((x, l) => x + l.length + 1, 0);
+    const WEEKS_HEAD = `Weeks, oldest first (budgets are today's):`;
+    const STRIP_HEAD = 'Weigh-ins since the start (day, kg, trend weight, schedule line):';
+    const fixed = cost(lines) + STRIP_HEAD.length + 1 + cost([cur, ...comp, adjust, ...tail]);
+    const weekFrom = new Array(weekLines.length + 1).fill(0); // the weekly rows from `from` on, with their heading
+    for (let i = weekLines.length - 1; i >= 0; i--) weekFrom[i] = weekFrom[i + 1] + weekLines[i].length + 1;
+    const sizeOf = (from, stripCost) => fixed + (from < weekLines.length ? WEEKS_HEAD.length + 1 + weekFrom[from] : 0) + stripCost - 1;
+    const rawFrom = new Array(raw.length + 1).fill(0); // the raw weigh-in lines from `i` on
+    for (let i = raw.length - 1; i >= 0; i--) rawFrom[i] = rawFrom[i + 1] + raw[i].length + 1;
+    const NONE = 'none'.length + 1; // no weigh-ins at all
     let from = 0;
-    let out = build(from, raw);
-    while (out.length > BRIEF_MAX && from < weeks.length) out = build(++from, raw);
-    // Still over: collapse the oldest weigh-ins, keeping as many recent ones raw as fit (at least the latest)
+    let len = sizeOf(from, raw.length ? rawFrom[0] : NONE);
+    while (len > BRIEF_MAX && from < weeks.length) len = sizeOf(++from, raw.length ? rawFrom[0] : NONE);
+    // Still over: collapse the oldest weigh-ins into one line a week, keeping as many recent ones raw as fit (at least the latest)
     let old = 0;
-    while (out.length > BRIEF_MAX && old < raw.length - 1) out = build(from, thin(++old));
+    const groups = new Map(); // week → { sum, n, cost } of the readings collapsed so far
+    let groupCost = 0;
+    while (len > BRIEF_MAX && old < raw.length - 1) {
+      const w = weekOfReading[old];
+      let g = groups.get(w);
+      if (g) groupCost -= g.cost; else { g = { sum: 0, n: 0, cost: 0 }; groups.set(w, g); }
+      g.sum += weighed[old].kg; g.n += 1; g.cost = weekLine(w, g.sum, g.n).length + 1;
+      groupCost += g.cost;
+      old += 1;
+      len = sizeOf(from, groupCost + rawFrom[old]);
+    }
     // Still over: drop the oldest collapsed lines
-    let lines2 = thin(old);
+    const lines2 = thin(old);
+    const lines2From = new Array(lines2.length + 1).fill(0);
+    for (let i = lines2.length - 1; i >= 0; i--) lines2From[i] = lines2From[i + 1] + lines2[i].length + 1;
     let drop = 0;
-    while (out.length > BRIEF_MAX && drop < lines2.length - 1) out = build(from, lines2.slice(++drop));
-    return out;
+    while (len > BRIEF_MAX && drop < lines2.length - 1) len = sizeOf(from, lines2From[++drop]);
+    return build(from, lines2.slice(drop));
   });
 }

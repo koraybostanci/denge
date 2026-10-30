@@ -350,7 +350,7 @@ test('the progress brief: sections, both adjust forms, no junk values, the cap a
     assert.match(b, /Supplements: taken 1 over the whole plan, 1 of 7 in the last week\./);
     assert.doesNotMatch(b, /Secret pill|s1|undefined|NaN|-0\b|8,200 steps/);
     assert.ok(b.split('\n').filter((l) => l.startsWith('- ')).length <= 8);
-    // The rule holds: two weeks of the average more than 0.7 kg above the schedule
+    // The rule holds: two weeks of the trend more than 0.7 kg above the schedule
     for (let i = 0; i < 16; i++) S.days[day(-i)] = { ...(S.days[day(-i)] || {}), day: day(-i), kg: 88 };
     assert.match(progressBrief(), /Adjustment rule: .*cut 100 kcal a day or add 2,000 steps, never below the minimum of \d+ kcal/);
     assert.doesNotMatch(progressBrief(), /No automatic adjustment/);
@@ -388,7 +388,7 @@ test('the progress brief: sections, both adjust forms, no junk values, the cap a
     const daily = progressBrief();
     assert.ok(daily.length <= 3500, String(daily.length));
     assert.match(daily, /Goal: /);
-    assert.ok(daily.includes(`${day(0)} ${(Math.round((90 - 300 / 40) * 10) / 10).toFixed(1)} avg `));
+    assert.ok(daily.includes(`${day(0)} ${(Math.round((90 - 300 / 40) * 10) / 10).toFixed(1)} trend `));
     assert.match(daily, /week of .*: avg \d+\.\d kg, \d+ weigh-ins/);
     assert.doesNotMatch(daily, /undefined|NaN/);
     // The fixed tail survives the trimming, so the app's rating and the adjust rule always travel with the summary

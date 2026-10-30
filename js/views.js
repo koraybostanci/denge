@@ -1,5 +1,5 @@
 import {
-  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, avg7, latestWeight, weightSeries, projection,
+  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, trendWeight, withTrendIndex, withDayIndex, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
   plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses, shownName,
@@ -212,9 +212,9 @@ function bento(day, part) {
   if (isToday) {
     const p = progressSummary();
     const value = dd.kg ? n1(dd.kg) : p.a ? n1(p.a.kg) : '–';
-    // Today's weigh-in, then the 7-day average beside where you stand: "avg 85.2 · on schedule"
-    const avg = avg7(day);
-    const status = dd.kg && avg && p.started ? t('avg {kg} · {status}', { kg: n1(avg.kg), status: lower(p.tag) }) : p.tag;
+    // Today's weigh-in, then the trend beside where you stand: "trend 85.2 · on schedule"
+    const avg = trendWeight(day);
+    const status = dd.kg && avg && p.started ? t('trend {kg} · {status}', { kg: n1(avg.kg), status: lower(p.tag) }) : p.tag;
     const action = dd.kg ? t('Today’s weigh-in {kg} kg. Change', { kg: n1(dd.kg) }) : t('Enter today’s weigh-in');
     weight = `<button type="button" class="tile${dd.kg ? ' is-done' : ''}" data-act="num" data-kind="kg" aria-label="${esc(t('Weight. {head}. {line} {action}', { head: p.head, line: p.line, action }))}">
       ${top(t('Weight'), !!dd.kg, dd.kg ? '' : t('tap to weigh in'))}
@@ -548,7 +548,7 @@ export function renderNumSheet(kind, day) {
   return `
   <header class="sheet-top"><h2 id="sheet-title">${title}</h2><button type="button" class="btn" data-act="close-sheet">${t('Cancel')}</button></header>
   <form id="num-form" class="num" data-kind="${kind}" data-day="${day}" autocomplete="off">
-    <label for="num-in" class="note">${isKg ? t('Weigh in the morning under the same conditions. A single day fluctuates; the maths uses the 7-day average.') : t('Your daily step count from the phone’s Health app. Goal {goal}.', { goal: n0(S.settings.steps) })}</label>
+    <label for="num-in" class="note">${isKg ? t('Weigh in the morning under the same conditions. A single day fluctuates; the maths uses the trend.') : t('Your daily step count from the phone’s Health app. Goal {goal}.', { goal: n0(S.settings.steps) })}</label>
     <div class="num-row"><input id="num-in" type="text" inputmode="${isKg ? 'decimal' : 'numeric'}" value="${cur ? esc(isKg ? n1(cur) : String(cur)) : ''}" placeholder="${isKg ? n1(S.settings.startKg) : '8000'}" enterkeyhint="done"><span>${isKg ? 'kg' : t('steps')}</span></div>
     <p class="note is-error" id="num-err" role="alert" hidden></p>
     <button type="submit" class="btn btn-primary btn-wide">${t('Save')}</button>
@@ -893,7 +893,7 @@ export function renderCheck() {
 let chartData = null;
 
 // The weight chart. Three ranges: the last 7 days or the last two weeks, where every weigh-in can be read, and the
-// whole plan, which shows where it is going and when you arrive at this pace. Brass is you (the 7-day average),
+// whole plan, which shows where it is going and when you arrive at this pace. Brass is you (the trend weight),
 // the dashed teal line is your line (the schedule), grey dots are the daily weigh-ins. The height never spans less
 // than 2 kg, so a normal day-to-day wobble does not look like a cliff.
 function weightChart() {
@@ -912,7 +912,7 @@ function weightChart() {
   const visible = series.filter((d) => d.day >= x0 && d.day <= x1);
   const avgPoints = [];
   const from = whole ? (visible[0] && visible[0].day) : x0;
-  if (from) for (let d = from; d <= (tod < x1 ? tod : x1); d = addDays(d, 1)) { const a = avg7(d); if (a) avgPoints.push({ day: d, kg: a.kg }); }
+  if (from) withTrendIndex(() => { for (let d = from; d <= (tod < x1 ? tod : x1); d = addDays(d, 1)) { const a = trendWeight(d); if (a) avgPoints.push({ day: d, kg: a.kg }); } });
   const end = avgPoints[avgPoints.length - 1];
 
   // The height: everything shown, plus a little room, and at least 2 kg
@@ -979,8 +979,8 @@ function weightChart() {
   const avgKg = end ? n1(end.kg) : '';
   const lineKg = end ? n1(lineAt(tod < x1 ? tod : x1)) : '';
   const alt = end
-    ? (whole ? (pr && pr.eta ? t('Weight over the whole plan: 7-day average {avg} kg, your line {line} kg, at this pace you arrive on {date}.', { avg: avgKg, line: lineKg, date: dShort.format(parseDay(pr.eta)) }) : t('Weight over the whole plan: 7-day average {avg} kg, your line {line} kg.', { avg: avgKg, line: lineKg }))
-      : week ? t('Weight over the last 7 days: 7-day average {avg} kg, your line {line} kg.', { avg: avgKg, line: lineKg }) : t('Weight over the last two weeks: 7-day average {avg} kg, your line {line} kg.', { avg: avgKg, line: lineKg }))
+    ? (whole ? (pr && pr.eta ? t('Weight over the whole plan: trend {trend} kg, your line {line} kg, at this pace you arrive on {date}.', { trend: avgKg, line: lineKg, date: dShort.format(parseDay(pr.eta)) }) : t('Weight over the whole plan: trend {trend} kg, your line {line} kg.', { trend: avgKg, line: lineKg }))
+      : week ? t('Weight over the last 7 days: trend {trend} kg, your line {line} kg.', { trend: avgKg, line: lineKg }) : t('Weight over the last two weeks: trend {trend} kg, your line {line} kg.', { trend: avgKg, line: lineKg }))
     : (whole ? t('Weight chart: no weigh-ins yet.') : week ? t('Weight chart: no weigh-ins in the last 7 days.') : t('Weight chart: no weigh-ins in the last two weeks.'));
   return `<div class="chart">
     <div class="chart-head"><h2>${t('Weight')}</h2>
@@ -1001,7 +1001,7 @@ function weightChart() {
     </svg>
     <div class="tip" id="c-tip" hidden></div>
     ${!end && !whole ? `<p class="note">${week ? t('No weigh-ins in the last 7 days.') : t('No weigh-ins in the last two weeks.')}</p>` : ''}
-    <p class="legend"><span><i class="key-avg"></i>${t('You (7-day average)')}</span><span><i class="key-target"></i>${t('Your line')}</span><span><i class="key-dot"></i>${t('Daily weigh-in')}</span>${proj ? `<span><i class="key-proj"></i>${t('At this pace')}</span>` : ''}</p>
+    <p class="legend"><span><i class="key-avg"></i>${t('You (trend)')}</span><span><i class="key-target"></i>${t('Your line')}</span><span><i class="key-dot"></i>${t('Daily weigh-in')}</span>${proj ? `<span><i class="key-proj"></i>${t('At this pace')}</span>` : ''}</p>
   </div>`;
 }
 
@@ -1025,7 +1025,7 @@ export function attachChart(root) {
     const d = S.days[day];
     const rows = [[dShort.format(parseDay(day)), '']];
     if (d && d.kg) rows.push([n1(d.kg) + ' kg', t('weigh-in')]);
-    if (chartData.avg[day]) rows.push([n1(chartData.avg[day]) + ' kg', t('average')]);
+    if (chartData.avg[day]) rows.push([n1(chartData.avg[day]) + ' kg', t('trend')]);
     if (day >= S.settings.startDate) rows.push([n1(targetAt(day, S.settings)) + ' kg', t('line')]);
     tip.innerHTML = '';
     rows.forEach(([value, label], k) => {
@@ -1166,8 +1166,8 @@ function checkpoints() {
   for (let i = 28; i < total - 6; i += 28) points.push(addDays(s.startDate, i));
   points.push(s.targetDate);
   const tod = today();
-  return `<table class="table"><thead><tr><th scope="col">${t('Date')}</th><th scope="col">${t('Your line')}</th><th scope="col">${t('Your average')}</th></tr></thead><tbody>
-    ${points.map((d) => { const a = d <= tod ? avg7(d) : null; return `<tr><td>${esc(dShort.format(parseDay(d)))}</td><td>${n1(targetAt(d, s))} kg</td><td>${a ? n1(a.kg) + ' kg' : '–'}</td></tr>`; }).join('')}
+  return `<table class="table"><thead><tr><th scope="col">${t('Date')}</th><th scope="col">${t('Your line')}</th><th scope="col">${t('Your trend')}</th></tr></thead><tbody>
+    ${withTrendIndex(() => points.map((d) => { const a = d <= tod ? trendWeight(d) : null; return `<tr><td>${esc(dShort.format(parseDay(d)))}</td><td>${n1(targetAt(d, s))} kg</td><td>${a ? n1(a.kg) + ' kg' : '–'}</td></tr>`; }).join(''))}
   </tbody></table>`;
 }
 
@@ -1175,28 +1175,30 @@ function adjustNotice() {
   const s = S.settings;
   const tod = today();
   if (diffDays(s.startDate, tod) < 14) return '';
-  const a = avg7(tod);
-  const b = avg7(addDays(tod, -7));
+  const a = trendWeight(tod);
+  const b = trendWeight(addDays(tod, -7));
   if (!a || !b || a.n < 3 || b.n < 3) return '';
   if (a.kg - targetAt(tod, s) > 0.7 && b.kg - targetAt(addDays(tod, -7), s) > 0.7) {
-    return `<div class="notice"><p>${t('Your average has been more than 0.7 kg behind schedule for two weeks. Cut 100 kcal a day or add 2,000 steps. Do not go below {kcal} kcal.', { kcal: n0(Math.max(kcalMinDay(), s.kcalRest - 100)) })}</p><button type="button" class="btn" data-act="settings" data-sec="targets">${t('Open goals')}</button></div>`;
+    return `<div class="notice"><p>${t('Your trend has been more than 0.7 kg behind schedule for two weeks. Cut 100 kcal a day or add 2,000 steps. Do not go below {kcal} kcal.', { kcal: n0(Math.max(kcalMinDay(), s.kcalRest - 100)) })}</p><button type="button" class="btn" data-act="settings" data-sec="targets">${t('Open goals')}</button></div>`;
   }
   return '';
 }
 
-export function renderProgress() {
+// One pass over the whole log: the entries are bucketed by day once (withDayIndex), so each day's totals do not filter them all again
+export const renderProgress = () => withDayIndex(renderProgressScreen);
+function renderProgressScreen() {
   const s = S.settings;
   const { head, line, a, target, started } = progressSummary();
   const pr = projection();
   const series = weightSeries();
   const lost = a ? s.startKg - a.kg : 0;
   const run = streak();
-  const rows = series.slice().reverse().slice(0, 120).map((d) => {
-    const avg = avg7(d.day);
+  const rows = withTrendIndex(() => series.slice().reverse().slice(0, 120).map((d) => {
+    const avg = trendWeight(d.day);
     const tot = dayTotals(d.day);
     return `<tr><td>${esc(dTiny.format(parseDay(d.day)))}</td><td>${n1(d.kg)}</td><td>${avg ? n1(avg.kg) : '–'}</td><td>${d.day >= s.startDate ? n1(targetAt(d.day, s)) : '–'}</td><td>${tot.n ? n0(tot.kcal) : '–'}</td></tr>`;
-  }).join('');
-  // The hero: the kilos down once there is an average to count from; until then, where things stand in words
+  }).join(''));
+  // The hero: the kilos down once there is a trend to count from; until then, where things stand in words
   let hero;
   let note;
   if (started && a) {
@@ -1249,7 +1251,7 @@ export function renderProgress() {
   <section>
     <details class="table-details">
       <summary>${t('Weigh-in table')}</summary>
-      ${rows ? `<table class="table"><thead><tr><th scope="col">${t('Day')}</th><th scope="col">${t('Weigh-in')}</th><th scope="col">${t('Avg')}</th><th scope="col">${t('Line')}</th><th scope="col">kcal</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="note">${t('No weigh-ins yet. Enter one on Today, or type a number into the log.')}</p>`}
+      ${rows ? `<table class="table"><thead><tr><th scope="col">${t('Day')}</th><th scope="col">${t('Weigh-in')}</th><th scope="col">${t('Trend')}</th><th scope="col">${t('Line')}</th><th scope="col">kcal</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="note">${t('No weigh-ins yet. Enter one on Today, or type a number into the log.')}</p>`}
     </details>
   </section>
   ${progressAi()}`;

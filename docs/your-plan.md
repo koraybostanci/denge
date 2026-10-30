@@ -15,6 +15,16 @@ workout days, 135 g of protein, lunch at 12:00, two snacks, dinner at 18:00.
   medical advice, and may be revisited with real use. Pickle is weight-loss only: setup requires the goal
   weight below your current weight and Settings requires it below the start weight; maintenance and gain
   goals are not supported.
+- **Trend weight** is the weight line the app reads and shows, in place of a plain 7-day mean. It is an exponentially
+  weighted moving average of your weigh-ins, worked out on the device: each reading takes 30% of the way from the
+  trend to itself (`TREND_ALPHA` in `js/core.js`), and after a gap the share grows with the days since the last reading,
+  so a reading after a week away counts for more than one the day after. On a steady loss it trails your latest weigh-in
+  by about two days (`(1 − α) / α`), a day less than a 7-day mean, and it does not jump when an old reading leaves a
+  window. A reading more than 3 kg from the trend, plus 1 kg for every day since the last reading (never more than 15 kg), is
+  set aside as a typo and moves nothing; two such readings in a row that agree within 1 kg are taken as a new level and
+  start the trend over. The first reading is judged against the start weight. The chart, the Today tile, the Progress tables,
+  the "behind the line" notice, the rating and the model briefs all use it; the arrival date still comes from a straight
+  line fitted to the last 14 days of weigh-ins, which a trend's lag would bias.
 - **Meals** are changed in the app, on the Plan tab. The plan that comes with the app is called
   Default and is read-only. Tap a meal and then Edit meal, or + Add meal on a slot. The first save
   ("Save to My plan") creates My plan with that change and makes it the active plan; Cancel creates
