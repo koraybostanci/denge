@@ -2,7 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, reconcileConf, pantryMatch, sanitizeOut, placeWord, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
+import { analyze, review, progressReview, cleanProgressReview, coach, check, foodValues, cleanFoodValues, cleanItems, reconcileConf, pantryMatch, sanitizeOut, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, AI_ERRORS, WAITING } from '../js/ai.js';
 import { reviewBrief } from '../js/briefs.js';
 import { cleanEntry, PLAN_CAPS, MACRO_CAPS, ITEM_MACRO_CAPS } from '../js/backup.js';
 import { setLang, inEnglish } from '../js/i18n.js';
@@ -687,33 +687,17 @@ test('sanitizeOut is idempotent', () => {
   assert.equal(sanitizeOut(once), once);
 });
 
-test('a saved place is named only by Home, Office or out; any other name becomes a generic label', () => {
-  assert.equal(placeWord('out'), 'out');
-  assert.equal(placeWord('Home'), 'home');
-  assert.equal(placeWord('office'), 'office');
-  assert.equal(placeWord("Mum's flat, 12 Elm Street"), 'a saved place');
-});
-
-test('a place name never reaches the analysis request body', async () => {
-  mockFetch(() => reply(200, claudeBody(meal)));
-  await analyze({ cfg: sonnet, when: new Date(), text: 'lentil soup', place: "Mum's flat, 12 Elm Street", blobs: [] });
-  const body = JSON.stringify(calls[0].body);
-  assert.ok(!body.includes('Elm'), 'street kept out of the body');
-  assert.ok(!body.includes("Mum's flat"), 'place name kept out of the body');
-  assert.ok(body.includes('place: a saved place'));
-});
-
-test('a place name and a note with contact details never reach the review request body', async () => {
+test('a note with contact details never reaches the review request body', async () => {
   const saved = S.entries;
   const savedSettings = { ...S.settings }, savedPlan = S.plan;
   const day = today();
   S.plan = buildPlan(seedPlan);
   Object.assign(S.settings, { startDate: day, startKg: 86.4, targetDate: day, targetKg: 78, kcalRest: 1550, kcalTrain: 1750, protein: 135, proteinMin: 120 });
   S.entries = [{ id: 'e1', day, ts: Date.now(), kind: 'meal', status: 'ok', slot: 'lunch', title: 'Soup at 12 Elm Street, a.b@c.io', tier: 'plan', flags: [], mult: 1,
-    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], place: "Mum's flat, 12 Elm Street", photoIds: [], planId: '' }];
+    kcal: 300, p: 20, c: 30, f: 10, fib: 2, conf: 1, q: '', items: [{ n: 'lentils 200 g', g: 200, kcal: 300, p: 20, c: 30, f: 10, fib: 2 }], photoIds: [], planId: '' }];
   try {
     const brief = reviewBrief(day);
-    assert.ok(!brief.includes('Elm') && !brief.includes('a.b@c.io') && !brief.includes("Mum's flat"), brief);
+    assert.ok(!brief.includes('Elm') && !brief.includes('a.b@c.io'), brief);
     assert.ok(brief.includes('200 g'), 'food quantities survive');
     mockFetch(() => reply(200, claudeBody(JSON.stringify({ head: 'h', good: [], cut: [], next: 'n' }))));
     await review({ cfg: sonnet, brief });

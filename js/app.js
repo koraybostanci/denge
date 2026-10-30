@@ -4,7 +4,7 @@ import { setLang, getLang, storedLang, rememberLang, applyStatic, t, tn, td, fol
 import { canRun, installHtml } from './standalone.js';
 import { buildSql, exportName } from './export.js';
 import * as picture from './picture.js';
-import { readMeta, placeLabel } from './exif.js';
+import { readMeta } from './exif.js';
 import { analyze, review, coach, check, progressReview, foodValues, cleanItems, reconcileConf, pantryMatch, ITEM_CAPS_ANALYSIS, ITEM_CAPS_WRITE, CHECK_EDGE, shrink, costUSD, probeVision, listModels, AI_ERRORS, AI_ERROR_LABEL, WAITING, errorDetail, STRONG_MODEL, PRESETS, ZEN_FREE } from './ai.js';
 import { reviewBrief, coachBrief, checkBrief, progressBrief, hasProgressData } from './briefs.js';
 import { backupProblem, cleanEntry, cleanDay, cleanCheck, cleanPhoto, cleanSettings, cleanPlans, plansRecord, PLAN_CAPS, activePlan, loadedPlans, sweepPlanPhotos, readMeal, readFood, readProgress, savedPlan, cleanBadges, restoreBadges, b64FromBuf, cleanFoods, restoreFoods, sweepFoodPhotos, FOODS_MAX, squeeze } from './backup.js';
@@ -157,7 +157,7 @@ async function logMeal(tpl, src, day = S.viewDay) {
     items: cleanItems(tpl.items, ITEM_CAPS_WRITE), // a favourite whose items never had macros keeps them absent, not stored 0
     kcal: cap(tpl.kcal, ITEM_CAPS_WRITE.kcal), p: cap(tpl.p, ITEM_CAPS_WRITE.p), c: cap(tpl.c, ITEM_CAPS_WRITE.c), f: cap(tpl.f, ITEM_CAPS_WRITE.f), fib: cap(tpl.fib, ITEM_CAPS_WRITE.fib),
     tier: tpl.tier || 'plan', flags: tpl.flags || [], conf: tpl.conf || 1, q: '', mult: 1,
-    photoIds: [], timeSrc: day === today() ? 'now' : 'manual', place: null,
+    photoIds: [], timeSrc: day === today() ? 'now' : 'manual',
   };
   await saveEntry(e);
   render();
@@ -247,25 +247,11 @@ async function submitText(text) {
   const e = {
     id: db.uid(), ts: now.getTime(), day: dayKey(now), createdAt: now.getTime(), kind: 'meal', status: 'pending',
     src: 'text', text, title: text, slot: slotByTime(now), items: [], kcal: 0, p: 0, c: 0, f: 0, fib: 0,
-    tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds: [], timeSrc: 'now', place: null,
+    tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds: [], timeSrc: 'now',
   };
   await saveEntry(e);
   go('log');
   queueAnalyze(e.id);
-}
-
-let posCache = null;
-function getPos(force = false) {
-  if (!(force || S.settings.useLocation) || !navigator.geolocation) return Promise.resolve(null);
-  if (posCache && Date.now() - posCache.at < 300000) return Promise.resolve(posCache);
-  return new Promise((res) => {
-    const t = setTimeout(() => res(null), 6000);
-    navigator.geolocation.getCurrentPosition(
-      (p) => { clearTimeout(t); posCache = { lat: p.coords.latitude, lon: p.coords.longitude, at: Date.now() }; res(posCache); },
-      () => { clearTimeout(t); res(null); },
-      { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 },
-    );
-  });
 }
 
 let preparing = 0; // photo batches being prepared; an update must not reload the page under them
@@ -290,7 +276,7 @@ async function prepareAndQueue(files, note) {
         if (lm && Date.now() - lm > 120000 && lm > Date.parse('2020-01-01')) { ts = lm; timeSrc = 'file'; } else { ts = Date.now(); timeSrc = 'now'; }
       }
       if (ts > Date.now() + 60000) { ts = Date.now(); timeSrc = 'now'; }
-      prepared.push({ small, ts, timeSrc, lat: meta.lat, lon: meta.lon });
+      prepared.push({ small, ts, timeSrc });
     } catch (err) {
       toast(t('Could not open a photo: {name}', { name: f.name }));
     }
@@ -306,15 +292,6 @@ async function prepareAndQueue(files, note) {
   }
   for (const g of groups) {
     const first = g[0];
-    let place = null;
-    const withGps = g.find((p) => p.lat != null);
-    if (S.settings.useLocation) {
-      if (withGps) place = placeLabel(withGps.lat, withGps.lon, S.settings.places);
-      else if (first.timeSrc === 'now') {
-        const pos = await getPos();
-        if (pos) place = placeLabel(pos.lat, pos.lon, S.settings.places);
-      }
-    }
     const photoIds = [];
     for (const p of g) {
       const pid = db.uid();
@@ -325,7 +302,7 @@ async function prepareAndQueue(files, note) {
     const e = {
       id: db.uid(), ts: first.ts, day: dayKey(when), createdAt: Date.now(), kind: 'meal', status: 'pending',
       src: 'photo', text: note || '', ...titleFor('photo', {}), slot: slotByTime(when), items: [], kcal: 0, p: 0, c: 0, f: 0, fib: 0,
-      tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds, timeSrc: first.timeSrc, place,
+      tier: 'plan', flags: [], conf: 0, q: '', mult: 1, photoIds, timeSrc: first.timeSrc,
     };
     await saveEntry(e);
     queueAnalyze(e.id);
@@ -750,7 +727,7 @@ async function analyzeEntry(id, opts = {}) {
     const cfg = aiCfg();
     if (opts.strong && cfg.provider === 'anthropic') cfg.model = STRONG_MODEL;
     const { data, usage, model: usedModel } = await analyze({
-      cfg, blobs, text: e.text, when: new Date(e.ts), place: e.place, hint: opts.hint,
+      cfg, blobs, text: e.text, when: new Date(e.ts), hint: opts.hint,
       onRetry: (...a) => { S.retry.set(id, retryNote(...a)); render(); },
     });
     await addUsage(usedModel, usage);
@@ -1300,7 +1277,7 @@ function openSheet(html, state, focusSel, keepFocus) {
 }
 function closeSheet() {
   const was = S.sheet;
-  if (S.sheet && S.sheet.type === 'settings') { S.suppEdit = ''; S.profileDraft = null; }
+  if (S.sheet && S.sheet.type === 'settings') { S.suppEdit = ''; S.profileDraft = null; S.keyDraft = null; S.resetStep = ''; }
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
@@ -1875,7 +1852,10 @@ const ACT = {
   'cal': (el) => { S.calPick = S.calPick === el.dataset.day ? null : el.dataset.day; render(); },
   'goto-day': (el) => { if (el.dataset.day <= today()) { S.viewDay = el.dataset.day; go('today'); } },
   // Settings
-  'save-key': async () => {
+  'save-key': async (_el, { quiet = false } = {}) => {
+    const sel = $('#set-prov');
+    if (sel) S.settings.provider = sel.value; // the provider is saved with the key, not when it is picked
+    S.keyDraft = null;
     if (S.settings.provider === 'openai') {
       // The key is sent to this address, so it must be a secure one; a schemeless address would be read as a path on this site
       const base = $('#set-base').value.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
@@ -1889,12 +1869,11 @@ const ACT = {
     }
     await saveSettings();
     toast(aiCfg().key ? t('Saved on this device') : t('Key removed'));
-    render();
-    await openSettings();
+    if (!quiet) { render(); await openSettings(); }
     if (hasKey()) ACT['analyze-all']();
   },
   'test-key': async () => {
-    if ((await ACT['save-key']()) === false) return;
+    if ((await ACT['save-key'](null, { quiet: true })) === false) return;
     const out = $('#key-test');
     if (!hasKey()) { out.textContent = S.settings.provider === 'openai' ? t('Address, model and key are all required.') : t('A key is required.'); return; }
     const cfg = aiCfg();
@@ -1939,7 +1918,7 @@ const ACT = {
     }
   },
   'find-vision': async () => {
-    if ((await ACT['save-key']()) === false) return;
+    if ((await ACT['save-key'](null, { quiet: true })) === false) return;
     const out = $('#key-test');
     if (!S.settings.oaBase || !S.settings.oaKey) { out.textContent = t('Enter the address and key first.'); return; }
     const base = { provider: 'openai', key: S.settings.oaKey, base: S.settings.oaBase };
@@ -1981,12 +1960,29 @@ const ACT = {
       startKg: num('#set-startkg'), targetKg: num('#set-endkg'),
       kcalRest: Math.round(num('#set-rest')), kcalTrain: Math.round(num('#set-train')), kcalMinDay: Math.round(num('#set-minday')), protein: Math.round(num('#set-prot')),
     };
-    if (!patch.startDate || !patch.targetDate || patch.targetDate <= patch.startDate || !(patch.startKg > patch.targetKg) || !(patch.kcalMinDay >= 500) || !(patch.kcalRest >= patch.kcalMinDay) || !(patch.kcalTrain >= patch.kcalRest) || !(patch.protein > 50)) {
-      return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
+    // Each broken rule is written under its own field, in place: the sheet is not rebuilt, so nothing typed is lost
+    const bad = {};
+    if (!patch.startDate) bad['set-start'] = t('Pick a start date');
+    if (!patch.targetDate) bad['set-end'] = t('Pick an end date');
+    else if (patch.startDate && patch.targetDate <= patch.startDate) bad['set-end'] = t('The end must be after the start');
+    if (!(patch.startKg > 0)) bad['set-startkg'] = t('Enter your start weight');
+    if (!(patch.targetKg > 0)) bad['set-endkg'] = t('Enter your goal weight');
+    else if (!(patch.startKg > patch.targetKg)) bad['set-endkg'] = t('The goal weight must be below the start weight');
+    if (!(patch.kcalMinDay >= 500)) bad['set-minday'] = t('At least {kcal} kcal', { kcal: fmtInt(500) });
+    if (!(patch.kcalRest >= patch.kcalMinDay)) bad['set-rest'] = t('At least the minimum ({kcal})', { kcal: fmtInt(patch.kcalMinDay || 500) });
+    if (!(patch.kcalTrain >= patch.kcalRest)) bad['set-train'] = t('At least a rest day ({kcal})', { kcal: fmtInt(patch.kcalRest || 500) });
+    if (!(patch.protein > 50)) bad['set-prot'] = t('More than 50 g');
+    for (const id of ['set-start', 'set-end', 'set-startkg', 'set-endkg', 'set-minday', 'set-rest', 'set-train', 'set-prot']) {
+      const err = $(`#err-${id}`);
+      if (err) err.textContent = bad[id] || '';
+      mark($(`#${id}`), !!bad[id]);
     }
+    const first = Object.keys(bad)[0];
+    if (first) { $(`#${first}`).focus(); return; }
     const st = S.settings;
     const now = today(); // a stored goal already past the pace limit does not block other edits
-    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
+    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) { $('#err-set-end').textContent = t('That is faster than a steady pace: pick a later date or a closer goal weight'); mark($('#set-end'), true); $('#set-end').focus(); return; } // i18n-ok: element ids
+    $('#err-set-end').textContent = '';
     S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();
@@ -2002,7 +1998,6 @@ const ACT = {
     await openSettings('profile'); // the open sheet shows the saved name and the cleaned fields
     toast(t('Profile saved'));
   },
-  'loc-toggle': async (el) => { S.settings.useLocation = el.checked; await saveSettings(); openSettings(); },
   'review-toggle': async (el) => { S.settings.autoReview = el.checked; await saveSettings(); },
   'coach-day': (el) => {
     if (!hasKey()) return toast(t('Add an API key in Settings to get a note'));
@@ -2019,18 +2014,6 @@ const ACT = {
     if (!navigator.onLine) return toast(td(AI_ERRORS.offline));
     if (!hasProgressData()) return toast(t('Log something first and the review has more to go on'));
     queueProgressReview();
-  },
-  'loc-save': async (el) => {
-    const out = $('#loc-out');
-    out.textContent = t('Getting your location…');
-    posCache = null;
-    const pos = await getPos(true);
-    if (!pos) { out.textContent = t('Could not get a location. Check that the browser has location permission.'); return; }
-    const name = el.dataset.name;
-    S.settings.places = (S.settings.places || []).filter((p) => p.name !== name).concat([{ name, lat: pos.lat, lon: pos.lon }]);
-    await saveSettings();
-    openSettings();
-    toast(t('This spot is saved as “{name}”', { name }));
   },
   'export': () => exportBackup(false),
   'export-photos': () => exportBackup(true),
@@ -2063,9 +2046,16 @@ const ACT = {
     } catch { /* not supported */ }
     location.reload();
   },
+  'reset-ask': (el) => {
+    const keep = $('#keep-key');
+    if (keep) S.resetKeep = keep.checked;
+    S.resetStep = el.dataset.step;
+    openSettings('reset', el.dataset.step === 'all' ? '#reset-word' : null);
+  },
+  'reset-cancel': () => { S.resetStep = ''; openSettings('reset'); },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures, pantry foods with their photos and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (S.resetStep !== 'clear') return; // the confirm is the in-sheet step
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
     const foodIds = new Set(S.foods.map((f) => f.id));
     for (const f of S.foods) if (f.photo) keep.add(f.photo); // the pantry's foods and their photos stay too
@@ -2091,9 +2081,8 @@ const ACT = {
   'wipe-all': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
-    const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
-    if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
+    const typed = $('#reset-word') ? $('#reset-word').value : '';
+    if (S.resetStep !== 'all' || !['delete', 'sil'].includes(foldKey(typed.trim()))) return; // the word is typed in the sheet; the Turkish one and the English one are both accepted
     const clientId = S.settings.clientId; // the install keeps its id through a reset
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -2111,10 +2100,10 @@ const ACT = {
     seedInMemory(); // the plans start again from the seed; the record is written when setup is finished
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.foods = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
-    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null;
+    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null; S.keyDraft = null; S.resetStep = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
-    autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
+    autoTried.clear(); pausedUntil = 0; frame = null; photoTarget = null;
     dropPantry();
     closeSheet();
     S.tab = 'today'; S.onboard = null;
@@ -2155,6 +2144,8 @@ function syncProfileDraft() {
 // The zoom slider of the framing step
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
+  if (/^set-(start|end|startkg|endkg|minday|rest|train|prot)$/.test(ev.target.id)) { const e = $(`#err-${ev.target.id}`); if (e) e.textContent = ''; mark(ev.target, false); }
+  if (ev.target.id === 'reset-word') $('#reset-go').disabled = !['delete', 'sil'].includes(foldKey(ev.target.value.trim()));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
@@ -2188,7 +2179,7 @@ document.addEventListener('change', (ev) => guard(async () => {
     if (files.length) { $('#composer-input').value = ''; await submitPhotos(files, note); }
     return;
   }
-  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals, favourites and saved places are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
+  if (el.id === 'set-import') { const file = el.files[0]; el.value = ''; if (file && window.confirm(t('Restore this backup? It replaces My plan with the one saved in the backup. A backup made before plans existed leaves your plan as it is. Your goals and favourites are replaced too; entries, days, checks, badges and plan pictures are added to what is on this device. Foods are added to your Pantry the same way (a food that is in both takes the backup’s values). Pictures of meals that exist only in your current My plan are deleted when it is replaced.'))) await importBackup(file); return; }
   // Add ingredient: a food of the draft plan becomes a row, and its empty grams field takes the focus. "New food…" opens the
   // food form for a new key; Done adds it as a row.
   if (el.id === 'md-add') {
@@ -2204,9 +2195,8 @@ document.addEventListener('change', (ev) => guard(async () => {
     $(sel).scrollIntoView({ block: 'nearest' });
     return;
   }
-  if (el.dataset.act === 'loc-toggle') return ACT['loc-toggle'](el);
   if (el.dataset.act === 'review-toggle') return ACT['review-toggle'](el);
-  if (el.dataset.chg === 'provider') { S.settings.provider = el.value; await saveSettings(); render(); return openSettings(); }
+  if (el.dataset.chg === 'provider') { S.keyDraft = { provider: el.value }; return openSettings(); }
   if (el.dataset.chg === 'preset') {
     const p = PRESETS.find((x) => x.id === el.value);
     if (p) { $('#set-base').value = p.base; $('#set-oamodel').value = p.model; }

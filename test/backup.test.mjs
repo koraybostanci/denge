@@ -7,7 +7,7 @@ import { SCHEMA_VERSION } from '../js/core.js';
 const good = {
   id: 'abc123', ts: 1759300000000, day: '2026-10-01', kind: 'meal', status: 'ok', slot: 'lunch', title: 'Egg', kcal: 500, p: 30, c: 5, f: 20, fib: 2,
   tier: 'plan', flags: ['alcohol'], conf: 0.8, mult: 1.5, photoIds: ['p1'], items: [{ n: 'egg', g: 100, kcal: 143, p: 12, c: 0.6, f: 10, fib: 0 }],
-  place: 'Home', timeSrc: 'exif', src: 'photo', q: '', planId: 'L-A', edited: true,
+  timeSrc: 'exif', src: 'photo', q: '', planId: 'L-A', edited: true,
 };
 
 test('backupProblem: what can be restored and what cannot', () => {
@@ -42,7 +42,6 @@ test('entry fields are clamped and given the right type', () => {
   const c = cleanEntry({ ...good, kcal: 1e9, p: -5, c: 'abc', f: NaN, fib: null });
   assert.deepEqual([c.kcal, c.p, c.c, c.f, c.fib], [6000, 0, 0, 0, 0]);
   assert.equal(cleanEntry({ ...good, kcal: Infinity }).kcal, 0);
-  assert.equal(cleanEntry({ ...good, place: { x: 1 } }).place, null);
   assert.deepEqual(cleanEntry({ ...good, photoIds: ['ok1', '"><b>', 5, 'x'.repeat(50)] }).photoIds, ['ok1']);
 });
 
@@ -85,11 +84,11 @@ test('a day: the coffee tally is a whole number up to 30, or null', () => {
 test('settings: what the app talks to is never taken from a file', () => {
   const s = cleanSettings({
     provider: 'openai', oaBase: 'https://evil.example/v1', oaModel: 'm', model: 'm', apiKey: 'k', oaKey: 'k', usage: { in: 1 }, lastBackup: 9,
-    startKg: 90, startDate: '2026-10-05', places: [{ name: 'Home', lat: 1, lon: 2 }],
+    startKg: 90, startDate: '2026-10-05', places: [{ name: 'Home', lat: 1, lon: 2 }], useLocation: true,
   });
   for (const k of ['provider', 'oaBase', 'oaModel', 'model', 'apiKey', 'oaKey', 'usage', 'lastBackup']) assert.equal(k in s, false, k);
   assert.equal(s.startKg, 90);
-  assert.equal(s.places.length, 1);
+  assert.equal('places' in s || 'useLocation' in s, false); // places from an older backup are dropped
 });
 
 test('settings: junk values and malformed plan meal ids are dropped', () => {

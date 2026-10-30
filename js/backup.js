@@ -95,7 +95,6 @@ export function cleanEntry(e) {
     mult: isNum(e.mult) && e.mult > 0 ? Math.min(10, e.mult) : 1,
     photoIds: (Array.isArray(e.photoIds) ? e.photoIds : []).filter(isId).slice(0, 6),
     timeSrc: oneOf(e.timeSrc, ['now', 'exif', 'file', 'manual'], 'now'),
-    place: typeof e.place === 'string' ? e.place.slice(0, 40) : null,
     edited: e.edited === true, model: txt(e.model, 60),
   };
   // Weigh-ins and step counts carry only the fields they had
@@ -156,7 +155,7 @@ function cleanFavorite(f) {
   };
 }
 
-// Settings that travel with a backup: the targets, favourites, saved places and the plan's pictures.
+// Settings that travel with a backup: the targets, favourites and the plan's pictures.
 // What the app talks to (provider, address, model, keys) and its running totals stay as they are on this device,
 // so a backup can never point the stored key at another server.
 export const GENDERS = ['female', 'male', 'other', 'none'];
@@ -167,15 +166,11 @@ export function cleanSettings(s) {
   for (const k of ['startDate', 'targetDate']) if (isDay(s[k])) out[k] = s[k];
   for (const [k, [lo, hi]] of Object.entries(RANGES)) if (isNum(s[k]) && s[k] >= lo && s[k] <= hi) out[k] = s[k];
   if (out.kcalMinDay > out.kcalRest) delete out.kcalMinDay; // a minimum above the budget would leave no day on plan
-  for (const k of ['useLocation', 'hideStart', 'autoReview']) if (typeof s[k] === 'boolean') out[k] = s[k];
+  for (const k of ['hideStart', 'autoReview']) if (typeof s[k] === 'boolean') out[k] = s[k];
   if (typeof s.name === 'string') { const n = squeeze(s.name, 40); if (n) out.name = n; }
   if (Number.isInteger(s.age) && s.age >= 18 && s.age <= 120) out.age = s.age;
   if (GENDERS.includes(s.gender)) out.gender = s.gender;
   if (s.lang === 'en' || s.lang === 'tr') out.lang = s.lang;
-  if (Array.isArray(s.places)) {
-    out.places = s.places.filter((p) => p && typeof p.name === 'string' && isNum(p.lat) && isNum(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180)
-      .slice(0, 10).map((p) => ({ name: p.name.slice(0, 40), lat: p.lat, lon: p.lon }));
-  }
   if (Array.isArray(s.supplements)) {
     const seen = new Set();
     out.supplements = s.supplements.filter((x) => x && isId(x.id) && txt(x.name, 40).trim() && !seen.has(x.id) && seen.add(x.id))

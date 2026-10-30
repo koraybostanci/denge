@@ -468,8 +468,10 @@ test('a save is refused when My plan the draft started from is gone, or a draft 
 test('restoring a backup asks first, before the file is read, and the confirmations name the plans', () => {
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(app, /if \(file && window\.confirm\(t\('Restore this backup\?[^']*My plan[^']*'\)\)\) await importBackup\(file\)/);
-  assert.match(app, /Clear your log\?[^']*plans \(My plan and Default\)/);
-  assert.match(app, /Factory reset: [^']*My plan \(Default comes back\)/);
+  // the Reset cards (shown before the in-sheet confirm) name what happens to the plans
+  const views = readFileSync(new URL('../js/views.js', import.meta.url), 'utf8');
+  assert.match(views, /your plans \(My plan and Default\)/);
+  assert.match(views, /My plan \(Default comes back\)/);
 });
 
 test('old list format: a bare { id } entry is not an empty My plan, on load or on restore; a normal plan after it is used', () => {

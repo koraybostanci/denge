@@ -162,8 +162,6 @@ function extras() {
   const s = S.settings;
   s.supplements = [{ id: 's1', name: 'Magnesium', dose: '400 mg' }];
   s.favorites = [{ id: 'f1', name: 'Burger', kcal: 700 }];
-  s.places = [{ name: 'Home' }];
-  s.useLocation = true;
   s.lastBackup = null;
   s.usage = { in: 1200, out: 300, calls: 1, usd: 0.02 };
   s.planPhotos = { 'L-A': 'p1' };
@@ -171,8 +169,8 @@ function extras() {
   S.storage = { usage: 5e6 };
   S.days[TODAY].coach = { note: 'Skyr was the best', ts: at(TODAY, 15), sig: 'x' };
   S.days[day(-1)].review = { head: 'Good day', good: ['Cut the sauce'], cut: ['Dinner out'], next: 'Ordered a small one', ts: at(day(-1), 22), sig: 'old' };
-  S.entries.push(meal(day(-1), 20, 'dinner', 'Burger', 900, 40, { tier: 'off', src: 'photo', conf: 0.4, q: 'Is it fried?', place: 'home', timeSrc: 'exif', photoIds: ['a', 'b'], text: 'Fresh and light', items: [{ n: 'Burger', g: 200, kcal: 500 }], mult: 1.5, edited: true }));
-  S.entries.push(meal(day(-1), 21, 'late', 'Almond milk', 100, 3, { src: 'text', place: 'out', timeSrc: 'manual' }));
+  S.entries.push(meal(day(-1), 20, 'dinner', 'Burger', 900, 40, { tier: 'off', src: 'photo', conf: 0.4, q: 'Is it fried?', timeSrc: 'exif', photoIds: ['a', 'b'], text: 'Fresh and light', items: [{ n: 'Burger', g: 200, kcal: 500 }], mult: 1.5, edited: true }));
+  S.entries.push(meal(day(-1), 21, 'late', 'Almond milk', 100, 3, { src: 'text', timeSrc: 'manual' }));
   S.entries.push({ id: 'pe', day: T0(), ts: at(T0(), 9), createdAt: at(T0(), 9), kind: 'meal', status: 'error', slot: 'lunch', title: 'Lunch menu', src: 'photo', kcal: 0, p: 0, c: 0, f: 0, fib: 0, mult: 1, flags: [], items: [] });
   S.entries.push({ id: 'ps', day: T0(), ts: at(T0(), 10), createdAt: at(T0(), 10), kind: 'steps', status: 'ok', title: '8,200 steps', steps: 8200, timeSrc: 'file' });
   S.entries.push({ id: 'pw', day: T0(), ts: at(T0(), 11), createdAt: at(T0(), 11), kind: 'weight', status: 'ok', title: 'Weight 86 kg', kg: 86, tk: { kind: 'weight', params: { kg: 86 } } });

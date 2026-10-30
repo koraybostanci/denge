@@ -1,7 +1,7 @@
 // What the model reads: the day, the coach note and the check, in plain English lines. Text only, a few hundred tokens each.
 // Always English, whatever the interface language is (inEnglish), and no DOM, so the tests build them too.
 import { inEnglish } from './i18n.js';
-import { sanitizeOut, placeWord } from './text.js';
+import { sanitizeOut } from './text.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
 import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, trendWeight, withTrendIndex, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';
@@ -29,7 +29,7 @@ function reviewBriefText(day) {
     const kind = e.planId ? 'plan meal' : e.tier === 'off' ? 'off plan' : e.tier === 'flex' ? 'weekly flex' : 'fits the plan';
     const items = e.planId ? '' : (e.items || []).slice(0, 6).map((i) => `${sanitizeOut(i.n)}${i.g ? ` ${r(i.g * m)} g` : ''} ${r((i.kcal || 0) * m)} kcal`).join('; ');
     lines.push(`- ${hhmm(e.ts)} ${(SLOT_NAME[e.slot] || '').toLowerCase()}: ${sanitizeOut(e.title)}, ${r(x.kcal)} kcal, ${r(x.p)} g protein, ${kind}`
-      + `${(e.flags || []).includes('alcohol') ? ', alcohol' : ''}${e.place ? `, ${e.place === 'out' ? 'eaten out' : `at ${placeWord(e.place)}`}` : ''}${items ? ` [${items}]` : ''}`);
+      + `${(e.flags || []).includes('alcohol') ? ', alcohol' : ''}${items ? ` [${items}]` : ''}`);
   }
   const open = openSlots(day).map((x) => x.name.toLowerCase());
   if (open.length) lines.push(`${v.live ? 'Not eaten yet' : 'Nothing logged for'}: ${open.join(', ')}.`);
