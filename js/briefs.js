@@ -181,12 +181,14 @@ function progressBriefText() {
       return `${d.day} ${f1(d.kg)} trend ${f1(tw ? tw.kg : d.kg)} line ${sf(d.day)}`;
     }));
     // The first `old` weigh-ins as one average line per week, then the rest raw
-    const weekOfReading = weighed.map((d) => weekStart(d.day)); // looked up once: the trimming below calls thin() for every number of readings it tries
+    const weekOfReading = weighed.map((d) => weekStart(d.day)); // looked up once: the trimming below tries many numbers of readings
     const weekLabel = new Map(); // week → its date as the brief writes it
+    // The line for a week of collapsed readings: their sum (added in the order of the log) and how many
+    const weekLine = (w, sum, n) => { if (!weekLabel.has(w)) weekLabel.set(w, date(w)); return `week of ${weekLabel.get(w)}: avg ${f1(sum / n)} kg, ${n} weigh-ins`; };
     const thin = (old) => {
       const byWeek = new Map();
-      for (let i = 0; i < old; i++) { const w = weekOfReading[i]; const g = byWeek.get(w); if (g) g.push(weighed[i].kg); else byWeek.set(w, [weighed[i].kg]); }
-      return [...[...byWeek].map(([w, v]) => { if (!weekLabel.has(w)) weekLabel.set(w, date(w)); return `week of ${weekLabel.get(w)}: avg ${f1(v.reduce((a, b) => a + b, 0) / v.length)} kg, ${v.length} weigh-ins`; }), ...raw.slice(old)];
+      for (let i = 0; i < old; i++) { const w = weekOfReading[i]; const g = byWeek.get(w); if (g) { g.sum += weighed[i].kg; g.n += 1; } else byWeek.set(w, { sum: weighed[i].kg, n: 1 }); }
+      return [...[...byWeek].map(([w, g]) => weekLine(w, g.sum, g.n)), ...raw.slice(old)];
     };
     // 5. The current week
     const ws = weekStart(t);
@@ -231,16 +233,40 @@ function progressBriefText() {
       return [...lines, ...(from < weekLines.length ? [`Weeks, oldest first (budgets are today's):`, ...weekLines.slice(from)] : []),
         'Weigh-ins since the start (day, kg, trend weight, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
     };
+    // The trimming only needs to know how long each try would be, so it adds up the lengths of the parts (each part and the newline
+    // after it, less the last newline) and builds the text once, at the end. build(from, strip) is the text, sizeOf its length.
+    const cost = (arr) => arr.reduce((x, l) => x + l.length + 1, 0);
+    const WEEKS_HEAD = `Weeks, oldest first (budgets are today's):`;
+    const STRIP_HEAD = 'Weigh-ins since the start (day, kg, trend weight, schedule line):';
+    const fixed = cost(lines) + STRIP_HEAD.length + 1 + cost([cur, ...comp, adjust, ...tail]);
+    const weekFrom = new Array(weekLines.length + 1).fill(0); // the weekly rows from `from` on, with their heading
+    for (let i = weekLines.length - 1; i >= 0; i--) weekFrom[i] = weekFrom[i + 1] + weekLines[i].length + 1;
+    const sizeOf = (from, stripCost) => fixed + (from < weekLines.length ? WEEKS_HEAD.length + 1 + weekFrom[from] : 0) + stripCost - 1;
+    const rawFrom = new Array(raw.length + 1).fill(0); // the raw weigh-in lines from `i` on
+    for (let i = raw.length - 1; i >= 0; i--) rawFrom[i] = rawFrom[i + 1] + raw[i].length + 1;
+    const NONE = 'none'.length + 1; // no weigh-ins at all
     let from = 0;
-    let out = build(from, raw);
-    while (out.length > BRIEF_MAX && from < weeks.length) out = build(++from, raw);
-    // Still over: collapse the oldest weigh-ins, keeping as many recent ones raw as fit (at least the latest)
+    let len = sizeOf(from, raw.length ? rawFrom[0] : NONE);
+    while (len > BRIEF_MAX && from < weeks.length) len = sizeOf(++from, raw.length ? rawFrom[0] : NONE);
+    // Still over: collapse the oldest weigh-ins into one line a week, keeping as many recent ones raw as fit (at least the latest)
     let old = 0;
-    while (out.length > BRIEF_MAX && old < raw.length - 1) out = build(from, thin(++old));
+    const groups = new Map(); // week → { sum, n, cost } of the readings collapsed so far
+    let groupCost = 0;
+    while (len > BRIEF_MAX && old < raw.length - 1) {
+      const w = weekOfReading[old];
+      let g = groups.get(w);
+      if (g) groupCost -= g.cost; else { g = { sum: 0, n: 0, cost: 0 }; groups.set(w, g); }
+      g.sum += weighed[old].kg; g.n += 1; g.cost = weekLine(w, g.sum, g.n).length + 1;
+      groupCost += g.cost;
+      old += 1;
+      len = sizeOf(from, groupCost + rawFrom[old]);
+    }
     // Still over: drop the oldest collapsed lines
-    let lines2 = thin(old);
+    const lines2 = thin(old);
+    const lines2From = new Array(lines2.length + 1).fill(0);
+    for (let i = lines2.length - 1; i >= 0; i--) lines2From[i] = lines2From[i + 1] + lines2[i].length + 1;
     let drop = 0;
-    while (out.length > BRIEF_MAX && drop < lines2.length - 1) out = build(from, lines2.slice(++drop));
-    return out;
+    while (len > BRIEF_MAX && drop < lines2.length - 1) len = sizeOf(from, lines2From[++drop]);
+    return build(from, lines2.slice(drop));
   });
 }
