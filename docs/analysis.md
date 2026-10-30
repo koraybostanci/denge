@@ -32,7 +32,7 @@ up to date there is no button. It is one text request: a summary of the whole lo
 as plain lines. It holds the goals and where you stand against the weight schedule, meals as numbers
 (calories against budget, protein, flex used, off-plan entries), weigh-ins, steps, water, coffee,
 workout days, how many supplements were taken (counts, never their names) and the day verdicts. It
-carries no photos and none of the model's earlier reviews. The summary is kept to about 3,500 characters
+carries no photos and none of the model's earlier reviews. The weight it carries is the trend weight (a smoothed figure the app works out on the device, see [Make it your plan](your-plan.md)); no new data leaves the device. The summary is kept to about 3,500 characters
 (the goal and closing lines stay whole even past that); when
 there are more weigh-ins than fit, the oldest are thinned into weekly averages. If nothing is logged
 yet, a toast says so and nothing is sent. The reply is a rating in words (great, on track, a bit

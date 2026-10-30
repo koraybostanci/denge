@@ -49,7 +49,7 @@ It covers: the setup screen's validation and focus; focus on the status line whi
 setup with Default; an install from before setup existed being upgraded; the warning with Retry when
 the start-up save fails; a factory reset keeping the install id; a restore from the setup screen with
 and without goals (and My plan surviving the finish); and a failed save with a failed cleanup, then a
-changed plan choice. Storage failures are simulated by patching `IDBObjectStore`.
+changed plan choice; and the trend weight on the screens (the Today tile, a typed weigh-in and a mistyped one, the Progress chart, its legend, tooltip and tables, the adjust notice, the model brief and the Turkish wording). Storage failures are simulated by patching `IDBObjectStore`.
 
 Still manual: real touch input, browsers other than Chromium, the real file picker for a restore, a
 genuine storage failure (not a patched `IDBObjectStore.put`), and the service-worker update path

@@ -3,7 +3,7 @@ import { t, tn, T, td, foldKey, parseNum, inEnglish } from './i18n.js';
 import { PARSE_TR } from './parse-tr.js';
 import { buildPlan, SLOTS, FLEX, DEFAULTS, LOCALE, has, dayKey, parseDay, addDays, diffDays, SMALL_TREAT_KCAL, planDigest, targetAt } from './plan.js';
 
-export const APP_VERSION = '59'; // bump together with VERSION in sw.js
+export const APP_VERSION = '60'; // bump together with VERSION in sw.js
 export const SCHEMA_VERSION = 2; // version of the stored data and of the backup file
 // The app's internal id. It names the database, the caches, the backup files' marker and the SQL export's tables, and
 // never follows the app's name (Pickle), so a rename touches only what people see and never the data.
@@ -333,6 +333,60 @@ export function avg7(day) {
   }
   return n ? { kg: s / n, n } : null;
 }
+
+// ——— Trend weight ———
+// The trend is an exponentially weighted moving average of the weigh-ins: each reading pulls it a share of the way
+// towards itself, and a reading counts for less the older it gets. Unlike a 7-day mean it has no window edge, so an old
+// weigh-in leaving the window never makes it jump, and it follows a steady loss about a day closer than the mean does
+// (a lag of (1 − α) / α days: 2.3 days at α = 0.3, against 3 days for the 7-day mean). The price is a little more noise
+// from a single reading. avg7 stays as the plain 7-day mean; it is the figure the SQL export's weight_avg7_kg holds.
+export const TREND_ALPHA = 0.3; // the share of the way to a new reading, per day since the previous one
+export const TREND_SLACK = 3; // kg a reading may differ from the trend on the same day, plus 1 kg for every day since the last one
+export const TREND_MAX_SWING = 15; // kg: the most a reading may differ, whatever the gap
+export const TREND_AGREE = 1; // kg: two odd readings in a row that agree this closely are a new level, not typos
+
+// The trend after each of the weigh-ins in `points` ({ day, kg }, oldest first) as { day, kg, trend, skipped }. Pure: no state.
+// A reading that is far from the trend (a mistyped 58 for 85) is set aside, `skipped`, and moves nothing; the first reading is
+// judged against the start weight. Two odd readings in a row that agree with each other are a real new level (or a typo that
+// seeded the trend), and the trend starts over from the second. Gaps are handled by the day count: the share a reading
+// takes grows as 1 − (1 − α)^days, so a reading after a week away counts for more than one the day after the last.
+export function trendSeriesOf(points, { startKg, startDate } = {}) {
+  const out = [];
+  const start = startKg > 0 && startDate ? { kg: startKg, day: startDate } : null; // what the first reading is judged against
+  let trend = null; // { kg, day } at the last reading that counted
+  let held = null; // the last reading that was set aside
+  for (const p of points) {
+    if (!p || !Number.isFinite(p.kg) || !(p.kg > 0)) continue;
+    const base = trend || start;
+    const allow = trend ? Math.min(TREND_MAX_SWING, TREND_SLACK + Math.max(0, diffDays(trend.day, p.day))) : TREND_MAX_SWING;
+    const odd = !!base && Math.abs(p.kg - base.kg) > allow;
+    const reseed = odd && !!held && Math.abs(p.kg - held.kg) <= TREND_AGREE;
+    if (odd && !reseed) {
+      held = p;
+      out.push({ day: p.day, kg: p.kg, trend: trend ? trend.kg : null, skipped: true });
+      continue;
+    }
+    held = null;
+    if (!trend || reseed) trend = { kg: p.kg, day: p.day };
+    else {
+      const a = 1 - (1 - TREND_ALPHA) ** Math.max(1, diffDays(trend.day, p.day));
+      trend = { kg: trend.kg + a * (p.kg - trend.kg), day: p.day };
+    }
+    out.push({ day: p.day, kg: p.kg, trend: trend.kg, skipped: false });
+  }
+  return out;
+}
+// The trend weight on a day, shaped like avg7: { kg, n, day }, with n the weigh-ins in the 7 days ending on it and `day`
+// the last reading that counted. null when there is none in those 7 days (the trend is not carried across a week without
+// weighing, as the 7-day mean was not), so every guard on avg7's n and null reads the same here.
+export function trendWeight(day = today()) {
+  const series = trendSeriesOf(weightSeries().filter((d) => d.day <= day), S.settings);
+  const from = addDays(day, -6);
+  const n = series.filter((p) => p.day >= from).length;
+  const last = series.findLast((p) => !p.skipped);
+  return n && last ? { kg: last.trend, n, day: last.day } : null;
+}
+
 // The latest recorded weigh-in on or before the day, shaped like an average of one
 export function latestWeight(day = today()) {
   const last = weightSeries().filter((d) => d.day <= day).pop();
@@ -650,16 +704,16 @@ export function progressRatingHint() {
   const s = S.settings;
   const t = today();
   const w = weightSeries().filter((d) => diffDays(d.day, t) <= 14);
-  const a = avg7(t);
-  if (w.length < RATING_MIN_WEIGHINS || diffDays(w[0].day, w[w.length - 1].day) < RATING_MIN_SPAN || !a || a.n < 2) return 'too-early'; // one fluke reading is not an average
+  const a = trendWeight(t);
+  if (w.length < RATING_MIN_WEIGHINS || diffDays(w[0].day, w[w.length - 1].day) < RATING_MIN_SPAN || !a || a.n < 2) return 'too-early'; // one fluke reading is not a trend
   if (a.kg <= s.targetKg) {
     // At the target already, but losing faster than the plan asks is overshoot, not "great"
     const pr = projection();
     return pr && -pr.perWeek > planRate().kg * 7 ? 'on-track' : 'great';
   }
   const wk = addDays(t, -7);
-  const b = avg7(wk);
-  const f = avg7(addDays(t, -21));
+  const b = trendWeight(wk);
+  const f = trendWeight(addDays(t, -21));
   // The n floors are exactly the bar the brief's adjust rule and the Progress tab's notice use, so the hint never disagrees with them
   if ((b && a.n >= 3 && b.n >= 3 && a.kg - targetAt(t, s) > RATING_STUCK_GAP && b.kg - targetAt(wk, s) > RATING_STUCK_GAP) || (f && f.n >= 2 && f.kg - a.kg < RATING_FLAT)) return 'stuck';
   return a.kg - targetAt(t, s) >= RATING_BEHIND ? 'a-bit-behind' : 'on-track';
@@ -668,7 +722,7 @@ export function progressRatingHint() {
 export function progressGate() {
   const days = diffDays(S.settings.startDate, today());
   if (days < 7) return 'none';
-  return days >= 14 || (avg7(today()) || { n: 0 }).n >= 3 ? 'ready' : 'gated';
+  return days >= 14 || (trendWeight(today()) || { n: 0 }).n >= 3 ? 'ready' : 'gated';
 }
 // 'none' = not written yet, 'refresh' = the log changed since or it is over 14 days old or has no valid past time, else 'fresh'
 export function progressState() {

@@ -3,7 +3,7 @@
 import { inEnglish } from './i18n.js';
 import { sanitizeOut, placeWord } from './text.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
-import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, avg7, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
+import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, trendWeight, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';
 
 // The day in plain lines: what the model gets to read. Text only, a few hundred tokens.
@@ -38,12 +38,12 @@ function reviewBriefText(day) {
   lines.push(`Steps: ${dd.steps ? r(dd.steps) : 'not logged'}. Water: ${dd.water ? `${(dd.water / 1000).toFixed(1)} l` : 'not logged'}. Weigh-in: ${dd.kg ? `${dd.kg} kg` : 'none'}.`);
   const rate = planRate();
   let goal = `Goal: ${s.startKg} kg on ${s.startDate} to ${s.targetKg} kg on ${s.targetDate}, which needs about ${rate.kg.toFixed(2)} kg (${r(rate.kcal / 10) * 10} kcal) a day.`;
-  const avg = avg7(day);
+  const avg = trendWeight(day);
   if (day < s.startDate) goal += ' On this day the plan had not started yet.';
   else if (avg) {
     const sched = targetAt(day, s);
     const gap = avg.kg - sched;
-    goal += ` Schedule for this day ${sched.toFixed(1)} kg; 7-day average ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
+    goal += ` Schedule for this day ${sched.toFixed(1)} kg; trend weight (smoothed over recent weigh-ins) ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
   }
   lines.push(goal);
   const f = weekFlex(day);
@@ -82,10 +82,10 @@ function checkBriefText(note) {
   lines.push(`This week: flexible dinner ${f.meal} of 1 used, beer or small dessert ${f.small} of 1 used, off-plan entries ${f.off}.`);
   const rate = planRate();
   let goal = `Goal: ${s.startKg} kg to ${s.targetKg} kg by ${s.targetDate}, about ${rate.kg.toFixed(2)} kg (${r(rate.kcal / 10) * 10} kcal) a day.`;
-  const avg = avg7(t);
+  const avg = trendWeight(t);
   if (avg && t >= s.startDate) {
     const gap = avg.kg - targetAt(t, s);
-    goal += ` 7-day average ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
+    goal += ` Trend weight (smoothed over recent weigh-ins) ${avg.kg.toFixed(1)} kg, ${Math.abs(gap) < 0.15 ? 'on the schedule' : `${Math.abs(gap).toFixed(1)} kg ${gap > 0 ? 'above' : 'below'} the schedule`}.`;
   }
   lines.push(goal);
   lines.push(note ? `Note from the person: ${sanitizeOut(note)}` : 'No note from the person.');
@@ -173,7 +173,10 @@ function progressBriefText() {
     };
     // 4. Every weigh-in since the start
     const weighed = Object.values(S.days).filter((d) => d.kg && d.day >= s.startDate && d.day <= t).sort((a, b) => (a.day < b.day ? -1 : 1));
-    const raw = weighed.map((d) => `${d.day} ${f1(d.kg)} avg ${f1(avg7(d.day).kg)} line ${sf(d.day)}`);
+    const raw = weighed.map((d) => {
+      const tw = trendWeight(d.day); // null only while every reading so far was set aside as a typo: the reading itself stands in
+      return `${d.day} ${f1(d.kg)} trend ${f1(tw ? tw.kg : d.kg)} line ${sf(d.day)}`;
+    });
     // The first `old` weigh-ins as one average line per week, then the rest raw
     const thin = (old) => {
       const byWeek = new Map();
@@ -202,10 +205,10 @@ function progressBriefText() {
       comp.push(`Supplements: taken ${whole} over the whole plan, ${last} of ${have * 7} in the last week.`);
     }
     // 7. The adjust rule, worked out here and handed over as given
-    const a = avg7(t);
-    const b = avg7(addDays(t, -7));
+    const a = trendWeight(t);
+    const b = trendWeight(addDays(t, -7));
     const adjust = total > 0 && h.days > 14 && a && b && a.n >= 3 && b.n >= 3 && a.kg - sched(t) > 0.7 && b.kg - sched(addDays(t, -7)) > 0.7
-      ? `Adjustment rule: the 7-day average has been more than 0.7 kg behind the schedule for two weeks, so the app suggests: cut 100 kcal a day or add 2,000 steps, never below the minimum of ${kcalMinDay()} kcal. Pass this on as given; do not work out other numbers.`
+      ? `Adjustment rule: the trend weight has been more than 0.7 kg behind the schedule for two weeks, so the app suggests: cut 100 kcal a day or add 2,000 steps, never below the minimum of ${kcalMinDay()} kcal. Pass this on as given; do not work out other numbers.`
       : 'No automatic adjustment is suggested at this time.';
     // 8. The app's rating and pace
     const tail = [`APP RATING ESTIMATE: ${progressRatingHint()}`];
@@ -221,7 +224,7 @@ function progressBriefText() {
     const weekLines = weeks.map(weekRow);
     const build = (from, strip) => {
       return [...lines, ...(from < weekLines.length ? [`Weeks, oldest first (budgets are today's):`, ...weekLines.slice(from)] : []),
-        'Weigh-ins since the start (day, kg, 7-day average, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
+        'Weigh-ins since the start (day, kg, trend weight, schedule line):', ...(strip.length ? strip : ['none']), cur, ...comp, adjust, ...tail].join('\n');
     };
     let from = 0;
     let out = build(from, raw);

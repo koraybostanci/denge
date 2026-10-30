@@ -88,7 +88,7 @@ test('badges: one row per earned step, and none without any', () => {
   assert.deepEqual(rows(db, 'SELECT id, threshold, day FROM weightplan_badges ORDER BY id, threshold').map((r) => ({ ...r })), [
     { id: 'days_on', threshold: 7, day: '2026-10-12' }, { id: 'days_on', threshold: 30, day: '2026-11-05' }, { id: 'first_meal', threshold: 1, day: '2026-10-06' },
   ]);
-  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '6');
+  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '7');
   const none = new DatabaseSync(':memory:');
   load(none);
   load(none);
@@ -113,4 +113,41 @@ test('the pantry: per 100 g values, the ingredients and a photo flag export and 
   none.exec(buildSql({ settings, entries, days, foods: 'junk', appVersion: 'test' }).sql); // junk input exports no rows and no error
   none.exec(buildSql({ settings, entries, days, appVersion: 'test' }).sql); // none when nothing was given either
   assert.equal(rows(none, 'SELECT COUNT(*) AS n FROM weightplan_foods')[0].n, 0);
+});
+
+test('the trend weight is exported with the same function the app uses, and the export schema moved with the new column', () => {
+  const db = new DatabaseSync(':memory:');
+  load(db);
+  assert.equal(rows(db, "SELECT value FROM weightplan_settings WHERE key = 'export_schema'")[0].value, '7');
+  const r = rows(db, 'SELECT day, weight_kg, weight_trend_kg FROM weightplan_daily ORDER BY day');
+  const first = r.find((x) => x.day === '2026-10-06');
+  const second = r.find((x) => x.day === '2026-10-07');
+  assert.equal(first.weight_trend_kg, 85.4); // the first reading seeds the trend
+  assert.equal(second.weight_trend_kg, 85.28); // 85.4 + 0.3 × (85.0 − 85.4), to the cents the export keeps
+});
+
+test('the trend column: empty with no weigh-in in the 7 days up to the day, carried between weigh-ins, typos left out', () => {
+  const db = new DatabaseSync(':memory:');
+  const many = [
+    { day: '2026-10-05', kg: 86.0 }, { day: '2026-10-06', kg: 85.8 }, { day: '2026-10-07', kg: 58 }, // a mistyped reading
+    { day: '2026-10-09', kg: 85.4 }, { day: '2026-10-20', kg: 84.0 },
+  ];
+  const extra = [{ day: '2026-10-08', steps: 1000 }, { day: '2026-10-14', steps: 2000 }, { day: '2026-10-18', steps: 3000 }];
+  db.exec(buildSql({ settings, entries: [], days: [...many, ...extra], appVersion: 'test' }).sql);
+  const t = Object.fromEntries(rows(db, 'SELECT day, weight_trend_kg AS t FROM weightplan_days').map((x) => [x.day, x.t]));
+  assert.equal(t['2026-10-05'], 86);
+  assert.equal(t['2026-10-06'], 85.94); // 86 + 0.3 × (85.8 − 86)
+  assert.equal(t['2026-10-07'], 85.94, 'the 58 kg reading moves nothing');
+  assert.equal(t['2026-10-08'], 85.94, 'a day without a weigh-in carries the trend while one lies in the 7 days up to it');
+  assert.ok(t['2026-10-09'] < 85.94 && t['2026-10-09'] > 85.4);
+  assert.equal(t['2026-10-14'], t['2026-10-09'], 'carried to the sixth day after the last reading');
+  assert.equal(t['2026-10-18'], null, 'nine days after the last reading: nothing in the window');
+  assert.ok(t['2026-10-20'] < 85.4 && t['2026-10-20'] > 84.0);
+});
+
+test('the trend column is NULL for a log with no weigh-ins, and survives junk weights', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(buildSql({ settings, entries: [], days: [{ day: '2026-10-06', steps: 5 }, { day: '2026-10-07', kg: 'abc' }, { day: '2026-10-08', kg: 0 }, { day: '2026-10-09', kg: -3 }], appVersion: 'test' }).sql);
+  assert.deepEqual(rows(db, 'SELECT COUNT(*) AS n FROM weightplan_days WHERE weight_trend_kg IS NOT NULL')[0].n, 0);
+  assert.equal(rows(db, 'SELECT COUNT(*) AS n FROM weightplan_days')[0].n, 4);
 });

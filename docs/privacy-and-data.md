@@ -78,11 +78,13 @@ leaves everything else in that database alone.
 | `weightplan_badges` | earned badge step | `id`, `threshold`, `day` (the day it was earned) |
 | `weightplan_supplements` | id | `id`, `name`, `dose` |
 | `weightplan_supplement_log` | day, supplement_id | `day`, `supplement_id` (one row per supplement ticked that day) |
-| `weightplan_days` | day | `day`, `weight_kg`, `steps`, `water_ml`, `coffee_cups`, `workout`, `target_kcal`, `target_weight_kg` |
+| `weightplan_days` | day | `day`, `weight_kg`, `weight_trend_kg`, `steps`, `water_ml`, `coffee_cups`, `workout`, `target_kcal`, `target_weight_kg` |
 | `weightplan_meals` | logged meal | `id`, `day`, `logged_at`, `slot`, `title`, `source`, `plan_id`, `tier`, `status`, `portion`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g`, `confidence`, `place`, `note`, `photos`, `flags` |
 | `weightplan_meal_items` | ingredient of a meal | `meal_id`, `position`, `name`, `grams`, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fibre_g` |
 | `weightplan_settings` | setting | `key`, `value` (dates, weights, daily goals, and the export's own version and time) |
-| `weightplan_daily` (view) | day | the day's values, the 7-day weight average, and the meal totals with the day's `beers` |
+| `weightplan_daily` (view) | day | the day's values, the trend weight, the plain 7-day weight average, and the meal totals with the day's `beers` |
+
+`weight_trend_kg` is the trend weight the app shows (see [Make it your plan](your-plan.md)), worked out when the file is made; it is empty on a day with no weigh-in in the 7 days up to it. `weight_avg7_kg` stays as the plain mean of the weigh-ins in those 7 days.
 
 Calories, macros and grams are already multiplied by the portion. Only meals with `status = 'ok'`
 have numbers. The per-item macro columns (`carbs_g`, `fat_g`, `fibre_g` in `weightplan_meal_items`)
@@ -94,7 +96,7 @@ exported.
 
 ```sql
 -- weight against the schedule
-SELECT day, weight_kg, weight_avg7_kg, target_weight_kg FROM weightplan_daily ORDER BY day;
+SELECT day, weight_kg, weight_trend_kg, target_weight_kg FROM weightplan_daily ORDER BY day;
 
 -- days over the calorie budget
 SELECT day, kcal, target_kcal FROM weightplan_daily WHERE kcal > target_kcal;
