@@ -1640,14 +1640,15 @@ export function renderSettings() {
   const mb = (b) => (b / 1048576).toLocaleString(LOCALE, { maximumFractionDigits: 1 });
   const places = s.places || [];
   const favorites = s.favorites || [];
-  const openai = s.provider === 'openai';
+  const savedOpenai = s.provider === 'openai';
+  const openai = ((S.keyDraft && S.keyDraft.provider) || s.provider) === 'openai'; // a provider picked but not yet saved shapes the form
   const backupAge = s.lastBackup ? diffDays(dayKey(new Date(s.lastBackup)), today()) : null;
   const backupStatus = backupAge == null ? t('No backup yet') : backupAge === 0 ? t('Last backup today') : tn('Last backup {n} day ago|Last backup {n} days ago', backupAge);
   const preset = PRESETS.find((p) => p.base === s.oaBase);
   // Where the key is sent must be visible: a preset names its provider, any other address shows its host
   let host = s.oaBase;
   try { host = new URL(s.oaBase).host; } catch { /* not an address; show it as typed */ }
-  const analysisStatus = !hasKey() ? t('No key') : openai ? `${preset ? preset.name.split(' (')[0] : host}, ${s.oaModel}` : `Claude, ${(MODELS[s.model] || { name: s.model }).name.split(' (')[0]}`;
+  const analysisStatus = !hasKey() ? t('No key') : savedOpenai ? `${preset ? preset.name.split(' (')[0] : host}, ${s.oaModel}` : `Claude, ${(MODELS[s.model] || { name: s.model }).name.split(' (')[0]}`;
   const section = (id, title, status, body) => `<details class="setting" data-sec="${id}"${S.openSetting === id ? ' open' : ''}>
     <summary><span>${title}</span><small>${esc(status)}</small></summary>
     <div class="setting-body">${body}</div>
@@ -1666,34 +1667,40 @@ export function renderSettings() {
     <label for="set-oakey">${t('Key')}</label>
     <input id="set-oakey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.oaKey)}">
     ${preset && preset.id === 'gemini' ? `<p class="note">${t('Get a free key at aistudio.google.com with “Get API key”.')}</p>` : ''}
-    <label for="set-oamodel">${t('Model')}</label>
-    <input id="set-oamodel" type="text" list="oa-models" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.oaModel)}" placeholder="${t('model id')}">
-    <datalist id="oa-models">${ZEN_FREE.map((m) => `<option value="${m}"></option>`).join('')}</datalist>
-    <label for="set-base">${t('Address')}</label>
-    <input id="set-base" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.oaBase)}" placeholder="https://…/v1">
-    <div class="actions"><button type="button" class="btn btn-primary" data-act="test-key">${t('Save and test')}</button><button type="button" class="btn" data-act="save-key">${t('Save only')}</button></div>
-    <p class="note pre" id="key-test" role="status"></p>
-    <p class="note">${t('If the model does not read photos: {find}. It tries the provider’s models one by one with a small test image.', { find: `<button type="button" class="link link-inline" data-act="find-vision">${t('find a model that reads photos')}</button>` })}</p>` : `
+    <details class="adv"${preset ? '' : ' open'}>
+      <summary>${t('Advanced')}</summary>
+      <label for="set-oamodel">${t('Model')}</label>
+      <input id="set-oamodel" type="text" list="oa-models" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.oaModel)}" placeholder="${t('model id')}">
+      <datalist id="oa-models">${ZEN_FREE.map((m) => `<option value="${m}"></option>`).join('')}</datalist>
+      <label for="set-base">${t('Address')}</label>
+      <input id="set-base" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.oaBase)}" placeholder="https://…/v1">
+      <p class="note">${t('If the model does not read photos: {find}. It tries the provider’s models one by one with a small test image.', { find: `<button type="button" class="link link-inline" data-act="find-vision">${t('find a model that reads photos')}</button>` })}</p>
+    </details>` : `
     <label for="set-key">${t('Key')}</label>
     <input id="set-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.apiKey)}" placeholder="sk-ant-…">
     <label for="set-model">${t('Model')}</label>
-    <select id="set-model">${Object.entries(MODELS).map(([k, m]) => `<option value="${k}"${s.model === k ? ' selected' : ''}>${m.name}</option>`).join('')}</select>
-    <div class="actions"><button type="button" class="btn btn-primary" data-act="test-key">${t('Save and test')}</button><button type="button" class="btn" data-act="save-key">${t('Save only')}</button></div>
-    <p class="note pre" id="key-test" role="status"></p>`}
+    <select id="set-model">${Object.entries(MODELS).map(([k, m]) => `<option value="${k}"${s.model === k ? ' selected' : ''}>${m.name}</option>`).join('')}</select>`}
+    <div class="actions"><button type="button" class="btn btn-primary" data-act="test-key">${t('Save and test')}</button><button type="button" class="link" data-act="save-key">${t('Save only')}</button></div>
+    <p class="note pre" id="key-test" role="status"></p>
     <label class="check"><input type="checkbox" data-act="review-toggle"${s.autoReview === false ? '' : ' checked'}> ${t('Review each finished day by itself')}</label>
     <p class="note">${t('One short text request a day, sent when you open the app: the day’s meals and numbers, no photos. Switched off, a review is written only when you ask for it in the Log.')}</p>
-    <p class="note">${tn('So far {calls} call, {input} input and {output} output tokens.|So far {calls} calls, {input} input and {output} output tokens.', u.calls, { calls: n0(u.calls), input: n0(u.in), output: n0(u.out) })}${openai ? '' : ` ${t('Estimated cost {cost}.', { cost: `$${u.usd.toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}` })}`}</p>`;
+    <p class="note">${tn('So far {calls} call, {input} input and {output} output tokens.|So far {calls} calls, {input} input and {output} output tokens.', u.calls, { calls: n0(u.calls), input: n0(u.in), output: n0(u.out) })}${savedOpenai ? '' : ` ${t('Estimated cost {cost}.', { cost: `$${u.usd.toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}` })}`}</p>`;
 
+  const gerr = (id) => `<small class="field-err" id="err-${id}" role="alert"></small>`; // i18n-ok: markup; // filled in place by the Goals check, never by a re-render
+  const G = { start: 'set-start', end: 'set-end', startkg: 'set-startkg', endkg: 'set-endkg', minday: 'set-minday', prot: 'set-prot', rest: 'set-rest', train: 'set-train' }; // i18n-ok: element ids
   const targets = `
     <div class="field-grid">
-      <label for="set-start">${t('Start')}<input id="set-start" type="date" value="${esc(s.startDate)}"></label>
-      <label for="set-end">${t('End')}<input id="set-end" type="date" value="${esc(s.targetDate)}"></label>
-      <label for="set-startkg">${t('Start weight')}<input id="set-startkg" type="text" inputmode="decimal" value="${n1(s.startKg)}"></label>
-      <label for="set-endkg">${t('Goal weight')}<input id="set-endkg" type="text" inputmode="decimal" value="${n1(s.targetKg)}"></label>
-      <label for="set-rest">${t('Rest-day kcal')}<input id="set-rest" type="text" inputmode="numeric" value="${esc(s.kcalRest)}"></label>
-      <label for="set-train">${t('Workout-day kcal')}<input id="set-train" type="text" inputmode="numeric" value="${esc(s.kcalTrain)}"></label>
-      <label for="set-minday">${t('Minimum kcal')}<input id="set-minday" type="text" inputmode="numeric" value="${esc(kcalMinDay())}"></label>
-      <label for="set-prot">${t('Protein (g)')}<input id="set-prot" type="text" inputmode="numeric" value="${esc(s.protein)}"></label>
+      <label for="set-start">${t('Start')}<input id="set-start" type="date" value="${esc(s.startDate)}">${gerr(G.start)}</label>
+      <label for="set-end">${t('End')}<input id="set-end" type="date" value="${esc(s.targetDate)}">${gerr(G.end)}</label>
+      <label for="set-startkg">${t('Start weight')}<input id="set-startkg" type="text" inputmode="decimal" value="${n1(s.startKg)}">${gerr(G.startkg)}</label>
+      <label for="set-endkg">${t('Goal weight')}<input id="set-endkg" type="text" inputmode="decimal" value="${n1(s.targetKg)}">${gerr(G.endkg)}</label>
+    </div>
+    <p class="note">${t('Daily calories: the minimum is the floor, a rest day sits at or above it, and a workout day at or above a rest day.')}</p>
+    <div class="field-grid">
+      <label for="set-minday">${t('Minimum kcal')}<input id="set-minday" type="text" inputmode="numeric" value="${esc(kcalMinDay())}">${gerr(G.minday)}</label>
+      <label for="set-prot">${t('Protein (g)')}<input id="set-prot" type="text" inputmode="numeric" value="${esc(s.protein)}">${gerr(G.prot)}</label>
+      <label for="set-rest">${t('Rest-day kcal')}<input id="set-rest" type="text" inputmode="numeric" value="${esc(s.kcalRest)}">${gerr(G.rest)}</label>
+      <label for="set-train">${t('Workout-day kcal')}<input id="set-train" type="text" inputmode="numeric" value="${esc(s.kcalTrain)}">${gerr(G.train)}</label>
     </div>
     <div class="actions"><button type="button" class="btn btn-primary" data-act="save-targets">${t('Save goals')}</button></div>`;
 
@@ -1721,14 +1728,17 @@ export function renderSettings() {
     <p class="note">${t('Data lives only on this device. iOS can delete web data when storage runs low; save a backup to Files once a week.')}</p>
     <div class="actions">
       <button type="button" class="btn btn-primary" data-act="export">${t('Save backup')}</button>
-      <button type="button" class="btn" data-act="export-photos">${t('With photos')}</button>
       <button type="button" class="btn" data-act="import">${t('Restore from backup')}</button>
     </div>
     <input id="set-import" type="file" accept="application/json,.json" hidden>
+    <details class="adv">
+    <summary>${t('More')}</summary>
+    <div class="actions"><button type="button" class="btn" data-act="export-photos">${t('With photos')}</button></div>
     <p class="note">${t('For analysis on a computer: one .sql file with your days, meals and goals that loads into any SQLite database. Photos, keys and saved places are left out.')}</p>
     <div class="actions"><button type="button" class="btn" data-act="export-sql">${t('Export for SQLite')}</button></div>
     <p class="note">${S.persisted === true ? t('Persistent storage is on.') : S.persisted === false ? t('Persistent storage has not been granted yet. Adding the app to the Home Screen makes that more likely.') : ''} ${storage && storage.usage != null ? t('Space used: {mb} MB.', { mb: mb(storage.usage) }) : ''}</p>
-    ${S.persisted === false ? `<div class="actions"><button type="button" class="btn" data-act="persist">${t('Request persistent storage')}</button></div>` : ''}`;
+    ${S.persisted === false ? `<div class="actions"><button type="button" class="btn" data-act="persist">${t('Request persistent storage')}</button></div>` : ''}
+    </details>`;
 
   const favoritesBody = favorites.length
     ? `<ul class="items">${favorites.map((f) => `<li><span>${esc(f.name)}, ${n0(f.kcal)} kcal</span><button type="button" class="link" data-act="favorite-remove" data-id="${esc(f.id)}">${t('Remove')}</button></li>`).join('')}</ul>`
@@ -1764,20 +1774,26 @@ export function renderSettings() {
       <p class="note">${t('Starts your tracking over; the app stays set up as it is.')}</p>
       <dl class="reset-diff">
         <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews and Check verdicts.')}</dd></div>
-        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
+        <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Every setting: goals and dates, favourites, saved places, your plans (My plan and Default), the plan’s pictures, your pantry foods with their photos, your API key and provider, and the badges you have earned.')}</dd></div>
       </dl>
-      <div class="actions"><button type="button" class="btn btn-danger" data-act="wipe">${t('Clear my log')}</button></div>
+      ${S.resetStep === 'clear'
+        ? `<p class="note is-error" role="alert">${t('This cannot be undone.')}</p><div class="actions"><button type="button" class="btn btn-danger btn-danger-solid" data-act="wipe">${t('Clear my log')}</button><button type="button" class="btn" data-act="reset-cancel">${t('Cancel')}</button></div>`
+        : `<div class="actions"><button type="button" class="btn btn-danger" data-act="reset-ask" data-step="clear">${t('Clear my log')}</button></div>`}
     </section>
     <section class="reset-card">
       <h3>${t('Factory reset')}</h3>
       <p class="note">${t('Back to how the app was on its first launch.')}</p>
       <dl class="reset-diff">
-        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The app returns to the setup screen.')}</dd></div>
+        <div><dt class="is-gone">${t('Deletes')}</dt><dd>${t('Everything above, plus your goals and dates, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos, the usage totals and your other settings. The app returns to the setup screen.')}</dd></div>
         <div><dt class="is-kept">${t('Keeps')}</dt><dd>${t('Only the install id, the language, and your API key and provider if the box is ticked.')}</dd></div>
       </dl>
-      <label class="check"><input type="checkbox" id="keep-key" checked> ${t('Keep my API key and provider')}</label>
-      <div class="actions"><button type="button" class="btn btn-danger btn-danger-solid" data-act="wipe-all">${t('Factory reset')}</button></div>
-      <p class="note">${t('You will be asked to type {word}.', { word: t('DELETE', { $id: 'reset.word' }) })}</p>
+      <label class="check"><input type="checkbox" id="keep-key"${S.resetKeep === false ? '' : ' checked'}> ${t('Keep my API key and provider')}</label>
+      ${S.resetStep === 'all'
+        ? `<p class="note is-error" role="alert">${t('This cannot be undone.')}</p>
+      <label for="reset-word">${t('Type {word} to continue.', { word: t('DELETE', { $id: 'reset.word' }) })}</label>
+      <input id="reset-word" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <div class="actions"><button type="button" class="btn btn-danger btn-danger-solid" id="reset-go" data-act="wipe-all" disabled>${t('Factory reset')}</button><button type="button" class="btn" data-act="reset-cancel">${t('Cancel')}</button></div>`
+        : `<div class="actions"><button type="button" class="btn btn-danger" data-act="reset-ask" data-step="all">${t('Factory reset')}</button></div>`}
     </section>`;
 
   // The language control: the two names and the heading are written in both languages and never translated.
@@ -1794,14 +1810,18 @@ export function renderSettings() {
   return `
   <header class="sheet-top"><h2 id="sheet-title">${t('Settings')}</h2><button type="button" class="btn" data-act="close-sheet">${t('Close')}</button></header>
   <div class="settings">
+    <h3 class="setting-group">${t('About you')}</h3>
     ${langSection}${profileSection}
-    ${section('analysis', t('Photo and text analysis'), analysisStatus, analysis)}
     ${section('targets', t('Goals'), t('{start} kg to {end} kg by {date}', { start: n1(s.startKg), end: n1(s.targetKg), date: dShort.format(parseDay(s.targetDate)) }), targets)}
-    ${section('backup', t('Backup and export'), backupStatus, backup)}
-    ${section('location', t('Location'), s.useLocation ? (places.length ? t('On: {names}', { names: places.map((p) => p.name).join(', ') }) : t('On, no saved places')) : t('Off'), location)}
+    <h3 class="setting-group">${t('Food')}</h3>
     ${section('favorites', t('Favourites'), favorites.length ? tn('{n} meal|{n} meals', favorites.length) : t('None yet'), favoritesBody)}
     ${pantrySection}
     ${section('supplements', t('Supplements'), supps.length ? supps.map((x) => x.name).join(', ') : t('None yet'), suppBody)}
+    ${section('location', t('Location'), s.useLocation ? (places.length ? t('On: {names}', { names: places.map((p) => p.name).join(', ') }) : t('On, no saved places')) : t('Off'), location)}
+    <h3 class="setting-group">${t('Data and analysis')}</h3>
+    ${section('analysis', t('Photo and text analysis'), analysisStatus, analysis)}
+    ${section('backup', t('Backup and export'), backupStatus, backup)}
+    <h3 class="setting-group">${t('App')}</h3>
     ${section('version', t('Version and updates'), t('Version {v}', { v: APP_VERSION }), version)}
     ${section('reset', t('Reset'), t('Clear my log, or factory reset'), reset)}
   </div>

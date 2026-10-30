@@ -103,7 +103,10 @@ try {
   const id = await evalPage(PAGE, `window.__app.S.settings.clientId`);
   await click(PAGE, '[data-act="settings"]');
   await waitFor(PAGE, `!document.getElementById('sheet').hidden && !!document.querySelector('details[data-sec="reset"]')`);
-  await evalPage(PAGE, `document.querySelector('details[data-sec="reset"]').open = true; window.prompt = () => 'DELETE';`);
+  await evalPage(PAGE, `document.querySelector('details[data-sec="reset"]').open = true;`);
+  await click(PAGE, '[data-act="reset-ask"][data-step="all"]'); // the confirm is in the sheet: type the word, then the button enables
+  await waitFor(PAGE, `!!document.getElementById('reset-word')`, { what: 'the reset word field' });
+  await evalPage(PAGE, `(() => { const i = document.getElementById('reset-word'); i.value = 'DELETE'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await click(PAGE, '[data-act="wipe-all"]');
   await waitFor(PAGE, SETUP);
   await is(PAGE, `window.__app.S.settings.onboarded === false`, 'setup returns');

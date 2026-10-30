@@ -165,6 +165,6 @@ test('reverse lint for app.js: it flags unwrapped messages and lets wrapped ones
 
 test('app.js: the messages it shows use keys the extraction sees', () => {
   const keys = new Set(extract().found.filter((f) => f.file === 'js/app.js').map((f) => f.key));
-  for (const k of ['{name} logged', 'Entry deleted', 'reset.word', 'Log cleared', 'Could not load that language. Try again when you are online.']) assert.ok(keys.has(k), k);
+  for (const k of ['{name} logged', 'Entry deleted', 'Log cleared', 'Could not load that language. Try again when you are online.']) assert.ok(keys.has(k), k);
   assert.ok(keys.size > 100);
 });

@@ -1300,7 +1300,7 @@ function openSheet(html, state, focusSel, keepFocus) {
 }
 function closeSheet() {
   const was = S.sheet;
-  if (S.sheet && S.sheet.type === 'settings') { S.suppEdit = ''; S.profileDraft = null; }
+  if (S.sheet && S.sheet.type === 'settings') { S.suppEdit = ''; S.profileDraft = null; S.keyDraft = null; S.resetStep = ''; }
   $('#sheet').hidden = true;
   S.sheet = null;
   frame = null; // a photo being framed is dropped with the sheet
@@ -1875,7 +1875,10 @@ const ACT = {
   'cal': (el) => { S.calPick = S.calPick === el.dataset.day ? null : el.dataset.day; render(); },
   'goto-day': (el) => { if (el.dataset.day <= today()) { S.viewDay = el.dataset.day; go('today'); } },
   // Settings
-  'save-key': async () => {
+  'save-key': async (_el, { quiet = false } = {}) => {
+    const sel = $('#set-prov');
+    if (sel) S.settings.provider = sel.value; // the provider is saved with the key, not when it is picked
+    S.keyDraft = null;
     if (S.settings.provider === 'openai') {
       // The key is sent to this address, so it must be a secure one; a schemeless address would be read as a path on this site
       const base = $('#set-base').value.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
@@ -1889,12 +1892,11 @@ const ACT = {
     }
     await saveSettings();
     toast(aiCfg().key ? t('Saved on this device') : t('Key removed'));
-    render();
-    await openSettings();
+    if (!quiet) { render(); await openSettings(); }
     if (hasKey()) ACT['analyze-all']();
   },
   'test-key': async () => {
-    if ((await ACT['save-key']()) === false) return;
+    if ((await ACT['save-key'](null, { quiet: true })) === false) return;
     const out = $('#key-test');
     if (!hasKey()) { out.textContent = S.settings.provider === 'openai' ? t('Address, model and key are all required.') : t('A key is required.'); return; }
     const cfg = aiCfg();
@@ -1939,7 +1941,7 @@ const ACT = {
     }
   },
   'find-vision': async () => {
-    if ((await ACT['save-key']()) === false) return;
+    if ((await ACT['save-key'](null, { quiet: true })) === false) return;
     const out = $('#key-test');
     if (!S.settings.oaBase || !S.settings.oaKey) { out.textContent = t('Enter the address and key first.'); return; }
     const base = { provider: 'openai', key: S.settings.oaKey, base: S.settings.oaBase };
@@ -1981,12 +1983,29 @@ const ACT = {
       startKg: num('#set-startkg'), targetKg: num('#set-endkg'),
       kcalRest: Math.round(num('#set-rest')), kcalTrain: Math.round(num('#set-train')), kcalMinDay: Math.round(num('#set-minday')), protein: Math.round(num('#set-prot')),
     };
-    if (!patch.startDate || !patch.targetDate || patch.targetDate <= patch.startDate || !(patch.startKg > patch.targetKg) || !(patch.kcalMinDay >= 500) || !(patch.kcalRest >= patch.kcalMinDay) || !(patch.kcalTrain >= patch.kcalRest) || !(patch.protein > 50)) {
-      return toast(t('Check the values: the end must be after the start, the goal weight below the start weight, and calories at least {kcal}, as the plan\'s rules say', { kcal: fmtInt(patch.kcalMinDay >= 500 ? patch.kcalMinDay : 500) }));
+    // Each broken rule is written under its own field, in place: the sheet is not rebuilt, so nothing typed is lost
+    const bad = {};
+    if (!patch.startDate) bad['set-start'] = t('Pick a start date');
+    if (!patch.targetDate) bad['set-end'] = t('Pick an end date');
+    else if (patch.startDate && patch.targetDate <= patch.startDate) bad['set-end'] = t('The end must be after the start');
+    if (!(patch.startKg > 0)) bad['set-startkg'] = t('Enter your start weight');
+    if (!(patch.targetKg > 0)) bad['set-endkg'] = t('Enter your goal weight');
+    else if (!(patch.startKg > patch.targetKg)) bad['set-endkg'] = t('The goal weight must be below the start weight');
+    if (!(patch.kcalMinDay >= 500)) bad['set-minday'] = t('At least {kcal} kcal', { kcal: fmtInt(500) });
+    if (!(patch.kcalRest >= patch.kcalMinDay)) bad['set-rest'] = t('At least the minimum ({kcal})', { kcal: fmtInt(patch.kcalMinDay || 500) });
+    if (!(patch.kcalTrain >= patch.kcalRest)) bad['set-train'] = t('At least a rest day ({kcal})', { kcal: fmtInt(patch.kcalRest || 500) });
+    if (!(patch.protein > 50)) bad['set-prot'] = t('More than 50 g');
+    for (const id of ['set-start', 'set-end', 'set-startkg', 'set-endkg', 'set-minday', 'set-rest', 'set-train', 'set-prot']) {
+      const err = $(`#err-${id}`);
+      if (err) err.textContent = bad[id] || '';
+      mark($(`#${id}`), !!bad[id]);
     }
+    const first = Object.keys(bad)[0];
+    if (first) { $(`#${first}`).focus(); return; }
     const st = S.settings;
     const now = today(); // a stored goal already past the pace limit does not block other edits
-    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) return toast(t('That is faster than a steady pace: pick a later date or a closer goal weight'));
+    if (goalPaceError(st, patch, currentWeight(now, patch.startKg), now, !!latestWeight(now))) { $('#err-set-end').textContent = t('That is faster than a steady pace: pick a later date or a closer goal weight'); mark($('#set-end'), true); $('#set-end').focus(); return; } // i18n-ok: element ids
+    $('#err-set-end').textContent = '';
     S.settings = { ...S.settings, ...patch, proteinMin: Math.round(patch.protein * PROTEIN_MIN_RATIO) };
     await saveSettings();
     render();
@@ -2063,9 +2082,16 @@ const ACT = {
     } catch { /* not supported */ }
     location.reload();
   },
+  'reset-ask': (el) => {
+    const keep = $('#keep-key');
+    if (keep) S.resetKeep = keep.checked;
+    S.resetStep = el.dataset.step;
+    openSettings('reset', el.dataset.step === 'all' ? '#reset-word' : null);
+  },
+  'reset-cancel': () => { S.resetStep = ''; openSettings('reset'); },
   'wipe': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
-    if (!window.confirm(t('Clear your log? This deletes meals and their photos, weigh-ins, steps, water, coffee, supplements taken, workout days, day reviews, the progress review and Check verdicts from this device. Your goals, favourites, saved places, plans (My plan and Default), plan pictures, pantry foods with their photos and API key stay, and so do the badges you have earned. It cannot be undone. Do you have a backup?'))) return;
+    if (S.resetStep !== 'clear') return; // the confirm is the in-sheet step
     const keep = new Set(Object.values(S.settings.planPhotos || {})); // the plan's own pictures stay
     const foodIds = new Set(S.foods.map((f) => f.id));
     for (const f of S.foods) if (f.photo) keep.add(f.photo); // the pantry's foods and their photos stay too
@@ -2091,9 +2117,8 @@ const ACT = {
   'wipe-all': async () => {
     if (busyNow()) return toast(t('Something is still being analysed. Try again in a moment'));
     const keepKey = !!($('#keep-key') && $('#keep-key').checked);
-    const word = t('DELETE', { $id: 'reset.word' }); // the word to type; the Turkish one and the English one are both accepted
-    const typed = window.prompt(t('Factory reset: this deletes everything on this device: your log and photos, goals, favourites, saved places, My plan (Default comes back), the plan’s pictures, your pantry foods with their photos and the usage totals. {keyNote} It cannot be undone. Do you have a backup?\n\nType {word} to continue.', { keyNote: keepKey ? t('Your API key and provider stay.') : t('Your API key and provider are deleted too.'), word }));
-    if (!typed || !['delete', 'sil'].includes(foldKey(typed.trim()))) return;
+    const typed = $('#reset-word') ? $('#reset-word').value : '';
+    if (S.resetStep !== 'all' || !['delete', 'sil'].includes(foldKey(typed.trim()))) return; // the word is typed in the sheet; the Turkish one and the English one are both accepted
     const clientId = S.settings.clientId; // the install keeps its id through a reset
     const kept = { lang: S.settings.lang }; // the language is not data: a reset keeps it, and so does its mirror
     if (keepKey) for (const k of ['provider', 'oaBase', 'oaModel', 'oaKey', 'apiKey', 'model']) kept[k] = S.settings[k];
@@ -2111,7 +2136,7 @@ const ACT = {
     seedInMemory(); // the plans start again from the seed; the record is written when setup is finished
     clearTimeout(announceTimer);
     S.entries = []; S.days = {}; S.checks = []; S.foods = []; S.badges = null; S.badgeIntro = 0; S.check = freshCheck();
-    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null;
+    S.viewDay = today(); S.calPick = null; S.openSetting = ''; S.suppEdit = ''; S.profileDraft = null; S.keyDraft = null; S.resetStep = '';
     S.busy.clear(); S.retry.clear(); S.reviewing.clear(); S.reviewErr.clear(); S.coaching.clear(); S.coachErr.clear(); S.reviewOpen.clear();
     resetProgressGen(); S.progressReview = null; S.progressErr.clear(); S.progressReviewing.clear();
     autoTried.clear(); posCache = null; pausedUntil = 0; frame = null; photoTarget = null;
@@ -2155,6 +2180,8 @@ function syncProfileDraft() {
 // The zoom slider of the framing step
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'frame-zoom') zoomFrame(Number(ev.target.value));
+  if (/^set-(start|end|startkg|endkg|minday|rest|train|prot)$/.test(ev.target.id)) { const e = $(`#err-${ev.target.id}`); if (e) e.textContent = ''; mark(ev.target, false); }
+  if (ev.target.id === 'reset-word') $('#reset-go').disabled = !['delete', 'sil'].includes(foldKey(ev.target.value.trim()));
   if (S.draft && /^md-/.test(ev.target.id)) checkDraft();
   if (S.draft && S.draft.foodForm && /^fd-/.test(ev.target.id)) checkFood();
   if (S.foodDraft && /^pf-/.test(ev.target.id)) checkPantry();
@@ -2206,7 +2233,7 @@ document.addEventListener('change', (ev) => guard(async () => {
   }
   if (el.dataset.act === 'loc-toggle') return ACT['loc-toggle'](el);
   if (el.dataset.act === 'review-toggle') return ACT['review-toggle'](el);
-  if (el.dataset.chg === 'provider') { S.settings.provider = el.value; await saveSettings(); render(); return openSettings(); }
+  if (el.dataset.chg === 'provider') { S.keyDraft = { provider: el.value }; return openSettings(); }
   if (el.dataset.chg === 'preset') {
     const p = PRESETS.find((x) => x.id === el.value);
     if (p) { $('#set-base').value = p.base; $('#set-oamodel').value = p.model; }
