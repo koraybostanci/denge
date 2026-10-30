@@ -1,5 +1,5 @@
 import {
-  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, trendWeight, latestWeight, weightSeries, projection,
+  S, today, eff, dayTotals, dayTarget, dayStatus, dayReasons, dayNotes, trendWeight, withTrendIndex, latestWeight, weightSeries, projection,
   weekStart, weekFlex, weekResult, proteinLevel, streak, suggest, hasKey, APP_VERSION, dayGoals, isPerfect, history, planRate,
   dayVerdict, verdictText, reviewState, coachState, VERDICT, checkReady, BAND, proteinFloor, CHECK_MAX, fmtInt, fmtKg, chartWindow, drinkTally,
   plannedBy, planSteps, budgetVerdict, budgetMeter, suppTaken, titleOf, kcalMinDay, mealById, mainSlots, canEditPlan, hasMyPlan, onDefault, foodUses, shownName,
@@ -912,7 +912,7 @@ function weightChart() {
   const visible = series.filter((d) => d.day >= x0 && d.day <= x1);
   const avgPoints = [];
   const from = whole ? (visible[0] && visible[0].day) : x0;
-  if (from) for (let d = from; d <= (tod < x1 ? tod : x1); d = addDays(d, 1)) { const a = trendWeight(d); if (a) avgPoints.push({ day: d, kg: a.kg }); }
+  if (from) withTrendIndex(() => { for (let d = from; d <= (tod < x1 ? tod : x1); d = addDays(d, 1)) { const a = trendWeight(d); if (a) avgPoints.push({ day: d, kg: a.kg }); } });
   const end = avgPoints[avgPoints.length - 1];
 
   // The height: everything shown, plus a little room, and at least 2 kg
@@ -1167,7 +1167,7 @@ function checkpoints() {
   points.push(s.targetDate);
   const tod = today();
   return `<table class="table"><thead><tr><th scope="col">${t('Date')}</th><th scope="col">${t('Your line')}</th><th scope="col">${t('Your trend')}</th></tr></thead><tbody>
-    ${points.map((d) => { const a = d <= tod ? trendWeight(d) : null; return `<tr><td>${esc(dShort.format(parseDay(d)))}</td><td>${n1(targetAt(d, s))} kg</td><td>${a ? n1(a.kg) + ' kg' : '–'}</td></tr>`; }).join('')}
+    ${withTrendIndex(() => points.map((d) => { const a = d <= tod ? trendWeight(d) : null; return `<tr><td>${esc(dShort.format(parseDay(d)))}</td><td>${n1(targetAt(d, s))} kg</td><td>${a ? n1(a.kg) + ' kg' : '–'}</td></tr>`; }).join(''))}
   </tbody></table>`;
 }
 
@@ -1191,11 +1191,11 @@ export function renderProgress() {
   const series = weightSeries();
   const lost = a ? s.startKg - a.kg : 0;
   const run = streak();
-  const rows = series.slice().reverse().slice(0, 120).map((d) => {
+  const rows = withTrendIndex(() => series.slice().reverse().slice(0, 120).map((d) => {
     const avg = trendWeight(d.day);
     const tot = dayTotals(d.day);
     return `<tr><td>${esc(dTiny.format(parseDay(d.day)))}</td><td>${n1(d.kg)}</td><td>${avg ? n1(avg.kg) : '–'}</td><td>${d.day >= s.startDate ? n1(targetAt(d.day, s)) : '–'}</td><td>${tot.n ? n0(tot.kcal) : '–'}</td></tr>`;
-  }).join('');
+  }).join(''));
   // The hero: the kilos down once there is a trend to count from; until then, where things stand in words
   let hero;
   let note;

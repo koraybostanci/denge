@@ -380,11 +380,22 @@ export function trendSeriesOf(points, { startKg, startDate } = {}) {
 // the last reading that counted. null when there is none in those 7 days (the trend is not carried across a week without
 // weighing, as the 7-day mean was not), so every guard on avg7's n and null reads the same here.
 export function trendWeight(day = today()) {
-  const series = trendSeriesOf(weightSeries().filter((d) => d.day <= day), S.settings);
-  const from = addDays(day, -6);
-  const n = series.filter((p) => p.day >= from).length;
-  const last = series.findLast((p) => !p.skipped);
-  return n && last ? { kg: last.trend, n, day: last.day } : null;
+  const all = trendIndex || trendSeriesOf(weightSeries().filter((d) => d.day <= day), S.settings);
+  // The series is causal (a reading never depends on a later one), so the trend on a day is the prefix of the whole series up to it
+  const upTo = (d) => { let lo = 0; let hi = all.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (all[mid].day <= d) lo = mid + 1; else hi = mid; } return lo; };
+  const end = upTo(day);
+  const n = end - upTo(addDays(day, -7)); // the readings of the 7 days ending on `day`
+  let i = end - 1;
+  while (i >= 0 && all[i].skipped) i--;
+  return n && i >= 0 ? { kg: all[i].trend, n, day: all[i].day } : null;
+}
+let trendIndex = null; // the whole series, set only while withTrendIndex runs
+// Runs fn with the trend worked out once for the whole log, so a pass over many days (the chart, the tables, the brief) does not
+// rebuild it for each one. The results are the same as without it. fn must not be async and must not change the weigh-ins.
+export function withTrendIndex(fn) {
+  if (trendIndex) return fn();
+  trendIndex = trendSeriesOf(weightSeries(), S.settings);
+  try { return fn(); } finally { trendIndex = null; }
 }
 
 // The latest recorded weigh-in on or before the day, shaped like an average of one

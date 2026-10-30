@@ -3,7 +3,7 @@
 import { inEnglish } from './i18n.js';
 import { sanitizeOut, placeWord } from './text.js';
 import { SLOT_NAME, parseDay, addDays, diffDays, targetAt, hhmm } from './plan.js';
-import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, trendWeight, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
+import { S, today, eff, mealsOf, dayTotals, dayTarget, proteinFloor, trendWeight, withTrendIndex, weekFlex, openSlots, mainSlots, mealTimesLine, planRate, dayVerdict, VERDICT, verdictText,
   withDayIndex, weekStart, history, dayStatus, proteinLevel, projection, drinkTally, suppTaken, kcalMinDay, progressRatingHint } from './core.js';
 
 // The day in plain lines: what the model gets to read. Text only, a few hundred tokens.
@@ -173,10 +173,10 @@ function progressBriefText() {
     };
     // 4. Every weigh-in since the start
     const weighed = Object.values(S.days).filter((d) => d.kg && d.day >= s.startDate && d.day <= t).sort((a, b) => (a.day < b.day ? -1 : 1));
-    const raw = weighed.map((d) => {
+    const raw = withTrendIndex(() => weighed.map((d) => {
       const tw = trendWeight(d.day); // null only while every reading so far was set aside as a typo: the reading itself stands in
       return `${d.day} ${f1(d.kg)} trend ${f1(tw ? tw.kg : d.kg)} line ${sf(d.day)}`;
-    });
+    }));
     // The first `old` weigh-ins as one average line per week, then the rest raw
     const thin = (old) => {
       const byWeek = new Map();

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, currentWeight, avg7, trendWeight, trendSeriesOf, TREND_ALPHA, TREND_SLACK, TREND_MAX_SWING, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
+  S, BAND, proteinFloor, proteinLevel, dayTarget, weekResult, dayStatus, dayReasons, dayNotes, dayGoals, dayVerdict, latestWeight, currentWeight, avg7, trendWeight, withTrendIndex, trendSeriesOf, TREND_ALPHA, TREND_SLACK, TREND_MAX_SWING, kilosDown, projection, openSlots, suggest, planRate, eff, macroEdits,
   itemRests, REST_KCAL, REST_MACROS,
   fmtKg, freshSettings, freshCheck, today, SCHEMA_VERSION, VERDICT, verdictText, chartWindow,
   isPerfect, streak, suppTaken, weekStart, parseCount, drinkTally, planSteps, plannedBy, budgetVerdict, budgetMeter, kcalMinDay, reviewSig, reviewState,
@@ -901,4 +901,31 @@ test('trend weight: decisions read the trend — the Progress tab notice rule an
   for (let o = -45; o <= 0; o++) wi(o, tgt(-7) + 0.8); // flat 0.8 kg above where the line stood a week ago, daily
   assert.ok(trendWeight(T).kg - tgt(0) > 0.7 && trendWeight(day(-7)).kg - tgt(-7) > 0.7);
   assert.equal(progressRatingHint(), 'stuck');
+});
+
+test('trend weight: withTrendIndex gives the same answers as without it, on every day, for a messy log', () => {
+  reset(); S.settings.startKg = 87; S.settings.startDate = day(-60);
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let o = -90; o <= 3; o++) { const r = rnd(); if (r < 0.25) continue; wi(o, r > 0.97 ? 58 : Math.round((87 - 0.05 * (o + 90) + (rnd() - 0.5)) * 10) / 10); } // gaps, typos, a few future days
+  const days = []; for (let o = -100; o <= 5; o++) days.push(day(o));
+  const plain = days.map((d) => trendWeight(d));
+  const indexed = withTrendIndex(() => days.map((d) => trendWeight(d)));
+  assert.deepEqual(indexed, plain);
+  assert.ok(plain.some((x) => x) && plain.some((x) => x === null), 'both weighed and unweighed days are in the sample');
+});
+test('trend weight: withTrendIndex nests, hands back what fn returns, lets go afterwards and when fn throws', () => {
+  reset(); S.settings.startKg = 86; wi(-3, 86); wi(-1, 85);
+  assert.equal(withTrendIndex(() => withTrendIndex(() => trendWeight(T).n)), 2);
+  assert.equal(withTrendIndex(() => 'x'), 'x');
+  assert.throws(() => withTrendIndex(() => { throw new Error('boom'); }), /boom/);
+  wi(0, 84); // the log changed after the passes: nothing stale is kept
+  assert.equal(trendWeight(T).n, 3);
+  near(trendWeight(T).kg, trendSeriesOf(pts([86, 85, 84], -3 + 0).map((p, i) => ({ day: [day(-3), day(-1), day(0)][i], kg: p.kg })), S.settings)[2].trend);
+});
+test('trend weight: a pass over three years of daily weigh-ins is fast with the index', () => {
+  reset(); S.settings.startKg = 95; S.settings.startDate = day(-1100);
+  for (let o = -1095; o <= 0; o++) wi(o, Math.round((95 - 0.012 * (o + 1095) + Math.sin(o) * 0.3) * 10) / 10);
+  const t0 = performance.now();
+  withTrendIndex(() => { for (let o = -1095; o <= 0; o++) trendWeight(day(o)); });
+  assert.ok(performance.now() - t0 < 500, `${Math.round(performance.now() - t0)} ms`);
 });
